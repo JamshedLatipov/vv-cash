@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:VvCash.ViewModels"
+        xmlns:models="using:VvCash.Models"
+        x:Class="VvCash.Views.CustomerDisplayWindow"
+        Title="Customer Display"
+        Background="#0f0f23"
+        WindowState="FullScreen"
+        ShowInTaskbar="False">
+
+    <Grid>
+        <!-- Idle state -->
+        <StackPanel IsVisible="{Binding IsIdle}"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    Spacing="16">
+            <TextBlock Text="{Binding WelcomeMessage}"
+                       FontSize="48" FontWeight="Bold"
+                       Foreground="White"
+                       HorizontalAlignment="Center"/>
+            <TextBlock Text="Scan items to begin."
+                       FontSize="24"
+                       Foreground="#a0a0b8"
+                       HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Active cart state -->
+        <Grid IsVisible="{Binding !IsIdle}" RowDefinitions="*,Auto" Margin="40">
+            <ScrollViewer Grid.Row="0">
+                <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="models:CartItem">
+                            <Border Margin="0,8" Padding="20,12" Background="#1a1a3e" CornerRadius="12">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" Spacing="4">
+                                        <TextBlock Text="{Binding Product.Name}" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
+                                        <TextBlock Text="{Binding Quantity, StringFormat='Qty: {0}'}" FontSize="16" Foreground="#a0a0b8"/>
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{Binding LineTotal, StringFormat='${0:F2}'}"
+                                               FontSize="24" FontWeight="Bold" Foreground="#11b4d4"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <Border Grid.Row="1" Background="#11b4d4" CornerRadius="12" Padding="24,16" Margin="0,16,0,0">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="TOTAL" FontSize="32" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Total, StringFormat='${0:F2}'}"
+                               FontSize="42" FontWeight="Bold" Foreground="White"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

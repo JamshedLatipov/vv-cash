@@ -1,0 +1,20 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="PrimaryColor">#11b4d4</Color>
+    <Color x:Key="PrimaryDarkColor">#0d8fa6</Color>
+    <Color x:Key="BackgroundColor">#0f0f23</Color>
+    <Color x:Key="CardBackground">#1a1a3e</Color>
+    <Color x:Key="TextPrimary">White</Color>
+    <Color x:Key="TextSecondary">#a0a0b8</Color>
+    <Color x:Key="SuccessColor">#4caf50</Color>
+    <Color x:Key="DangerColor">#f44336</Color>
+
+    <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource PrimaryColor}"/>
+    <SolidColorBrush x:Key="PrimaryDarkBrush" Color="{StaticResource PrimaryDarkColor}"/>
+    <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}"/>
+    <SolidColorBrush x:Key="CardBackgroundBrush" Color="{StaticResource CardBackground}"/>
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimary}"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
+</ResourceDictionary>
