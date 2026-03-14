@@ -18,23 +18,23 @@ build_property.PlatformNeutralAssembly =
 build_property.EnforceExtendedAnalyzerRules = 
 build_property._SupportedPlatformList = Linux,macOS,Windows
 build_property.RootNamespace = VvCash
-build_property.ProjectDir = /home/runner/work/vv-cash/vv-cash/src/VvCash/
+build_property.ProjectDir = /app/src/VvCash/
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 
 build_property.EffectiveAnalysisLevelStyle = 8.0
 build_property.EnableCodeStyleSeverity = 
 
-[/home/runner/work/vv-cash/vv-cash/src/VvCash/App.axaml]
+[/app/src/VvCash/App.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
 
-[/home/runner/work/vv-cash/vv-cash/src/VvCash/Assets/Styles/Colors.axaml]
+[/app/src/VvCash/Assets/Styles/Colors.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
 
-[/home/runner/work/vv-cash/vv-cash/src/VvCash/Assets/Styles/Controls.axaml]
+[/app/src/VvCash/Assets/Styles/Controls.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
 
-[/home/runner/work/vv-cash/vv-cash/src/VvCash/Views/CustomerDisplayWindow.axaml]
+[/app/src/VvCash/Views/CustomerDisplayWindow.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
 
-[/home/runner/work/vv-cash/vv-cash/src/VvCash/Views/MainWindow.axaml]
+[/app/src/VvCash/Views/MainWindow.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml

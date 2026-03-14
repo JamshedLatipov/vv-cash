@@ -15,67 +15,86 @@
     </Style>
 
     <Style Selector="Button.SecondaryButton">
-        <Setter Property="Background" Value="#2a2a5a"/>
-        <Setter Property="Foreground" Value="White"/>
-        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background" Value="#f1f5f9"/>
+        <Setter Property="Foreground" Value="#334155"/>
+        <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="Padding" Value="16,8"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="FontWeight" Value="Bold"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
+    <Style Selector="Button.SecondaryButton:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#e2e8f0"/>
+    </Style>
 
     <Style Selector="Button.DangerButton">
-        <Setter Property="Background" Value="#f44336"/>
+        <Setter Property="Background" Value="#ef4444"/>
         <Setter Property="Foreground" Value="White"/>
-        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="Padding" Value="16,8"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="FontWeight" Value="Bold"/>
     </Style>
 
     <Style Selector="Button.CategoryButton">
-        <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="#a0a0b8"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="4,8"/>
-        <Setter Property="Width" Value="68"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="Foreground" Value="#64748b"/>
+        <Setter Property="BorderBrush" Value="#f1f5f9"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="12"/>
+        <Setter Property="Width" Value="80"/>
+        <Setter Property="Height" Value="80"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     <Style Selector="Button.CategoryButton:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#1e1e42"/>
-        <Setter Property="TextElement.Foreground" Value="White"/>
+        <Setter Property="BorderBrush" Value="#11b4d4"/>
+        <Setter Property="TextElement.Foreground" Value="#11b4d4"/>
     </Style>
 
     <Style Selector="Button.IconButton">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Padding" Value="4"/>
-        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="Padding" Value="8"/>
+        <Setter Property="CornerRadius" Value="8"/>
     </Style>
 
     <Style Selector="Button.QtyButton">
-        <Setter Property="Background" Value="#2a2a5a"/>
-        <Setter Property="Foreground" Value="White"/>
-        <Setter Property="Width" Value="26"/>
-        <Setter Property="Height" Value="26"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="Foreground" Value="#0f172a"/>
+        <Setter Property="BorderBrush" Value="#e2e8f0"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Width" Value="32"/>
+        <Setter Property="Height" Value="32"/>
         <Setter Property="Padding" Value="0"/>
-        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="CornerRadius" Value="6"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="FontWeight" Value="Bold"/>
     </Style>
+    <Style Selector="Button.QtyButton:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="TextElement.Foreground" Value="White"/>
+    </Style>
 
     <Style Selector="Border.ProductCard">
-        <Setter Property="Background" Value="#1a1a3e"/>
-        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Background" Value="White"/>
+        <Setter Property="BorderBrush" Value="#f1f5f9"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="ClipToBounds" Value="True"/>
     </Style>
 
     <Style Selector="TextBox.SearchBox">
-        <Setter Property="Background" Value="#1e1e42"/>
-        <Setter Property="Foreground" Value="White"/>
-        <Setter Property="BorderBrush" Value="#2a2a5a"/>
-        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Background" Value="#f1f5f9"/>
+        <Setter Property="Foreground" Value="#0f172a"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="CornerRadius" Value="8"/>
         <Setter Property="Padding" Value="12,8"/>
+    </Style>
+    <Style Selector="TextBox.SearchBox:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Background" Value="#f1f5f9"/>
     </Style>
 
     <Style Selector="Button.Transparent">
