@@ -7,9 +7,9 @@
         x:Class="VvCash.Views.MainWindow"
         x:Name="RootWindow"
         Title="VV Cash POS"
-        Width="1280" Height="800"
+        Width="1440" Height="900"
         MinWidth="1024" MinHeight="600"
-        Background="#0f0f23">
+        Background="{StaticResource BackgroundBrush}">
 
     <Window.Resources>
         <converters:BoolToColorConverter x:Key="BoolToColorConverter"/>
@@ -17,198 +17,220 @@
 
     <Grid RowDefinitions="Auto, *, Auto" Background="{StaticResource BackgroundBrush}">
         <!-- Top Navigation Bar -->
-        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="24,12">
+        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="24,12" ZIndex="10">
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="24" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="12">
                         <material:MaterialIcon Kind="PackageVariant" Width="28" Height="28" Foreground="{StaticResource PrimaryBrush}" />
-                        <TextBlock Text="Luxe Threads POS" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="Luxe Threads POS" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <Border Width="1" Background="{StaticResource BorderBrush}" Margin="8,4"/>
-                    <TextBox Width="300" Text="{Binding SearchQuery}" Watermark="Search products or scan barcode..." Classes="SearchBox" VerticalAlignment="Center"/>
+                    <Border Width="1" Background="{StaticResource Slate200Brush}" Margin="8,0" Height="24"/>
+                    <Border Background="{StaticResource Slate100Brush}" CornerRadius="8" Padding="12,8" Width="300">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <material:MaterialIcon Kind="Magnify" Width="20" Height="20" Foreground="{StaticResource Slate500Brush}"/>
+                            <TextBox Text="{Binding SearchQuery}" Watermark="Search products or scan barcode..." Classes="SearchBox" Padding="0" VerticalAlignment="Center" Width="250" FontSize="14" Foreground="{StaticResource Slate900Brush}"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                    <Button Classes="Transparent" Content="Orders" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
-                    <Button Classes="Transparent" Content="Inventory" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold"/>
-                    <Button Classes="Transparent" Content="Customers" Foreground="{StaticResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,0,16,0"/>
+                    <Button Classes="NavButton" Content="Orders" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="Inventory" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="Customers" Margin="0,0,16,0" FontSize="14"/>
 
-                    <Button Classes="IconButton" Background="{StaticResource SecondaryButtonBackgroundBrush}">
-                        <material:MaterialIcon Kind="History" Width="20" Height="20" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    <Button Classes="IconButton" Margin="0,0,8,0">
+                        <material:MaterialIcon Kind="History" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                     </Button>
-                    <Button Classes="IconButton" Background="{StaticResource SecondaryButtonBackgroundBrush}">
-                        <material:MaterialIcon Kind="AccountCircle" Width="20" Height="20" Foreground="{StaticResource TextSecondaryBrush}"/>
+                    <Button Classes="IconButton">
+                        <material:MaterialIcon Kind="AccountCircle" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                     </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- Main Area -->
-        <Grid Grid.Row="1" ColumnDefinitions="Auto, *, 500" Margin="24">
-        <!-- Sidebar -->
-        <Border Grid.Column="0" Background="Transparent" Width="100">
-            <StackPanel Spacing="16">
-                <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="All">
-                    <StackPanel HorizontalAlignment="Center" Spacing="4">
-                        <material:MaterialIcon Kind="ViewGrid" Width="24" Height="24" />
-                        <TextBlock Text="All" FontSize="10" HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-                <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Clothing">
-                    <StackPanel HorizontalAlignment="Center" Spacing="4">
-                        <material:MaterialIcon Kind="TshirtCrew" Width="24" Height="24" />
-                        <TextBlock Text="Clothing" FontSize="10" HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-                <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Shoes">
-                    <StackPanel HorizontalAlignment="Center" Spacing="4">
-                        <material:MaterialIcon Kind="ShoeSneaker" Width="24" Height="24" />
-                        <TextBlock Text="Shoes" FontSize="10" HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-                <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Accessories">
-                    <StackPanel HorizontalAlignment="Center" Spacing="4">
-                        <material:MaterialIcon Kind="Watch" Width="24" Height="24" />
-                        <TextBlock Text="Accs" FontSize="10" HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-                <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Sale">
-                    <StackPanel HorizontalAlignment="Center" Spacing="4">
-                        <material:MaterialIcon Kind="Tag" Width="24" Height="24" />
-                        <TextBlock Text="Sale" FontSize="10" HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </Button>
-            </StackPanel>
-        </Border>
-
-        <!-- Center: Product Grid -->
-        <Grid Grid.Column="1" RowDefinitions="*" Margin="0,0,24,0">
-            <!-- Product grid -->
-            <ScrollViewer Grid.Row="0">
-                <ItemsControl ItemsSource="{Binding Products}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="models:Product">
-                            <Border Classes="ProductCard" Width="180" Margin="6" Cursor="Hand">
-                                <Button Classes="Transparent"
-                                        Command="{Binding DataContext.AddToCartCommand, ElementName=RootWindow}"
-                                        CommandParameter="{Binding}"
-                                        Padding="0">
-                                    <Grid RowDefinitions="120,*">
-                                        <!-- Image placeholder -->
-                                        <Panel Grid.Row="0" Background="{StaticResource SecondaryButtonBackgroundBrush}">
-                                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                                <material:MaterialIcon Kind="Package" Width="48" Height="48" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                            </StackPanel>
-                                            <!-- Discount badge -->
-                                            <Border IsVisible="{Binding DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                                    Background="#fee2e2" CornerRadius="4" Padding="4,2"
-                                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
-                                                <TextBlock Text="{Binding DiscountPercent, StringFormat='-{0}%'}" Foreground="{StaticResource DangerBrush}" FontSize="11" FontWeight="Black"/>
-                                            </Border>
-                                        </Panel>
-
-                                        <!-- Product details -->
-                                        <Border Grid.Row="1" Padding="12">
-                                            <StackPanel Spacing="4">
-                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Text="{Binding Sku}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
-                                                <TextBlock Text="{Binding Price, StringFormat='${0:F2}'}" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
-                                                <TextBlock Text="{Binding OriginalPrice, StringFormat='${0:F2}'}"
-                                                           IsVisible="{Binding OriginalPrice, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" TextDecorations="Strikethrough" VerticalAlignment="Bottom"/>
-                                            </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-                                    </Grid>
-                                </Button>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-        </Grid>
-
-        <!-- Right: Order Panel -->
-        <Border Grid.Column="2" Background="Transparent" CornerRadius="16">
-            <Grid RowDefinitions="Auto,*,Auto">
-                <!-- Header -->
-                <Border Grid.Row="0" Padding="0,0,0,16">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <StackPanel Grid.Column="0" Spacing="4">
-                            <TextBlock Text="Current Order" FontSize="24" FontWeight="ExtraBold" Foreground="{StaticResource TextPrimaryBrush}"/>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBlock Text="Order #8429" FontWeight="SemiBold" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
-                                <Ellipse Width="4" Height="4" Fill="{StaticResource BorderBrush}"/>
-                                <TextBlock Text="Terminal 01" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
-                                <Ellipse Width="4" Height="4" Fill="{StaticResource BorderBrush}"/>
-                                <TextBlock Text="Oct 24, 2023 • 2:45 PM" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
-                            </StackPanel>
+        <Grid Grid.Row="1" ColumnDefinitions="Auto, *, 600" Margin="24">
+            <!-- Sidebar -->
+            <Border Grid.Column="0" Background="Transparent" Width="80" Margin="0,0,24,0" VerticalAlignment="Top">
+                <StackPanel Spacing="16">
+                    <Button Classes="CategoryButton Active" Command="{Binding SelectCategoryCommand}" CommandParameter="All">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <material:MaterialIcon Kind="ViewGrid" Width="24" Height="24" />
+                            <TextBlock Text="ALL" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
                         </StackPanel>
-                        <Button Grid.Column="1" Classes="SecondaryButton" Background="{StaticResource SecondaryButtonBackgroundBrush}" Foreground="{StaticResource TextSecondaryBrush}" Command="{Binding ClearCartCommand}" VerticalAlignment="Center" Padding="12,8">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                <material:MaterialIcon Kind="Delete" Width="16" Height="16" Foreground="{StaticResource TextPrimaryBrush}"/>
-                                <TextBlock Text="Clear Cart" FontSize="12"/>
-                            </StackPanel>
-                        </Button>
-                    </Grid>
-                </Border>
+                    </Button>
+                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Clothing">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <material:MaterialIcon Kind="TshirtCrew" Width="24" Height="24" />
+                            <TextBlock Text="CLOTHING" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Shoes">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <material:MaterialIcon Kind="ShoeSneaker" Width="24" Height="24" />
+                            <TextBlock Text="SHOES" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Accessories">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <material:MaterialIcon Kind="Watch" Width="24" Height="24" />
+                            <TextBlock Text="ACCS" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Sale" Foreground="{StaticResource Red500Brush}">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <material:MaterialIcon Kind="Tag" Width="24" Height="24" />
+                            <TextBlock Text="SALE" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
 
-                <!-- Cart items -->
-                <ScrollViewer Grid.Row="1">
+            <!-- Center: Product Grid -->
+            <Grid Grid.Column="1" RowDefinitions="*" Margin="0,0,24,0">
+                <ScrollViewer Grid.Row="0">
+                    <ItemsControl ItemsSource="{Binding Products}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:Product">
+                                <Border Classes="ProductCard" Width="180" Margin="6" Cursor="Hand" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1" Background="White">
+                                    <Button Classes="Transparent"
+                                            Command="{Binding DataContext.AddToCartCommand, ElementName=RootWindow}"
+                                            CommandParameter="{Binding}"
+                                            Padding="0">
+                                        <Grid RowDefinitions="140,*">
+                                            <!-- Image placeholder -->
+                                            <Panel Grid.Row="0" Background="{StaticResource Slate50Brush}">
+                                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                    <material:MaterialIcon Kind="ImageOutline" Width="48" Height="48" Foreground="{StaticResource Slate300Brush}"/>
+                                                </StackPanel>
+                                                <!-- Discount badge -->
+                                                <Border IsVisible="{Binding DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                        Background="{StaticResource Red100Brush}" CornerRadius="4" Padding="6,2"
+                                                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
+                                                    <TextBlock Text="{Binding DiscountPercent, StringFormat='-{0}%'}" Foreground="{StaticResource Red600Brush}" FontSize="11" FontWeight="Black"/>
+                                                </Border>
+                                            </Panel>
+
+                                            <!-- Product details -->
+                                            <Border Grid.Row="1" Padding="12">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Slate900Brush}" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                                                        <TextBlock Text="{Binding Price, StringFormat='${0:F2}'}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
+                                                        <TextBlock Text="{Binding OriginalPrice, StringFormat='${0:F2}'}"
+                                                                   IsVisible="{Binding OriginalPrice, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                                   Foreground="{StaticResource Slate400Brush}" FontSize="12" TextDecorations="Strikethrough" VerticalAlignment="Bottom" Margin="0,0,0,1"/>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </Button>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
+            <!-- Right Panel (Cart & Totals) -->
+            <Grid Grid.Column="2" RowDefinitions="Auto, *, Auto">
+
+                <!-- Current Order Header -->
+                <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,24" VerticalAlignment="Bottom">
+                    <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Bottom">
+                        <TextBlock Text="Current Order" FontSize="30" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-0.5"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Order #8429" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
+                            <Ellipse Width="4" Height="4" Fill="{StaticResource Slate300Brush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="Terminal 01" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
+                            <Ellipse Width="4" Height="4" Fill="{StaticResource Slate300Brush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="Oct 24, 2023 • 2:45 PM" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Button Grid.Column="1" Classes="SecondaryButton" Command="{Binding ClearCartCommand}" VerticalAlignment="Bottom">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <material:MaterialIcon Kind="Delete" Width="18" Height="18" Foreground="{StaticResource Slate700Brush}"/>
+                            <TextBlock Text="Clear Cart" FontSize="14"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!-- Cart Items List -->
+                <ScrollViewer Grid.Row="1" Margin="0,0,8,24">
                     <ItemsControl ItemsSource="{Binding CartItems}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="models:CartItem">
-                                <Border Background="White" CornerRadius="12" Margin="0,0,0,12" Padding="16" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
-                                    <Grid ColumnDefinitions="100,*,Auto,Auto">
-                                        <!-- Image Placeholder -->
-                                        <Border Grid.Column="0" Background="{StaticResource SecondaryButtonBackgroundBrush}" CornerRadius="8" Width="80" Height="80" HorizontalAlignment="Left" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
-                                            <material:MaterialIcon Kind="ImageOutline" Width="32" Height="32" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                <Border Background="White" CornerRadius="12" Margin="0,0,0,16" Padding="16" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1">
+                                    <Grid ColumnDefinitions="100, *, Auto, Auto">
+                                        <!-- Image -->
+                                        <Border Grid.Column="0" Background="{StaticResource Slate50Brush}" CornerRadius="8" Width="96" Height="96" HorizontalAlignment="Left" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1" ClipToBounds="True">
+                                            <Panel>
+                                                <material:MaterialIcon Kind="ImageOutline" Width="32" Height="32" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                                                <!-- If ImagePath is valid, we would bind an Image here -->
+                                            </Panel>
                                         </Border>
 
-                                        <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top" Margin="8,0,0,0">
-                                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <TextBlock Text="{Binding Product.Name}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
-                                                <Border IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                                        Background="#fee2e2" CornerRadius="4" Padding="6,2">
-                                                    <TextBlock Text="{Binding Product.DiscountPercent, StringFormat='-{0}%'}" Foreground="{StaticResource DangerBrush}" FontSize="10" FontWeight="Black"/>
-                                                </Border>
-                                            </StackPanel>
-                                            <TextBlock Text="{Binding Product.Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Column="2" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,0,24,0">
-                                            <TextBlock Text="{Binding LineTotal, StringFormat='${0:F2}'}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Right"/>
-                                            <TextBlock Text="{Binding LineTotalOriginal, StringFormat='${0:F2}'}"
-                                                       IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" TextDecorations="Strikethrough" HorizontalAlignment="Right"/>
-                                        </StackPanel>
-
-                                        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                                            <Border Background="{StaticResource SecondaryButtonBackgroundBrush}" CornerRadius="8" Padding="4">
-                                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <Button Classes="QtyButton"
-                                                            Command="{Binding DataContext.DecreaseQuantityCommand, ElementName=RootWindow}"
-                                                            CommandParameter="{Binding}"
-                                                            Content="-"/>
-                                                    <TextBlock Text="{Binding Quantity}" Width="24" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextPrimaryBrush}" FontWeight="Bold" FontSize="16"/>
-                                                    <Button Classes="QtyButton"
-                                                            Command="{Binding DataContext.IncreaseQuantityCommand, ElementName=RootWindow}"
-                                                            CommandParameter="{Binding}"
-                                                            Content="+"/>
+                                        <!-- Details -->
+                                        <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Top" Margin="16,0,0,0">
+                                            <Grid ColumnDefinitions="*, Auto">
+                                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+                                                    <TextBlock Text="{Binding Product.Name}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                                    <Border IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                            Background="{StaticResource Red100Brush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Product.DiscountPercent, StringFormat='-{0}%'}" Foreground="{StaticResource Red600Brush}" FontSize="12" FontWeight="Black" LetterSpacing="1" Classes="Uppercase"/>
+                                                    </Border>
                                                 </StackPanel>
-                                            </Border>
-                                            <Button Classes="IconButton"
-                                                    Command="{Binding DataContext.RemoveFromCartCommand, ElementName=RootWindow}"
-                                                    CommandParameter="{Binding}">
-                                                <material:MaterialIcon Kind="Delete" Width="24" Height="24" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                            </Button>
+
+                                                <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                                    <TextBlock Text="{Binding LineTotal, StringFormat='${0:F2}'}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Right"/>
+                                                    <TextBlock Text="{Binding LineTotalOriginal, StringFormat='${0:F2}'}"
+                                                               IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                               Foreground="{StaticResource Slate400Brush}" FontSize="12" TextDecorations="Strikethrough" HorizontalAlignment="Right"/>
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <TextBlock Text="{Binding Product.Sku, StringFormat='SKU: {0}'}" FontSize="14" Foreground="{StaticResource Slate500Brush}"/>
+
+                                            <!-- Labels / Badges -->
+                                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                                <Border IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNull}}"
+                                                        Background="{StaticResource PrimaryLightBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                                                    <TextBlock Text="NEW ARRIVAL" Foreground="{StaticResource PrimaryBrush}" FontSize="12" FontWeight="Bold" LetterSpacing="1"/>
+                                                </Border>
+                                                <TextBlock IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                           Text="Seasonal Discount Applied" Foreground="{StaticResource Red500Brush}" FontSize="12" FontWeight="Medium" VerticalAlignment="Center"/>
+                                            </StackPanel>
                                         </StackPanel>
+
+                                        <!-- Quantity Controls -->
+                                        <Border Grid.Column="2" Background="{StaticResource Slate50Brush}" CornerRadius="8" Padding="8" VerticalAlignment="Center" Margin="16,0,8,0">
+                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                                <Button Classes="QtyButton"
+                                                        Command="{Binding DataContext.DecreaseQuantityCommand, ElementName=RootWindow}"
+                                                        CommandParameter="{Binding}"
+                                                        Content="-"/>
+                                                <TextBlock Text="{Binding Quantity}" Width="24" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="18"/>
+                                                <Button Classes="QtyButton"
+                                                        Command="{Binding DataContext.IncreaseQuantityCommand, ElementName=RootWindow}"
+                                                        CommandParameter="{Binding}"
+                                                        Content="+"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Delete Button -->
+                                        <Button Grid.Column="3" Classes="CartIconButton"
+                                                Command="{Binding DataContext.RemoveFromCartCommand, ElementName=RootWindow}"
+                                                CommandParameter="{Binding}"
+                                                VerticalAlignment="Center">
+                                            <material:MaterialIcon Kind="Delete" Width="24" Height="24"/>
+                                        </Button>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -216,17 +238,18 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <!-- Bottom Section (Promotions, Totals, Pay) -->
-                <Border Grid.Row="2" Background="White" CornerRadius="16" Padding="24" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Margin="0,16,0,0">
-                    <StackPanel Spacing="24">
-                        <Grid ColumnDefinitions="*,*">
+                <!-- Totals & Pay Section -->
+                <Border Grid.Row="2" Background="White" CornerRadius="16" Padding="24" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Margin="0,0,0,0">
+                    <Grid RowDefinitions="Auto, Auto">
+                        <Grid Grid.Row="0" ColumnDefinitions="*, *" Margin="0,0,0,24">
                             <!-- Promotions -->
-                            <StackPanel Grid.Column="0" Spacing="12" Margin="0,0,16,0">
-                                <TextBlock Text="PROMOTIONS &amp; COUPONS" FontSize="12" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" LetterSpacing="1"/>
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBox Grid.Column="0" Text="{Binding CouponCode}" Watermark="Enter coupon code" Margin="0,0,8,0" Classes="SearchBox" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"/>
+                            <StackPanel Grid.Column="0" Spacing="12" Margin="0,0,32,0">
+                                <TextBlock Text="PROMOTIONS &amp; COUPONS" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" LetterSpacing="1"/>
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBox Grid.Column="0" Text="{Binding CouponCode}" Watermark="Enter coupon code" Margin="0,0,8,0" Classes="CouponBox"/>
                                     <Button Grid.Column="1" Content="Apply" Command="{Binding ApplyCouponCommand}" Classes="SecondaryButton" Width="80"/>
                                 </Grid>
+
                                 <ItemsControl ItemsSource="{Binding AppliedCoupons}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
@@ -235,14 +258,14 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate DataType="models:Coupon">
-                                            <Border Background="#e0f2fe" CornerRadius="16" Margin="2" Padding="12,4">
+                                            <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="16" Margin="0,8,8,0" Padding="12,4">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <material:MaterialIcon Kind="Ticket" Width="14" Height="14" Foreground="{StaticResource PrimaryBrush}"/>
-                                                    <TextBlock Text="{Binding Code}" FontSize="12" Foreground="{StaticResource PrimaryDarkBrush}" FontWeight="Bold"/>
-                                                    <Button Classes="Transparent" Padding="0"
+                                                    <material:MaterialIcon Kind="TicketConfirmation" Width="16" Height="16" Foreground="{StaticResource PrimaryBrush}"/>
+                                                    <TextBlock Text="{Binding Code}" FontSize="12" Foreground="{StaticResource PrimaryBrush}" FontWeight="Bold"/>
+                                                    <Button Classes="Transparent" Padding="0" Margin="4,0,0,0"
                                                             Command="{Binding DataContext.RemoveCouponCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding Code}">
-                                                        <material:MaterialIcon Kind="Close" Width="12" Height="12" Foreground="{StaticResource PrimaryBrush}"/>
+                                                        <material:MaterialIcon Kind="Close" Width="14" Height="14" Foreground="{StaticResource PrimaryBrush}"/>
                                                     </Button>
                                                 </StackPanel>
                                             </Border>
@@ -251,72 +274,70 @@
                                 </ItemsControl>
                             </StackPanel>
 
-                            <!-- Totals -->
-                            <StackPanel Grid.Column="1" Spacing="12" Margin="16,0,0,0">
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock Grid.Column="0" Text="Subtotal" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='${0:F2}'}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/>
+                            <!-- Totals List -->
+                            <StackPanel Grid.Column="1" Spacing="12" Margin="32,0,0,0">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Grid.Column="0" Text="Subtotal" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='${0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
                                 </Grid>
-                                <Grid ColumnDefinitions="*,Auto">
-                                    <TextBlock Grid.Column="0" Text="Tax (8.5%)" Foreground="{StaticResource TextSecondaryBrush}" FontSize="14"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding Tax, StringFormat='${0:F2}'}" Foreground="{StaticResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/>
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Grid.Column="0" Text="Tax (8.5%)" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Tax, StringFormat='${0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
                                 </Grid>
-                                <Grid ColumnDefinitions="*,Auto">
+                                <Grid ColumnDefinitions="*, Auto">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
-                                        <material:MaterialIcon Kind="Tag" Width="14" Height="14" Foreground="{StaticResource DangerBrush}"/>
-                                        <TextBlock Text="Total Discount" Foreground="{StaticResource DangerBrush}" FontSize="14"/>
+                                        <material:MaterialIcon Kind="Tag" Width="16" Height="16" Foreground="{StaticResource Red500Brush}"/>
+                                        <TextBlock Text="Total Discount" Foreground="{StaticResource Red500Brush}" FontSize="16" FontWeight="Medium"/>
                                     </StackPanel>
-                                    <TextBlock Grid.Column="1" Text="{Binding TotalDiscount, StringFormat='-${0:F2}'}" Foreground="{StaticResource DangerBrush}" FontSize="14" FontWeight="Bold"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding TotalDiscount, StringFormat='-${0:F2}'}" Foreground="{StaticResource Red500Brush}" FontSize="16" FontWeight="Bold"/>
+                                </Grid>
+
+                                <Border Height="1" Background="{StaticResource Slate100Brush}" Margin="0,4"/>
+
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Grid.Column="0" Text="Total Amount" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Bottom"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat='${0:F2}'}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
                                 </Grid>
                             </StackPanel>
                         </Grid>
 
-                        <Border Height="1" Background="{StaticResource BorderBrush}"/>
-
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Grid.Column="0" Text="Total Amount" FontSize="18" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Bottom"/>
-                            <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat='${0:F2}'}" FontSize="36" FontWeight="ExtraBold" Foreground="{StaticResource TextPrimaryBrush}"/>
-                        </Grid>
-
-                        <Grid ColumnDefinitions="1*,3*" Margin="0,8,0,0">
-                            <Button Grid.Column="0" Margin="0,0,16,0"
-                                    Classes="SecondaryButton"
-                                    Command="{Binding PrintReceiptCommand}" Height="64">
+                        <!-- Action Buttons -->
+                        <Grid Grid.Row="1" ColumnDefinitions="1*, 3*">
+                            <Button Grid.Column="0" Margin="0,0,16,0" Classes="SecondaryButton" Command="{Binding PrintReceiptCommand}" Height="64" Background="{StaticResource Slate100Brush}" CornerRadius="12">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <material:MaterialIcon Kind="Printer" Width="24" Height="24"/>
-                                    <TextBlock Text="Print" FontSize="18"/>
+                                    <material:MaterialIcon Kind="Printer" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                                    <TextBlock Text="Print" FontSize="20" FontWeight="Black" Foreground="{StaticResource Slate700Brush}"/>
                                 </StackPanel>
                             </Button>
-                            <Button Grid.Column="1"
-                                    Classes="PrimaryButton"
-                                    Command="{Binding PayCommand}" Height="64" Background="{StaticResource PrimaryBrush}" CornerRadius="12">
-                                <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <material:MaterialIcon Kind="Cash" Width="28" Height="28"/>
-                                    <TextBlock Text="{Binding TotalAmount, StringFormat='Pay ${0:F2}'}" FontSize="24" FontWeight="ExtraBold"/>
+
+                            <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding PayCommand}" Height="64" CornerRadius="12">
+                                <StackPanel Orientation="Horizontal" Spacing="16">
+                                    <material:MaterialIcon Kind="CashMultiple" Width="32" Height="32"/>
+                                    <TextBlock Text="{Binding TotalAmount, StringFormat='Pay ${0:F2}'}" FontSize="24" FontWeight="Black"/>
                                 </StackPanel>
                             </Button>
                         </Grid>
-                    </StackPanel>
+                    </Grid>
                 </Border>
+
             </Grid>
-        </Border>
         </Grid>
 
         <!-- Status bar -->
-        <Border Grid.Row="2" Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="24,8">
-            <Grid ColumnDefinitions="*,Auto,Auto">
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="24" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
+        <Border Grid.Row="2" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,1,0,0" Padding="24,8">
+            <Grid ColumnDefinitions="*, Auto, Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
                         <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"/>
-                        <TextBlock Text="SYSTEM ONLINE" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
+                        <TextBlock Text="SYSTEM ONLINE" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
                         <Ellipse Width="6" Height="6" Fill="{Binding IsPrinterReady, Converter={StaticResource BoolToColorConverter}}"/>
-                        <TextBlock Text="{Binding PrinterStatusText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" Classes="Uppercase"/>
+                        <TextBlock Text="{Binding PrinterStatusText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" Classes="Uppercase"/>
                     </StackPanel>
                 </StackPanel>
-                <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" Margin="0,0,24,0" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="2" Text="V 2.4.0 • TERMINAL ID: LXP-09921" Foreground="{StaticResource TextSecondaryBrush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{StaticResource Slate400Brush}" FontSize="10" Margin="0,0,24,0" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="2" Text="V 2.4.0 • TERMINAL ID: LXP-09921" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
             </Grid>
         </Border>
     </Grid>
