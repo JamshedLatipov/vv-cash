@@ -1,3 +1,4 @@
+using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -20,33 +21,45 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var productService = new MockProductService();
-            var cartService = new CartService();
-            var discountService = new DiscountService();
-            var printerService = new MockPrinterService();
-            var customerDisplayService = new MockCustomerDisplayService();
+            var loginVm = new LoginViewModel();
+            var loginWindow = new LoginWindow { DataContext = loginVm };
 
-            var mainVm = new MainWindowViewModel(productService, cartService, discountService, printerService, customerDisplayService);
-            var mainWindow = new MainWindow { DataContext = mainVm };
-            desktop.MainWindow = mainWindow;
-
-            mainWindow.Opened += (s, e) =>
+            loginVm.LoginSuccessful += (s, e) =>
             {
-                var screens = mainWindow.Screens.All;
-                if (screens.Count > 1)
+                var productService = new MockProductService();
+                var cartService = new CartService();
+                var discountService = new DiscountService();
+                var printerService = new MockPrinterService();
+                var customerDisplayService = new MockCustomerDisplayService();
+
+                var mainVm = new MainWindowViewModel(productService, cartService, discountService, printerService, customerDisplayService);
+                var mainWindow = new MainWindow { DataContext = mainVm };
+
+                desktop.MainWindow = mainWindow;
+                mainWindow.Show();
+
+                mainWindow.Opened += (sender, args) =>
                 {
-                    var secondScreen = screens[1];
-                    var customerVm = new CustomerDisplayViewModel();
-                    mainVm.CustomerDisplayViewModel = customerVm;
-                    var customerWindow = new CustomerDisplayWindow
+                    var screens = mainWindow.Screens.All;
+                    if (screens.Count > 1)
                     {
-                        DataContext = customerVm,
-                        WindowStartupLocation = WindowStartupLocation.Manual,
-                        Position = new PixelPoint(secondScreen.Bounds.X, secondScreen.Bounds.Y)
-                    };
-                    customerWindow.Show();
-                }
+                        var secondScreen = screens[1];
+                        var customerVm = new CustomerDisplayViewModel();
+                        mainVm.CustomerDisplayViewModel = customerVm;
+                        var customerWindow = new CustomerDisplayWindow
+                        {
+                            DataContext = customerVm,
+                            WindowStartupLocation = WindowStartupLocation.Manual,
+                            Position = new PixelPoint(secondScreen.Bounds.X, secondScreen.Bounds.Y)
+                        };
+                        customerWindow.Show();
+                    }
+                };
+
+                loginWindow.Close();
             };
+
+            desktop.MainWindow = loginWindow;
         }
 
         base.OnFrameworkInitializationCompleted();
