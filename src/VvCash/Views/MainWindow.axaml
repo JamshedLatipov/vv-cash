@@ -87,7 +87,7 @@
             </Border>
 
             <!-- SplitView for Catalog Drawer and Main Content -->
-            <SplitView Grid.Column="1" IsPaneOpen="{Binding IsCatalogOpen}" DisplayMode="Overlay" OpenPaneLength="500" PanePlacement="Left" Background="Transparent" PaneBackground="Transparent" ZIndex="1">
+            <SplitView Grid.Column="1" IsPaneOpen="{Binding IsCatalogOpen, Mode=TwoWay}" DisplayMode="Overlay" OpenPaneLength="500" PanePlacement="Left" Background="Transparent" PaneBackground="Transparent" ZIndex="1">
                 <SplitView.Pane>
                     <Border Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,1,0" Padding="0,0,24,0">
                         <Grid RowDefinitions="Auto, *">
