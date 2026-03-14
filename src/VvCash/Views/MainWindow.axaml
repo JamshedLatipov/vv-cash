@@ -13,6 +13,7 @@
 
     <Window.Resources>
         <converters:BoolToColorConverter x:Key="BoolToColorConverter"/>
+        <converters:StringEqualityToBoolConverter x:Key="StringEqualityToBoolConverter"/>
     </Window.Resources>
 
     <Grid RowDefinitions="Auto, *, Auto" Background="{StaticResource BackgroundBrush}">
@@ -53,31 +54,31 @@
             <!-- Sidebar -->
             <Border Grid.Column="0" Background="Transparent" Width="80" Margin="0,0,24,0" VerticalAlignment="Top" ZIndex="2">
                 <StackPanel Spacing="16">
-                    <Button Classes="CategoryButton Active" Command="{Binding SelectCategoryCommand}" CommandParameter="All">
+                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='All'}" Command="{Binding SelectCategoryCommand}" CommandParameter="All">
                         <StackPanel HorizontalAlignment="Center" Spacing="4">
                             <material:MaterialIcon Kind="ViewGrid" Width="24" Height="24" />
                             <TextBlock Text="ALL" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
                         </StackPanel>
                     </Button>
-                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Clothing">
+                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Clothing'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Clothing">
                         <StackPanel HorizontalAlignment="Center" Spacing="4">
                             <material:MaterialIcon Kind="TshirtCrew" Width="24" Height="24" />
                             <TextBlock Text="CLOTHING" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
                         </StackPanel>
                     </Button>
-                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Shoes">
+                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Shoes'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Shoes">
                         <StackPanel HorizontalAlignment="Center" Spacing="4">
                             <material:MaterialIcon Kind="ShoeSneaker" Width="24" Height="24" />
                             <TextBlock Text="SHOES" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
                         </StackPanel>
                     </Button>
-                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Accessories">
+                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Accessories'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Accessories">
                         <StackPanel HorizontalAlignment="Center" Spacing="4">
                             <material:MaterialIcon Kind="Watch" Width="24" Height="24" />
                             <TextBlock Text="ACCS" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
                         </StackPanel>
                     </Button>
-                    <Button Classes="CategoryButton" Command="{Binding SelectCategoryCommand}" CommandParameter="Sale" Foreground="{StaticResource Red500Brush}">
+                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Sale'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Sale" Foreground="{StaticResource Red500Brush}">
                         <StackPanel HorizontalAlignment="Center" Spacing="4">
                             <material:MaterialIcon Kind="Tag" Width="24" Height="24" />
                             <TextBlock Text="SALE" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
@@ -316,17 +317,17 @@
 
                                 <!-- Action Buttons -->
                                 <Grid Grid.Row="1" ColumnDefinitions="1*, 3*">
-                                    <Button Grid.Column="0" Margin="0,0,16,0" Classes="SecondaryButton" Command="{Binding PrintReceiptCommand}" Height="64" Background="{StaticResource Slate100Brush}" CornerRadius="12">
+                                    <Button Grid.Column="0" Margin="0,0,16,0" Classes="SecondaryButton" Command="{Binding PrintReceiptCommand}" MinHeight="80" Background="{StaticResource Slate100Brush}" CornerRadius="12" HorizontalAlignment="Stretch">
                                         <StackPanel Orientation="Horizontal" Spacing="12">
-                                            <material:MaterialIcon Kind="Printer" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
-                                            <TextBlock Text="Print" FontSize="20" FontWeight="Black" Foreground="{StaticResource Slate700Brush}"/>
+                                            <material:MaterialIcon Kind="Printer" Width="28" Height="28" Foreground="{StaticResource Slate700Brush}"/>
+                                            <TextBlock Text="Print" FontSize="22" FontWeight="Black" Foreground="{StaticResource Slate700Brush}"/>
                                         </StackPanel>
                                     </Button>
 
-                                    <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding PayCommand}" Height="64" CornerRadius="12">
+                                    <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding PayCommand}" MinHeight="80" CornerRadius="12" HorizontalAlignment="Stretch">
                                         <StackPanel Orientation="Horizontal" Spacing="16">
-                                            <material:MaterialIcon Kind="CashMultiple" Width="32" Height="32"/>
-                                            <TextBlock Text="{Binding TotalAmount, StringFormat='Pay ${0:F2}'}" FontSize="24" FontWeight="Black"/>
+                                            <material:MaterialIcon Kind="CashMultiple" Width="36" Height="36"/>
+                                            <TextBlock Text="{Binding TotalAmount, StringFormat='Pay ${0:F2}'}" FontSize="28" FontWeight="Black"/>
                                         </StackPanel>
                                     </Button>
                                 </Grid>
