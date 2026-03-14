@@ -4,6 +4,7 @@
         xmlns:models="using:VvCash.Models"
         xmlns:material="using:Material.Icons.Avalonia"
         xmlns:converters="using:VvCash.Converters"
+        xmlns:views="using:VvCash.Views"
         x:Class="VvCash.Views.MainWindow"
         x:Name="RootWindow"
         Title="VV Cash POS"
@@ -356,5 +357,10 @@
                 <TextBlock Grid.Column="2" Text="V 2.4.0 • TERMINAL ID: LXP-09921" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
             </Grid>
         </Border>
+
+        <!-- Transaction Success Overlay -->
+        <views:TransactionSuccessView Grid.Row="0" Grid.RowSpan="3" ZIndex="100"
+                                      DataContext="{Binding SuccessViewModel}"
+                                      IsVisible="{Binding DataContext.SuccessViewModel, RelativeSource={RelativeSource AncestorType=Window}, Converter={x:Static ObjectConverters.IsNotNull}}"/>
     </Grid>
 </Window>

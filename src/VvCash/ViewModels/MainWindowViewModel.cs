@@ -34,6 +34,8 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private bool _isCatalogOpen = false;
 
+    [ObservableProperty] private TransactionSuccessViewModel? _successViewModel;
+
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
 
     public MainWindowViewModel(
@@ -208,7 +210,29 @@ public partial class MainWindowViewModel : ViewModelBase
             _cartService.Items,
             Subtotal, Tax, TotalDiscount, TotalAmount,
             _cartService.AppliedCoupons);
-        _cartService.ClearCart();
+
+        // Capture data for success view before clearing
+        var transactionId = new Random().Next(1000000, 9999999).ToString();
+        var currentItems = new System.Collections.ObjectModel.ObservableCollection<CartItem>(_cartService.Items);
+        var sub = Subtotal;
+        var t = Tax;
+        var disc = TotalDiscount;
+        var totalAmt = TotalAmount;
+
+        SuccessViewModel = new TransactionSuccessViewModel(
+            transactionId,
+            currentItems,
+            sub,
+            t,
+            disc,
+            totalAmt,
+            () =>
+            {
+                SuccessViewModel = null;
+                ClearCart();
+            }
+        );
+
         StatusMessage = "Payment processed. Thank you!";
         if (CustomerDisplayViewModel != null)
         {

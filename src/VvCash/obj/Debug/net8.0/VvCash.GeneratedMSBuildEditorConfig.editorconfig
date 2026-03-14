@@ -38,3 +38,6 @@ build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
 
 [/app/src/VvCash/Views/MainWindow.axaml]
 build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml
+
+[/app/src/VvCash/Views/TransactionSuccessView.axaml]
+build_metadata.AdditionalFiles.SourceItemGroup = AvaloniaXaml

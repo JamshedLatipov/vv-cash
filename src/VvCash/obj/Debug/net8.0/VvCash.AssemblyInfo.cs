@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("VvCash")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+86dea583f8733436c00f2f8c23481c9dc46e56cf")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+aa95082fdf5cb668fd9518bd8f6902c5e7021cca")]
 [assembly: System.Reflection.AssemblyProductAttribute("VvCash")]
 [assembly: System.Reflection.AssemblyTitleAttribute("VvCash")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,0 +1,218 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:material="using:Material.Icons.Avalonia"
+             xmlns:vm="using:VvCash.ViewModels"
+             xmlns:models="using:VvCash.Models"
+             x:Class="VvCash.Views.TransactionSuccessView"
+             Background="{StaticResource BackgroundBrush}"
+             x:DataType="vm:TransactionSuccessViewModel">
+
+    <Grid RowDefinitions="Auto, *, Auto">
+        <!-- Top Navigation -->
+        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="0,0,0,1" Padding="32,16">
+            <Grid ColumnDefinitions="Auto, *, Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="8" Padding="8">
+                        <material:MaterialIcon Kind="PointOfSale" Width="24" Height="24" Foreground="{StaticResource PrimaryBrush}" />
+                    </Border>
+                    <StackPanel>
+                        <TextBlock Text="POS-терминал" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" />
+                        <TextBlock Text="Магазин №42 • Смена: 08:00 - 20:00" FontSize="12" Foreground="{StaticResource Slate500Brush}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0" IsVisible="{Binding $parent[Window].Bounds.Width, Converter={x:Static ObjectConverters.IsNotNull}}"> <!-- simple hack for hidden sm:block -->
+                        <TextBlock Text="Александр Волков" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate900Brush}" TextAlignment="Right"/>
+                        <TextBlock Text="КАССИР-ОПЕРАЦИОНИСТ" FontSize="12" FontWeight="Medium" Foreground="{StaticResource PrimaryBrush}" TextAlignment="Right" Classes="Uppercase" LetterSpacing="1"/>
+                    </StackPanel>
+
+                    <Border CornerRadius="20" Width="40" Height="40" Background="{StaticResource PrimaryLightBrush}" BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="2" ClipToBounds="True" Opacity="0.5">
+                        <material:MaterialIcon Kind="AccountCircle" Width="36" Height="36" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <Button Classes="IconButton" Background="Transparent" Foreground="{StaticResource Slate400Brush}">
+                        <material:MaterialIcon Kind="Cog" Width="24" Height="24" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" Padding="32,24" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <StackPanel MaxWidth="1280" HorizontalAlignment="Center" Spacing="32">
+                <!-- Success Status Header -->
+                <StackPanel HorizontalAlignment="Center" Spacing="8" Margin="0,0,0,16">
+                    <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="48" Width="96" Height="96" HorizontalAlignment="Center" Margin="0,0,0,16" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="8">
+                        <material:MaterialIcon Kind="CheckCircle" Width="64" Height="64" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Транзакция успешна" FontSize="36" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" LetterSpacing="-0.5"/>
+                    <TextBlock Text="Оплата по карте одобрена банком" FontSize="18" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <Grid ColumnDefinitions="7*, 5*" Margin="0,0,0,32">
+
+                    <!-- Left: Digital Receipt -->
+                    <Border Grid.Column="0" Background="White" CornerRadius="12" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Padding="32" Margin="0,0,32,0" BoxShadow="0 4 20 0 #0D000000">
+                        <StackPanel>
+                            <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,32">
+                                <Border Grid.ColumnSpan="2" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Margin="0,0,0,-24" />
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="ФИНАНСОВЫЙ ЧЕК" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" LetterSpacing="2" Margin="0,0,0,4"/>
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="ID Транзакции:" FontSize="14" Foreground="{StaticResource Slate500Brush}"/>
+                                        <TextBlock Text="{Binding TransactionId, StringFormat='#TXN-{0}'}" FontSize="14" Foreground="{StaticResource Slate900Brush}" FontFamily="Courier New"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding DateString, StringFormat='Дата: {0}'}" FontSize="14" Foreground="{StaticResource Slate500Brush}"/>
+                                </StackPanel>
+                                <material:MaterialIcon Grid.Column="1" Kind="Barcode" Width="64" Height="64" Foreground="{StaticResource Slate300Brush}" VerticalAlignment="Top"/>
+                            </Grid>
+
+                            <!-- Items Header -->
+                            <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,8">
+                                <TextBlock Grid.Column="0" Text="НАИМЕНОВАНИЕ" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate500Brush}" LetterSpacing="1" Classes="Uppercase"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="48">
+                                    <TextBlock Text="КОЛ-ВО" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate500Brush}" LetterSpacing="1" Classes="Uppercase"/>
+                                    <TextBlock Text="СУММА" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate500Brush}" LetterSpacing="1" Classes="Uppercase"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Items List -->
+                            <ItemsControl ItemsSource="{Binding Items}" Margin="0,0,0,32">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="models:CartItem">
+                                        <Grid ColumnDefinitions="*, Auto" Margin="0,8">
+                                            <Border Grid.ColumnSpan="2" BorderBrush="{StaticResource Slate50Brush}" BorderThickness="0,0,0,1" Margin="0,0,0,-8" />
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="{Binding Product.Name}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Slate900Brush}"/>
+                                                <TextBlock Text="{Binding Product.Sku, StringFormat='Артикул: {0}'}" FontSize="12" Foreground="{StaticResource Slate400Brush}"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="48" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Quantity}" FontSize="16" FontWeight="Medium" Foreground="{StaticResource Slate700Brush}" Width="50" TextAlignment="Right"/>
+                                                <TextBlock Text="{Binding LineTotal, StringFormat='{}{0:N2} ₽'}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" Width="100" TextAlignment="Right"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Totals Section -->
+                            <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="8" Padding="24" Opacity="0.8">
+                                <StackPanel Spacing="12">
+                                    <Grid ColumnDefinitions="*, Auto">
+                                        <TextBlock Grid.Column="0" Text="Подытог:" Foreground="{StaticResource Slate600Brush}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='{}{0:N2} ₽'}" Foreground="{StaticResource Slate600Brush}"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*, Auto">
+                                        <TextBlock Grid.Column="0" Text="Скидка (Лояльность):" Foreground="{StaticResource Slate600Brush}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Discount, StringFormat='{}-{0:N2} ₽'}" Foreground="{StaticResource SuccessBrush}"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,12">
+                                        <Border Grid.ColumnSpan="2" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Margin="0,0,0,-12" />
+                                        <TextBlock Grid.Column="0" Text="НДС (20%):" Foreground="{StaticResource Slate600Brush}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Tax, StringFormat='{}{0:N2} ₽'}" Foreground="{StaticResource Slate600Brush}"/>
+                                    </Grid>
+                                    <Grid ColumnDefinitions="*, Auto">
+                                        <TextBlock Grid.Column="0" Text="ИТОГО:" FontSize="24" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Total, StringFormat='{}{0:N2} ₽'}" FontSize="24" FontWeight="ExtraBold" Foreground="{StaticResource PrimaryBrush}"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <StackPanel Margin="0,32,0,0" HorizontalAlignment="Center">
+                                <TextBlock Text="СПАСИБО ЗА ПОКУПКУ!" FontSize="12" Foreground="{StaticResource Slate400Brush}" TextAlignment="Center"/>
+                                <TextBlock Text="ООО &quot;РИТЕЙЛ-СЕРВИС&quot;, ИНН 7700123456" FontSize="12" Foreground="{StaticResource Slate400Brush}" TextAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Right: Actions and Summary -->
+                    <StackPanel Grid.Column="1" Spacing="24">
+
+                        <!-- Payment Method -->
+                        <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Padding="24">
+                            <StackPanel>
+                                <TextBlock Text="Способ оплаты" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" Margin="0,0,0,16"/>
+                                <Border Background="{StaticResource Slate50Brush}" CornerRadius="8" Padding="16">
+                                    <StackPanel Orientation="Horizontal" Spacing="16">
+                                        <material:MaterialIcon Kind="CreditCard" Width="36" Height="36" Foreground="{StaticResource Slate700Brush}"/>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding PaymentMethod}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Slate900Brush}"/>
+                                            <TextBlock Text="{Binding AuthCode, StringFormat='Код авторизации: {0}'}" FontSize="14" Foreground="{StaticResource Slate500Brush}"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Primary Actions -->
+                        <StackPanel Spacing="12">
+                            <Button Classes="PrimaryButton" Command="{Binding PrintReceiptCommand}" HorizontalAlignment="Stretch" Padding="20">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <material:MaterialIcon Kind="Printer" Width="24" Height="24" Foreground="White"/>
+                                    <TextBlock Text="Напечатать чек" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                                </StackPanel>
+                            </Button>
+
+                            <Grid ColumnDefinitions="*, *" Margin="0,0,0,16">
+                                <Button Grid.Column="0" Classes="SecondaryButton" Command="{Binding EmailReceiptCommand}" Margin="0,0,6,0" Padding="16">
+                                    <StackPanel Spacing="4" HorizontalAlignment="Center">
+                                        <material:MaterialIcon Kind="Email" Width="24" Height="24" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Email-чек" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="1" Classes="SecondaryButton" Command="{Binding SmsReceiptCommand}" Margin="6,0,0,0" Padding="16">
+                                    <StackPanel Spacing="4" HorizontalAlignment="Center">
+                                        <material:MaterialIcon Kind="Message" Width="24" Height="24" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                        <TextBlock Text="SMS-чек" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Border BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,1,0,0" Padding="0,16,0,0">
+                                <Button Command="{Binding NewSaleCommand}" Background="{StaticResource Slate900Brush}" CornerRadius="12" HorizontalAlignment="Stretch" Padding="20">
+                                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                                        <material:MaterialIcon Kind="CartPlus" Width="24" Height="24" Foreground="White"/>
+                                        <TextBlock Text="Новая продажа" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                                    </StackPanel>
+                                </Button>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Loyalty -->
+                        <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="12" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Padding="24" Opacity="0.8">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+                                    <material:MaterialIcon Kind="Stars" Width="24" Height="24" Foreground="{StaticResource PrimaryBrush}"/>
+                                    <TextBlock Text="Программа лояльности" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding ClientName, StringFormat='Клиент: {0}'}" FontSize="14" Foreground="{StaticResource Slate600Brush}" Margin="0,0,0,16"/>
+                                <Grid ColumnDefinitions="*, Auto" Margin="0,0,0,4">
+                                    <TextBlock Grid.Column="0" Text="Начислено баллов:" FontSize="14" Foreground="{StaticResource Slate500Brush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding PointsEarned}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}"/>
+                                </Grid>
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Grid.Column="0" Text="Доступный баланс:" FontSize="14" Foreground="{StaticResource Slate500Brush}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding PointsBalance}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer Help -->
+        <Border Grid.Row="2" Background="{StaticResource Slate100Brush}" Padding="32,16">
+            <Grid ColumnDefinitions="*, Auto">
+                <TextBlock Grid.Column="0" Text="Версия системы 4.8.2-build.921 • Лицензия активна" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="24">
+                    <TextBlock Text="Поддержка" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" Cursor="Hand"/>
+                    <TextBlock Text="Руководство пользователя" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" Cursor="Hand"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
