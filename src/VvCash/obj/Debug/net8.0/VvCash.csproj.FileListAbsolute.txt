@@ -1,0 +1,14 @@
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.csproj.AssemblyReference.cache
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/Avalonia/Resources.Inputs.cache
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/Avalonia/resources
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.GeneratedMSBuildEditorConfig.editorconfig
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.AssemblyInfoInputs.cache
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.AssemblyInfo.cs
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.csproj.CoreCompileInputs.cache
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.sourcelink.json
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/Avalonia/VvCash.dll
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/Avalonia/VvCash.pdb
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/refint/Avalonia/VvCash.dll
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.dll
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/refint/VvCash.dll
+/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/Debug/net8.0/VvCash.pdb
