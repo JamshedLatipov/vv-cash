@@ -1,13 +1,18 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Color x:Key="PrimaryColor">#11b4d4</Color>
-    <Color x:Key="PrimaryDarkColor">#0d8fa6</Color>
-    <Color x:Key="BackgroundColor">#0f0f23</Color>
-    <Color x:Key="CardBackground">#1a1a3e</Color>
-    <Color x:Key="TextPrimary">White</Color>
-    <Color x:Key="TextSecondary">#a0a0b8</Color>
-    <Color x:Key="SuccessColor">#4caf50</Color>
-    <Color x:Key="DangerColor">#f44336</Color>
+    <Color x:Key="PrimaryDarkColor">#0e9db9</Color>
+    <Color x:Key="BackgroundColor">#f6f8f8</Color>
+    <Color x:Key="CardBackground">White</Color>
+    <Color x:Key="TextPrimary">#0f172a</Color>
+    <Color x:Key="TextSecondary">#64748b</Color>
+    <Color x:Key="SuccessColor">#22c55e</Color>
+    <Color x:Key="DangerColor">#ef4444</Color>
+    <Color x:Key="BorderColor">#e2e8f0</Color>
+    <Color x:Key="HeaderBackgroundColor">White</Color>
+    <Color x:Key="SidebarBackgroundColor">#f6f8f8</Color>
+    <Color x:Key="SecondaryButtonBackground">#f1f5f9</Color>
+    <Color x:Key="SecondaryButtonHover">#e2e8f0</Color>
 
     <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource PrimaryColor}"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="{StaticResource PrimaryDarkColor}"/>
@@ -17,4 +22,9 @@
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="{StaticResource HeaderBackgroundColor}"/>
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="{StaticResource SidebarBackgroundColor}"/>
+    <SolidColorBrush x:Key="SecondaryButtonBackgroundBrush" Color="{StaticResource SecondaryButtonBackground}"/>
+    <SolidColorBrush x:Key="SecondaryButtonHoverBrush" Color="{StaticResource SecondaryButtonHover}"/>
 </ResourceDictionary>

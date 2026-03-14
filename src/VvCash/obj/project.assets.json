@@ -1932,24 +1932,25 @@
     ]
   },
   "packageFolders": {
-    "/home/runner/.nuget/packages/": {}
+    "/home/jules/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "/home/runner/work/vv-cash/vv-cash/src/VvCash/VvCash.csproj",
+      "projectUniqueName": "/app/src/VvCash/VvCash.csproj",
       "projectName": "VvCash",
-      "projectPath": "/home/runner/work/vv-cash/vv-cash/src/VvCash/VvCash.csproj",
-      "packagesPath": "/home/runner/.nuget/packages/",
-      "outputPath": "/home/runner/work/vv-cash/vv-cash/src/VvCash/obj/",
+      "projectPath": "/app/src/VvCash/VvCash.csproj",
+      "packagesPath": "/home/jules/.nuget/packages/",
+      "outputPath": "/app/src/VvCash/obj/",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "/home/runner/.nuget/NuGet/NuGet.Config"
+        "/home/jules/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
       ],
       "sources": {
+        "/usr/lib/dotnet/library-packs": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
@@ -2020,16 +2021,8 @@
         "warn": true,
         "downloadDependencies": [
           {
-            "name": "Microsoft.AspNetCore.App.Ref",
-            "version": "[8.0.23, 8.0.23]"
-          },
-          {
             "name": "Microsoft.NETCore.App.Host.linux-x64",
-            "version": "[8.0.23, 8.0.23]"
-          },
-          {
-            "name": "Microsoft.NETCore.App.Ref",
-            "version": "[8.0.23, 8.0.23]"
+            "version": "[8.0.24, 8.0.24]"
           }
         ],
         "frameworkReferences": {
@@ -2037,7 +2030,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "/usr/share/dotnet/sdk/10.0.102/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.103/PortableRuntimeIdentifierGraph.json"
       }
     }
   }
