@@ -201,6 +201,22 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private async Task OpenCustomerRegistration()
+    {
+        // Simple integration point assuming IClassicDesktopStyleApplicationLifetime or parent window lookup
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.CustomerRegistrationWindow();
+                dialog.DataContext = new CustomerRegistrationViewModel(dialog);
+                await dialog.ShowDialog(mainWindow);
+            }
+        }
+    }
+
+    [RelayCommand]
     private async Task Pay()
     {
         if (!CartItems.Any()) return;
