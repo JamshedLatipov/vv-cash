@@ -26,6 +26,7 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<Category> _allCategories = new();
     [ObservableProperty] private ObservableCollection<Category> _quickCategories = new();
     [ObservableProperty] private Category? _selectedCategory;
+    public string SelectedCategoryName => SelectedCategory?.Name ?? "All Categories";
     [ObservableProperty] private bool _isViewingCategories = true;
     [ObservableProperty] private string _couponCode = string.Empty;
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
@@ -133,6 +134,7 @@ public partial class PosViewModel : ViewModelBase
     private async Task SelectCategory(Category? category)
     {
         SelectedCategory = category;
+        OnPropertyChanged(nameof(SelectedCategoryName));
         SearchQuery = string.Empty;
         IsCatalogOpen = true;
 

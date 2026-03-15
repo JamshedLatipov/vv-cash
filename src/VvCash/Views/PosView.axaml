@@ -83,7 +83,7 @@
                     <Border Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,1,0" Padding="0,0,24,0">
                         <Grid RowDefinitions="Auto, *">
                             <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
-                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategory.Name, StringFormat='{}Catalog - {0}', TargetNullValue='All Categories'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategoryName, StringFormat='{}Catalog - {0}'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Classes="IconButton" Command="{Binding CloseCatalogCommand}" VerticalAlignment="Center">
                                     <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                                 </Button>
