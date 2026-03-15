@@ -1,1 +1,0 @@
-sed -i 's/services.AddSingleton<ICategoryService, CategoryService>();/services.AddHttpClient<ICategoryService, CategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();/g' src/VvCash/App.axaml.cs

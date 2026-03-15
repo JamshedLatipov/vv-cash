@@ -1,1 +1,0 @@
-sed -i 's/services.AddSingleton<IAuthService, AuthService>();/services.AddSingleton<IAuthService, AuthService>();\n        services.AddSingleton<ICategoryService, CategoryService>();/' src/VvCash/App.axaml.cs

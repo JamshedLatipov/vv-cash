@@ -1,1 +1,0 @@
-sed -i 's/if (root.TryGetProperty("data", out var dataElement) && dataElement.TryGetProperty("token", out var authTokenElement))/if (root.TryGetProperty("access_token", out var authTokenElement))/g' src/VvCash/Services/Api/AuthService.cs

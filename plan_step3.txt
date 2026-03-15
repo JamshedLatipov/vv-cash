@@ -1,5 +1,0 @@
-So we actually already have a `Category.cs`! Oh, let's look at `Category.cs`.
-It has `Id` and `Name`.
-Wait, the API `/cashes/category/show-on-cash/` returns categories.
-Can I see the Swagger documentation?
-Let's see what the API returns. I downloaded doc.json, let me parse the paths using jq.
