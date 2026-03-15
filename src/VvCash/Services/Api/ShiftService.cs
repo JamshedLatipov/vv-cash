@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Net.Http.Json;
 
 namespace VvCash.Services.Api;
 
@@ -77,12 +78,8 @@ public class ShiftService : IShiftService
             var url = $"{GetBaseUrl()}cashes/shift/close/";
             Console.WriteLine($"[ShiftService] POST to {url}");
             Debug.WriteLine($"[ShiftService] POST to {url}");
-            var request = new HttpRequestMessage(HttpMethod.Post, url);
-
             var payload = new { shift = shiftId };
-            request.Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
-
-            var response = await _httpClient.SendAsync(request);
+            var response = await _httpClient.PostAsJsonAsync(url, payload);
 
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
