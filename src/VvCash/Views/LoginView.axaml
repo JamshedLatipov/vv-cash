@@ -68,8 +68,8 @@
             <Setter Property="Padding" Value="12"/>
         </Style>
         <Style Selector="Button.SettingsButton:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#1AFFFFFF"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource Slate200Brush}"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate600Brush}"/>
         </Style>
     </UserControl.Styles>
 
@@ -77,23 +77,22 @@
         <!-- Left Side: Branding/Info -->
 
         <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="48">
-            <Grid>
-                <!-- Settings Button -->
-                <Button Classes="SettingsButton" VerticalAlignment="Top" HorizontalAlignment="Left" Command="{Binding OpenSettingsCommand}">
-                    <material:MaterialIcon Kind="Cog" Width="28" Height="28"/>
-                </Button>
-
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
                 <material:MaterialIcon Kind="PackageVariant" Width="120" Height="120" Foreground="White" />
                 <TextBlock Text="Luxe Threads POS" FontSize="48" FontWeight="Black" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
                 <TextBlock Text="Welcome back! Please enter your PIN to continue." FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
             </StackPanel>
-            </Grid>
         </Border>
 
         <!-- Right Side: PIN Entry -->
-        <Border Grid.Column="1" Padding="48" VerticalAlignment="Center">
-            <StackPanel MaxWidth="400" Spacing="16">
+        <Border Grid.Column="1" Padding="48">
+            <Grid>
+                <!-- Settings Button -->
+                <Button Classes="SettingsButton" VerticalAlignment="Top" HorizontalAlignment="Right" Command="{Binding OpenSettingsCommand}">
+                    <material:MaterialIcon Kind="Cog" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}" />
+                </Button>
+
+                <StackPanel MaxWidth="400" Spacing="16" VerticalAlignment="Center">
                 <TextBlock Text="Enter PIN" FontSize="32" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
 
                 <!-- PIN Display -->
@@ -134,6 +133,7 @@
                 <!-- Login Button -->
                 <Button Classes="LoginButton" Content="Login" Command="{Binding LoginCommand}" Height="72"/>
             </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>
