@@ -122,9 +122,13 @@ public class ShiftService : IShiftService
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
                 {
-                    if (root.TryGetProperty("body", out var bodyElement) && bodyElement.TryGetProperty("is_active", out var isActiveElement))
+                    if (root.TryGetProperty("body", out var bodyElement))
                     {
-                        return isActiveElement.GetBoolean();
+                        if (bodyElement.ValueKind == JsonValueKind.Null) return false;
+                        if (bodyElement.TryGetProperty("id", out var idElement))
+                        {
+                            return !string.IsNullOrEmpty(idElement.GetString());
+                        }
                     }
                 }
             }
