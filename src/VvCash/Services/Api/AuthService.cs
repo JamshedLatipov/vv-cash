@@ -68,7 +68,7 @@ public class AuthService : IAuthService
                     {
                         Console.WriteLine("[AuthService] Login successful.");
 
-                        if (root.TryGetProperty("data", out var dataElement) && dataElement.TryGetProperty("token", out var authTokenElement))
+                        if (root.TryGetProperty("access_token", out var authTokenElement))
                         {
                             _settingsService.AuthToken = authTokenElement.GetString() ?? string.Empty;
                             _settingsService.Save();
