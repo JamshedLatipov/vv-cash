@@ -1,22 +1,34 @@
 using System;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
 
 public partial class LoginViewModel : ViewModelBase
 {
+    private readonly IAuthService _authService;
+
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(MaskedPin))]
-    private string _pin = string.Empty;
+    private string _email = string.Empty;
+
+    [ObservableProperty]
+    private string _password = string.Empty;
 
     [ObservableProperty]
     private string _errorMessage = string.Empty;
 
-    public string MaskedPin => new string('•', Pin.Length);
+    [ObservableProperty]
+    private bool _isBusy = false;
 
     public event EventHandler? LoginSuccessful;
     public event EventHandler? SettingsRequested;
+
+    public LoginViewModel(IAuthService authService)
+    {
+        _authService = authService;
+    }
 
     [RelayCommand]
     private void OpenSettings()
@@ -24,44 +36,39 @@ public partial class LoginViewModel : ViewModelBase
         SettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 
-
     [RelayCommand]
-    private void AddDigit(string digit)
+    private async Task LoginAsync()
     {
         ErrorMessage = string.Empty;
-        if (Pin.Length < 6) // Standard 4-6 digit PIN
-        {
-            Pin += digit;
-        }
-    }
 
-    [RelayCommand]
-    private void RemoveDigit()
-    {
-        ErrorMessage = string.Empty;
-        if (Pin.Length > 0)
+        if (string.IsNullOrWhiteSpace(Email) || string.IsNullOrWhiteSpace(Password))
         {
-            Pin = Pin[..^1];
-        }
-    }
-
-    [RelayCommand]
-    private void Clear()
-    {
-        ErrorMessage = string.Empty;
-        Pin = string.Empty;
-    }
-
-    [RelayCommand]
-    private void Login()
-    {
-        if (string.IsNullOrEmpty(Pin))
-        {
-            ErrorMessage = "Please enter a PIN";
+            ErrorMessage = "Please enter both email and password";
             return;
         }
 
-        // Simulating login logic. Accept any PIN for this prototype.
-        LoginSuccessful?.Invoke(this, EventArgs.Empty);
+        IsBusy = true;
+
+        try
+        {
+            bool success = await _authService.LoginAsync(Email, Password);
+
+            if (success)
+            {
+                LoginSuccessful?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                ErrorMessage = "Invalid credentials or unable to connect.";
+            }
+        }
+        catch (Exception)
+        {
+            ErrorMessage = "An error occurred during login.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 }

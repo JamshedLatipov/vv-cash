@@ -3,62 +3,43 @@
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
         x:Class="VvCash.Views.LoginView"
-
-
-
         Background="{StaticResource Slate50Brush}">
 
     <UserControl.Styles>
-        <Style Selector="Button.NumpadButton">
+        <Style Selector="TextBox.LoginInput">
             <Setter Property="Background" Value="White"/>
-            <Setter Property="Foreground" Value="{StaticResource Slate800Brush}"/>
-            <Setter Property="FontSize" Value="28"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-            <Setter Property="VerticalAlignment" Value="Stretch"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Margin" Value="8"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate800Brush}"/>
+            <Setter Property="Margin" Value="0,8,0,24"/>
         </Style>
-        <Style Selector="Button.NumpadButton:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource Slate100Brush}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource Slate300Brush}"/>
-        </Style>
-        <Style Selector="Button.NumpadButton:pressed /template/ ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource Slate200Brush}"/>
-        </Style>
-
-        <Style Selector="Button.ActionButton">
-            <Setter Property="Background" Value="{StaticResource Slate200Brush}"/>
-            <Setter Property="Foreground" Value="{StaticResource Slate700Brush}"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
-            <Setter Property="VerticalAlignment" Value="Stretch"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="8"/>
-        </Style>
-        <Style Selector="Button.ActionButton:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="{StaticResource Slate300Brush}"/>
+        <Style Selector="TextBox.LoginInput:focus /template/ Border#PART_BorderElement">
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="2"/>
         </Style>
 
         <Style Selector="Button.LoginButton">
             <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="FontSize" Value="24"/>
+            <Setter Property="FontSize" Value="20"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="VerticalAlignment" Value="Stretch"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="8,16,8,8"/>
+            <Setter Property="Margin" Value="0,16,0,8"/>
+            <Setter Property="Height" Value="56"/>
         </Style>
         <Style Selector="Button.LoginButton:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#0d8fa6"/> <!-- A bit darker than PrimaryBrush (#11b4d4) -->
+        </Style>
+        <Style Selector="Button.LoginButton:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource Slate300Brush}"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate500Brush}"/>
         </Style>
 
         <Style Selector="Button.SettingsButton">
@@ -80,11 +61,11 @@
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
                 <material:MaterialIcon Kind="PackageVariant" Width="120" Height="120" Foreground="White" />
                 <TextBlock Text="Luxe Threads POS" FontSize="48" FontWeight="Black" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
-                <TextBlock Text="Welcome back! Please enter your PIN to continue." FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
+                <TextBlock Text="Welcome back! Please enter your credentials to continue." FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
             </StackPanel>
         </Border>
 
-        <!-- Right Side: PIN Entry -->
+        <!-- Right Side: Email/Password Entry -->
         <Border Grid.Column="1" Padding="48">
             <Grid>
                 <!-- Settings Button -->
@@ -92,47 +73,31 @@
                     <material:MaterialIcon Kind="Cog" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}" />
                 </Button>
 
-                <StackPanel MaxWidth="400" Spacing="16" VerticalAlignment="Center">
-                <TextBlock Text="Enter PIN" FontSize="32" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                <StackPanel MaxWidth="400" VerticalAlignment="Center" HorizontalAlignment="Stretch">
+                    <TextBlock Text="Sign In" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,32"/>
 
-                <!-- PIN Display -->
-                <Border Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="2" CornerRadius="12" Height="80" Padding="16">
-                    <TextBlock Text="{Binding MaskedPin}" FontSize="48" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                </Border>
+                    <!-- Error Message -->
+                    <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,16" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
-                <!-- Error Message -->
-                <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Height="20" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                    <!-- Email -->
+                    <TextBlock Text="Email Address" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
+                    <TextBox Classes="LoginInput" Text="{Binding Email, Mode=TwoWay}" Watermark="Enter your email" IsEnabled="{Binding !IsBusy}"/>
 
-                <!-- Numpad Grid -->
-                <Grid RowDefinitions="80, 80, 80, 80" ColumnDefinitions="*, *, *">
-                    <!-- Row 1 -->
-                    <Button Grid.Row="0" Grid.Column="0" Classes="NumpadButton" Content="1" Command="{Binding AddDigitCommand}" CommandParameter="1"/>
-                    <Button Grid.Row="0" Grid.Column="1" Classes="NumpadButton" Content="2" Command="{Binding AddDigitCommand}" CommandParameter="2"/>
-                    <Button Grid.Row="0" Grid.Column="2" Classes="NumpadButton" Content="3" Command="{Binding AddDigitCommand}" CommandParameter="3"/>
+                    <!-- Password -->
+                    <TextBlock Text="Password" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
+                    <TextBox Classes="LoginInput" Text="{Binding Password, Mode=TwoWay}" Watermark="Enter your password" PasswordChar="•" IsEnabled="{Binding !IsBusy}"/>
 
-                    <!-- Row 2 -->
-                    <Button Grid.Row="1" Grid.Column="0" Classes="NumpadButton" Content="4" Command="{Binding AddDigitCommand}" CommandParameter="4"/>
-                    <Button Grid.Row="1" Grid.Column="1" Classes="NumpadButton" Content="5" Command="{Binding AddDigitCommand}" CommandParameter="5"/>
-                    <Button Grid.Row="1" Grid.Column="2" Classes="NumpadButton" Content="6" Command="{Binding AddDigitCommand}" CommandParameter="6"/>
-
-                    <!-- Row 3 -->
-                    <Button Grid.Row="2" Grid.Column="0" Classes="NumpadButton" Content="7" Command="{Binding AddDigitCommand}" CommandParameter="7"/>
-                    <Button Grid.Row="2" Grid.Column="1" Classes="NumpadButton" Content="8" Command="{Binding AddDigitCommand}" CommandParameter="8"/>
-                    <Button Grid.Row="2" Grid.Column="2" Classes="NumpadButton" Content="9" Command="{Binding AddDigitCommand}" CommandParameter="9"/>
-
-                    <!-- Row 4 -->
-                    <Button Grid.Row="3" Grid.Column="0" Classes="ActionButton" Command="{Binding ClearCommand}">
-                        <material:MaterialIcon Kind="Close" Width="32" Height="32"/>
+                    <!-- Login Button -->
+                    <Button Classes="LoginButton" Command="{Binding LoginCommand}" IsEnabled="{Binding !IsBusy}">
+                        <Panel>
+                            <TextBlock Text="Login" IsVisible="{Binding !IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <material:MaterialIcon Kind="Loading" Classes="spin" Width="20" Height="20"/>
+                                <TextBlock Text="Authenticating..." VerticalAlignment="Center" FontSize="16"/>
+                            </StackPanel>
+                        </Panel>
                     </Button>
-                    <Button Grid.Row="3" Grid.Column="1" Classes="NumpadButton" Content="0" Command="{Binding AddDigitCommand}" CommandParameter="0"/>
-                    <Button Grid.Row="3" Grid.Column="2" Classes="ActionButton" Command="{Binding RemoveDigitCommand}">
-                        <material:MaterialIcon Kind="BackspaceOutline" Width="32" Height="32"/>
-                    </Button>
-                </Grid>
-
-                <!-- Login Button -->
-                <Button Classes="LoginButton" Content="Login" Command="{Binding LoginCommand}" Height="72"/>
-            </StackPanel>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>
