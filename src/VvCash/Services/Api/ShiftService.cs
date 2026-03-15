@@ -78,8 +78,9 @@ public class ShiftService : IShiftService
             var url = $"{GetBaseUrl()}cashes/shift/close/";
             Console.WriteLine($"[ShiftService] POST to {url}");
             Debug.WriteLine($"[ShiftService] POST to {url}");
-            var payload = new { shift = shiftId };
-            var response = await _httpClient.PostAsJsonAsync(url, payload);
+            url = $"{url}?shift={shiftId}";
+            Console.WriteLine($"[ShiftService] Final POST url: {url}");
+            var response = await _httpClient.PostAsync(url, null);
 
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
