@@ -31,15 +31,23 @@ public class ShiftService : IShiftService
 
     public async Task<bool> OpenShiftAsync()
     {
+        Console.WriteLine("[ShiftService] OpenShiftAsync called.");
+        Debug.WriteLine("[ShiftService] OpenShiftAsync called.");
         try
         {
             var url = $"{GetBaseUrl()}cashes/shift/open/";
+            Console.WriteLine($"[ShiftService] POST to {url}");
+            Debug.WriteLine($"[ShiftService] POST to {url}");
             var request = new HttpRequestMessage(HttpMethod.Post, url);
             var response = await _httpClient.SendAsync(request);
 
+            Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
+            Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[ShiftService] Response content: {responseContent}");
+                Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
                 using var jsonDoc = JsonDocument.Parse(responseContent);
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
@@ -58,15 +66,23 @@ public class ShiftService : IShiftService
 
     public async Task<bool> CloseShiftAsync()
     {
+        Console.WriteLine("[ShiftService] CloseShiftAsync called.");
+        Debug.WriteLine("[ShiftService] CloseShiftAsync called.");
         try
         {
             var url = $"{GetBaseUrl()}cashes/shift/close/";
+            Console.WriteLine($"[ShiftService] POST to {url}");
+            Debug.WriteLine($"[ShiftService] POST to {url}");
             var request = new HttpRequestMessage(HttpMethod.Post, url);
             var response = await _httpClient.SendAsync(request);
 
+            Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
+            Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[ShiftService] Response content: {responseContent}");
+                Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
                 using var jsonDoc = JsonDocument.Parse(responseContent);
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
@@ -85,15 +101,23 @@ public class ShiftService : IShiftService
 
     public async Task<bool> GetShiftStateAsync()
     {
+        Console.WriteLine("[ShiftService] GetShiftStateAsync called.");
+        Debug.WriteLine("[ShiftService] GetShiftStateAsync called.");
         try
         {
             var url = $"{GetBaseUrl()}cashes/shift/state/";
+            Console.WriteLine($"[ShiftService] GET to {url}");
+            Debug.WriteLine($"[ShiftService] GET to {url}");
             var request = new HttpRequestMessage(HttpMethod.Get, url);
             var response = await _httpClient.SendAsync(request);
 
+            Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
+            Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[ShiftService] Response content: {responseContent}");
+                Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
                 using var jsonDoc = JsonDocument.Parse(responseContent);
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)

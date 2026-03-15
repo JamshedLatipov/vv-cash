@@ -49,6 +49,8 @@ public partial class PosViewModel : ViewModelBase
     [RelayCommand]
     private async Task OpenShiftAsync()
     {
+        Console.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
         IsLoadingShift = true;
         bool success = await _shiftService.OpenShiftAsync();
         IsLoadingShift = false;
@@ -62,6 +64,8 @@ public partial class PosViewModel : ViewModelBase
     [RelayCommand]
     private async Task CloseShiftAsync()
     {
+        Console.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
         IsLoadingShift = true;
         bool success = await _shiftService.CloseShiftAsync();
         IsLoadingShift = false;
@@ -113,7 +117,11 @@ public partial class PosViewModel : ViewModelBase
         QuickCategories = new ObservableCollection<Category>(quickCats);
         IsViewingCategories = true;
 
+        Console.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
         IsShiftOpen = await _shiftService.GetShiftStateAsync();
+        Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen}");
+        System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen}");
         IsShiftModalVisible = !IsShiftOpen;
 
         // Initial view is just all categories
