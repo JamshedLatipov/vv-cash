@@ -32,6 +32,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private string _printerStatusText = "Printer Ready";
     [ObservableProperty] private bool _isPrinterReady = true;
     [ObservableProperty] private string _statusMessage = string.Empty;
+    [ObservableProperty] private bool _isCatalogOpen = false;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
 
@@ -71,6 +72,10 @@ public partial class MainWindowViewModel : ViewModelBase
 
     partial void OnSearchQueryChanged(string value)
     {
+        if (!string.IsNullOrWhiteSpace(value) && !IsCatalogOpen)
+        {
+            IsCatalogOpen = true;
+        }
         _ = LoadProductsAsync(SelectedCategory);
     }
 
@@ -109,6 +114,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private async Task SearchProducts()
     {
+        IsCatalogOpen = true;
         await LoadProductsAsync(SelectedCategory);
     }
 
@@ -117,7 +123,15 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         SelectedCategory = category;
         SearchQuery = string.Empty;
+        IsCatalogOpen = true;
         await LoadProductsAsync(category);
+    }
+
+    [RelayCommand]
+    private void CloseCatalog()
+    {
+        IsCatalogOpen = false;
+        SearchQuery = string.Empty;
     }
 
     [RelayCommand]
@@ -184,6 +198,22 @@ public partial class MainWindowViewModel : ViewModelBase
             Subtotal, Tax, TotalDiscount, TotalAmount,
             _cartService.AppliedCoupons);
         StatusMessage = success ? "Receipt printed." : "Print failed.";
+    }
+
+    [RelayCommand]
+    private async Task OpenCustomerRegistration()
+    {
+        // Simple integration point assuming IClassicDesktopStyleApplicationLifetime or parent window lookup
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.CustomerRegistrationWindow();
+                dialog.DataContext = new CustomerRegistrationViewModel(dialog);
+                await dialog.ShowDialog(mainWindow);
+            }
+        }
     }
 
     [RelayCommand]

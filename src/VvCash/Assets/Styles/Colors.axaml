@@ -2,29 +2,87 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Color x:Key="PrimaryColor">#11b4d4</Color>
     <Color x:Key="PrimaryDarkColor">#0e9db9</Color>
+    <Color x:Key="PrimaryLightColor">#e7f7fa</Color>
     <Color x:Key="BackgroundColor">#f6f8f8</Color>
     <Color x:Key="CardBackground">White</Color>
     <Color x:Key="TextPrimary">#0f172a</Color>
     <Color x:Key="TextSecondary">#64748b</Color>
+    <Color x:Key="TextMuted">#94a3b8</Color>
     <Color x:Key="SuccessColor">#22c55e</Color>
     <Color x:Key="DangerColor">#ef4444</Color>
-    <Color x:Key="BorderColor">#e2e8f0</Color>
+    <Color x:Key="DangerLightColor">#fee2e2</Color>
+    <Color x:Key="BorderColor">#f1f5f9</Color>
+    <Color x:Key="BorderDarkColor">#e2e8f0</Color>
     <Color x:Key="HeaderBackgroundColor">White</Color>
     <Color x:Key="SidebarBackgroundColor">#f6f8f8</Color>
-    <Color x:Key="SecondaryButtonBackground">#f1f5f9</Color>
-    <Color x:Key="SecondaryButtonHover">#e2e8f0</Color>
+    <Color x:Key="SecondaryButtonBackground">#f8fafc</Color>
+    <Color x:Key="SecondaryButtonHover">#f1f5f9</Color>
+
+    <Color x:Key="Slate50">#f8fafc</Color>
+    <Color x:Key="Slate100">#f1f5f9</Color>
+    <Color x:Key="Slate200">#e2e8f0</Color>
+    <Color x:Key="Slate300">#cbd5e1</Color>
+    <Color x:Key="Slate400">#94a3b8</Color>
+    <Color x:Key="Slate500">#64748b</Color>
+    <Color x:Key="Slate600">#475569</Color>
+    <Color x:Key="Slate700">#334155</Color>
+    <Color x:Key="Slate800">#1e293b</Color>
+    <Color x:Key="Slate900">#0f172a</Color>
+
+    <Color x:Key="Red50">#fef2f2</Color>
+    <Color x:Key="Red100">#fee2e2</Color>
+    <Color x:Key="Red500">#ef4444</Color>
+    <Color x:Key="Red600">#dc2626</Color>
+
+    <Color x:Key="Emerald100">#d1fae5</Color>
+    <Color x:Key="Emerald600">#059669</Color>
+
+    <Color x:Key="Blue100">#dbeafe</Color>
+    <Color x:Key="Blue600">#2563eb</Color>
+
+    <Color x:Key="Purple100">#f3e8ff</Color>
+    <Color x:Key="Purple600">#9333ea</Color>
 
     <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource PrimaryColor}"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="{StaticResource PrimaryDarkColor}"/>
+    <SolidColorBrush x:Key="PrimaryLightBrush" Color="{StaticResource PrimaryLightColor}"/>
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}"/>
     <SolidColorBrush x:Key="CardBackgroundBrush" Color="{StaticResource CardBackground}"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimary}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMuted}"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}"/>
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
+    <SolidColorBrush x:Key="DangerLightBrush" Color="{StaticResource DangerLightColor}"/>
     <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="BorderDarkBrush" Color="{StaticResource BorderDarkColor}"/>
     <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="{StaticResource HeaderBackgroundColor}"/>
     <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="{StaticResource SidebarBackgroundColor}"/>
     <SolidColorBrush x:Key="SecondaryButtonBackgroundBrush" Color="{StaticResource SecondaryButtonBackground}"/>
     <SolidColorBrush x:Key="SecondaryButtonHoverBrush" Color="{StaticResource SecondaryButtonHover}"/>
+
+    <SolidColorBrush x:Key="Slate50Brush" Color="{StaticResource Slate50}"/>
+    <SolidColorBrush x:Key="Slate100Brush" Color="{StaticResource Slate100}"/>
+    <SolidColorBrush x:Key="Slate200Brush" Color="{StaticResource Slate200}"/>
+    <SolidColorBrush x:Key="Slate300Brush" Color="{StaticResource Slate300}"/>
+    <SolidColorBrush x:Key="Slate400Brush" Color="{StaticResource Slate400}"/>
+    <SolidColorBrush x:Key="Slate500Brush" Color="{StaticResource Slate500}"/>
+    <SolidColorBrush x:Key="Slate600Brush" Color="{StaticResource Slate600}"/>
+    <SolidColorBrush x:Key="Slate700Brush" Color="{StaticResource Slate700}"/>
+    <SolidColorBrush x:Key="Slate800Brush" Color="{StaticResource Slate800}"/>
+    <SolidColorBrush x:Key="Slate900Brush" Color="{StaticResource Slate900}"/>
+
+    <SolidColorBrush x:Key="Red50Brush" Color="{StaticResource Red50}"/>
+    <SolidColorBrush x:Key="Red100Brush" Color="{StaticResource Red100}"/>
+    <SolidColorBrush x:Key="Red500Brush" Color="{StaticResource Red500}"/>
+    <SolidColorBrush x:Key="Red600Brush" Color="{StaticResource Red600}"/>
+
+    <SolidColorBrush x:Key="Emerald100Brush" Color="{StaticResource Emerald100}"/>
+    <SolidColorBrush x:Key="Emerald600Brush" Color="{StaticResource Emerald600}"/>
+
+    <SolidColorBrush x:Key="Blue100Brush" Color="{StaticResource Blue100}"/>
+    <SolidColorBrush x:Key="Blue600Brush" Color="{StaticResource Blue600}"/>
+
+    <SolidColorBrush x:Key="Purple100Brush" Color="{StaticResource Purple100}"/>
+    <SolidColorBrush x:Key="Purple600Brush" Color="{StaticResource Purple600}"/>
 </ResourceDictionary>

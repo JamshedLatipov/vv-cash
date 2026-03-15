@@ -1,0 +1,230 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:VvCash.ViewModels"
+        xmlns:material="using:Material.Icons.Avalonia"
+        xmlns:converters="using:VvCash.Converters"
+        x:Class="VvCash.Views.MixedPaymentWindow"
+        x:Name="RootWindow"
+        Title="Mixed Payment"
+        Width="1024" Height="768"
+        Background="{StaticResource BackgroundBrush}">
+
+    <Window.Resources>
+        <converters:StringEqualityToBoolConverter x:Key="StringEqualityToBoolConverter"/>
+    </Window.Resources>
+
+    <Grid RowDefinitions="Auto, *" Background="{StaticResource BackgroundBrush}">
+        <!-- Header -->
+        <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="32,16">
+            <Grid ColumnDefinitions="Auto, *, Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <material:MaterialIcon Kind="PointOfSale" Width="36" Height="36" Foreground="{StaticResource PrimaryBrush}" />
+                    <StackPanel>
+                        <TextBlock Text="Смешанная оплата" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                        <TextBlock Text="Заказ #8824 • Модный Бутик" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <Button Grid.Column="2" Classes="IconButton" Background="{StaticResource Slate100Brush}" Width="40" Height="40" CornerRadius="8"
+                        Command="{Binding CloseCommand}">
+                    <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate900Brush}"/>
+                </Button>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" ColumnDefinitions="*, Auto" Margin="24">
+
+            <!-- Left Side -->
+            <Grid Grid.Column="0" RowDefinitions="Auto, *, Auto" Margin="0,0,24,0">
+                <!-- Totals -->
+                <Grid Grid.Row="0" ColumnDefinitions="*, *" Margin="0,0,0,24">
+                    <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="12" Padding="24" Margin="0,0,16,0" BoxShadow="0 1 2 0 #10000000">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Общая сумма" FontSize="14" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}"/>
+                            <TextBlock Text="{Binding TotalAmount, StringFormat='{}{0:N0} ₽'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Background="{StaticResource PrimaryLightBrush}" BorderBrush="{StaticResource PrimaryDarkBrush}" BorderThickness="1" CornerRadius="12" Padding="24" BoxShadow="0 1 2 0 #10000000">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Остаток к оплате" FontSize="14" FontWeight="Medium" Foreground="{StaticResource PrimaryBrush}"/>
+                            <TextBlock Text="{Binding RemainingAmount, StringFormat='{}{0:N0} ₽'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource PrimaryBrush}" LetterSpacing="-1"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- Payment Methods -->
+                <StackPanel Grid.Row="1" Spacing="16">
+                    <TextBlock Text="Распределение оплаты" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+
+                    <!-- Cash -->
+                    <Border Background="White" BorderThickness="2" CornerRadius="12" Padding="16" BoxShadow="0 1 2 0 #10000000" Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Cash'}">
+                        <Border.Styles>
+                            <Style Selector="Border">
+                                <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}" />
+                            </Style>
+                            <Style Selector="Border.Active">
+                                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+                            </Style>
+                        </Border.Styles>
+                        <Grid ColumnDefinitions="Auto, *, Auto">
+                            <Border Grid.Column="0" Background="{StaticResource Emerald100Brush}" Width="48" Height="48" CornerRadius="8" Margin="0,0,16,0">
+                                <material:MaterialIcon Kind="CashMultiple" Width="24" Height="24" Foreground="{StaticResource Emerald600Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="Наличные" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                <TextBlock Text="Введено основной валютой" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2" Name="CashTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CashAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="0"/>
+                            <TextBlock Grid.Column="2" Text="₽" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Card -->
+                    <Border Name="CardBorder" Background="White" BorderThickness="1" CornerRadius="12" Padding="16" BoxShadow="0 1 2 0 #10000000" Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Card'}">
+                         <Border.Styles>
+                            <Style Selector="Border">
+                                <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}" />
+                            </Style>
+                            <Style Selector="Border.Active">
+                                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+                            </Style>
+                        </Border.Styles>
+                        <Grid ColumnDefinitions="Auto, *, Auto">
+                            <Border Grid.Column="0" Background="{StaticResource Blue100Brush}" Width="48" Height="48" CornerRadius="8" Margin="0,0,16,0">
+                                <material:MaterialIcon Kind="CreditCard" Width="24" Height="24" Foreground="{StaticResource Blue600Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="Банковская карта" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                <TextBlock Text="Через терминал эквайринга" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2" Name="CardTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CardAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="0"/>
+                            <TextBlock Grid.Column="2" Text="₽" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Gift Card -->
+                    <Border Name="GiftBorder" Background="White" BorderThickness="1" CornerRadius="12" Padding="16" BoxShadow="0 1 2 0 #10000000" Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Gift'}">
+                         <Border.Styles>
+                            <Style Selector="Border">
+                                <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}" />
+                            </Style>
+                            <Style Selector="Border.Active">
+                                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+                            </Style>
+                        </Border.Styles>
+                        <Grid ColumnDefinitions="Auto, *, Auto">
+                            <Border Grid.Column="0" Background="{StaticResource Purple100Brush}" Width="48" Height="48" CornerRadius="8" Margin="0,0,16,0">
+                                <material:MaterialIcon Kind="Gift" Width="24" Height="24" Foreground="{StaticResource Purple600Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="Подарочный сертификат" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                <TextBlock Text="Баланс: 5 000 ₽" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2" Name="GiftTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding GiftAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="0"/>
+                            <TextBlock Grid.Column="2" Text="₽" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- Footer Actions -->
+                <Grid Grid.Row="2" ColumnDefinitions="1*, 2*" Margin="0,24,0,0">
+                    <Button Grid.Column="0" Margin="0,0,16,0" Classes="SecondaryButton" Command="{Binding BackCommand}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="2" CornerRadius="12" HorizontalAlignment="Stretch" Padding="24,16">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <material:MaterialIcon Kind="ArrowLeft" Width="24" Height="24" Foreground="{StaticResource Slate900Brush}"/>
+                            <TextBlock Text="Назад" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                        </StackPanel>
+                    </Button>
+                    <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding ConfirmPaymentCommand}" CornerRadius="12" HorizontalAlignment="Stretch" Padding="24,16" Background="{StaticResource PrimaryBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <material:MaterialIcon Kind="CheckCircle" Width="24" Height="24"/>
+                            <TextBlock Text="Подтвердить оплату" FontSize="16" FontWeight="Bold"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Grid>
+
+            <!-- Right Side (Numpad) -->
+            <Border Grid.Column="1" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="24" Width="380" BoxShadow="0 20 25 -5 #10000000, 0 8 10 -6 #10000000">
+                <Grid RowDefinitions="Auto, *, Auto">
+                    <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,24">
+                        <TextBlock Text="БЫСТРЫЙ ВВОД" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate400Brush}" LetterSpacing="2" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
+                            <TextBlock Text="{Binding QuickInputText}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
+                            <TextBlock Text="₽" FontSize="20" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <Grid Grid.Row="1" RowDefinitions="*, *, *, *" ColumnDefinitions="*, *, *" Margin="0,0,0,16">
+                        <Grid.Styles>
+                            <Style Selector="Button.NumpadBtn">
+                                <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Slate900Brush}"/>
+                                <Setter Property="CornerRadius" Value="12"/>
+                                <Setter Property="FontSize" Value="24"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                                <Setter Property="Margin" Value="6"/>
+                            </Style>
+                            <Style Selector="Button.NumpadBtn:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="{StaticResource Slate100Brush}"/>
+                            </Style>
+                             <Style Selector="Button.BackspaceBtn">
+                                <Setter Property="Background" Value="{StaticResource Slate100Brush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Red500Brush}"/>
+                                <Setter Property="CornerRadius" Value="12"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                                <Setter Property="Margin" Value="6"/>
+                            </Style>
+                            <Style Selector="Button.BackspaceBtn:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="{StaticResource Red100Brush}"/>
+                            </Style>
+                        </Grid.Styles>
+
+                        <Button Grid.Row="0" Grid.Column="0" Classes="NumpadBtn" Content="1" Command="{Binding AddDigitCommand}" CommandParameter="1"/>
+                        <Button Grid.Row="0" Grid.Column="1" Classes="NumpadBtn" Content="2" Command="{Binding AddDigitCommand}" CommandParameter="2"/>
+                        <Button Grid.Row="0" Grid.Column="2" Classes="NumpadBtn" Content="3" Command="{Binding AddDigitCommand}" CommandParameter="3"/>
+
+                        <Button Grid.Row="1" Grid.Column="0" Classes="NumpadBtn" Content="4" Command="{Binding AddDigitCommand}" CommandParameter="4"/>
+                        <Button Grid.Row="1" Grid.Column="1" Classes="NumpadBtn" Content="5" Command="{Binding AddDigitCommand}" CommandParameter="5"/>
+                        <Button Grid.Row="1" Grid.Column="2" Classes="NumpadBtn" Content="6" Command="{Binding AddDigitCommand}" CommandParameter="6"/>
+
+                        <Button Grid.Row="2" Grid.Column="0" Classes="NumpadBtn" Content="7" Command="{Binding AddDigitCommand}" CommandParameter="7"/>
+                        <Button Grid.Row="2" Grid.Column="1" Classes="NumpadBtn" Content="8" Command="{Binding AddDigitCommand}" CommandParameter="8"/>
+                        <Button Grid.Row="2" Grid.Column="2" Classes="NumpadBtn" Content="9" Command="{Binding AddDigitCommand}" CommandParameter="9"/>
+
+                        <Button Grid.Row="3" Grid.Column="0" Classes="NumpadBtn" Content="." Command="{Binding AddDigitCommand}" CommandParameter="."/>
+                        <Button Grid.Row="3" Grid.Column="1" Classes="NumpadBtn" Content="0" Command="{Binding AddDigitCommand}" CommandParameter="0"/>
+                        <Button Grid.Row="3" Grid.Column="2" Classes="BackspaceBtn" Command="{Binding BackspaceCommand}">
+                            <material:MaterialIcon Kind="Backspace" Width="24" Height="24" Foreground="{StaticResource Red500Brush}"/>
+                        </Button>
+                    </Grid>
+
+                    <Grid Grid.Row="2" ColumnDefinitions="*, *" Height="60">
+                         <Grid.Styles>
+                            <Style Selector="Button.ResetBtn">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="BorderThickness" Value="2"/>
+                                <Setter Property="CornerRadius" Value="12"/>
+                                <Setter Property="FontSize" Value="16"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
+                            </Style>
+                            <Style Selector="Button.ResetBtn:pointerover /template/ ContentPresenter">
+                                <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+                            </Style>
+                        </Grid.Styles>
+                        <Button Grid.Column="0" Classes="ResetBtn" Content="Сброс" Command="{Binding ResetCommand}"/>
+                        <Button Grid.Column="1" Classes="PrimaryButton" Content="Всё сразу" Command="{Binding AllAtOnceCommand}" Margin="6,0,0,0"/>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
