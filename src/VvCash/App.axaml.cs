@@ -36,7 +36,8 @@ public partial class App : Application
 
             loginVm.SettingsRequested += (s, e) =>
             {
-                var settingsVm = new SettingsViewModel(loginVm);
+                var settingsService = Services.GetRequiredService<ISettingsService>();
+                var settingsVm = new SettingsViewModel(loginVm, settingsService);
                 settingsVm.NavigationRequest = mainVm.NavigateTo;
                 mainVm.NavigateTo(settingsVm);
             };
@@ -78,6 +79,7 @@ public partial class App : Application
     private void ConfigureServices(IServiceCollection services)
     {
         // Core Services
+        services.AddSingleton<ISettingsService, SettingsService>();
         services.AddHttpClient();
         services.AddSingleton<IAuthService, AuthService>();
 
@@ -92,8 +94,6 @@ public partial class App : Application
 
         // ViewModels
         services.AddTransient<LoginViewModel>();
-        // SettingsViewModel is created dynamically currently since it requires a previous view model
-        // services.AddTransient<SettingsViewModel>();
         services.AddTransient<PosViewModel>();
         services.AddTransient<CustomerDisplayViewModel>();
         services.AddSingleton<MainViewModel>();

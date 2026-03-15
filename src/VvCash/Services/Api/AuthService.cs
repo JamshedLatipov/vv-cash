@@ -9,18 +9,35 @@ namespace VvCash.Services.Api;
 public class AuthService : IAuthService
 {
     private readonly HttpClient _httpClient;
+    private readonly ISettingsService _settingsService;
 
-    public AuthService(HttpClient httpClient)
+    public AuthService(HttpClient httpClient, ISettingsService settingsService)
     {
         _httpClient = httpClient;
+        _settingsService = settingsService;
     }
 
     public async Task<bool> LoginAsync(string email, string password)
     {
         try
         {
+            var baseUrl = _settingsService.BackendUrl;
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                // Fallback or handle error. According to user request we take it from settings.
+                // Assuming settings must be configured before login.
+                return false;
+            }
+
+            // Ensure trailing slash for proper relative path combination, or format correctly
+            if (!baseUrl.EndsWith("/"))
+            {
+                baseUrl += "/";
+            }
+
             var request = new { email, password };
-            var response = await _httpClient.PostAsJsonAsync("http://market.proffi.io/authorization/login/", request);
+            var loginUrl = $"{baseUrl}authorization/login/";
+            var response = await _httpClient.PostAsJsonAsync(loginUrl, request);
 
             if (response.IsSuccessStatusCode)
             {
