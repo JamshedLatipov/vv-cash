@@ -24,6 +24,14 @@ public partial class App : Application
             var loginVm = new LoginViewModel();
             var mainVm = new MainViewModel(loginVm);
 
+
+            loginVm.SettingsRequested += (s, e) =>
+            {
+                var settingsVm = new SettingsViewModel(loginVm);
+                settingsVm.NavigationRequest = mainVm.NavigateTo;
+                mainVm.NavigateTo(settingsVm);
+            };
+
             loginVm.LoginSuccessful += (s, e) =>
             {
                 var productService = new MockProductService();

@@ -60,10 +60,22 @@
         <Style Selector="Button.LoginButton:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#0d8fa6"/> <!-- A bit darker than PrimaryBrush (#11b4d4) -->
         </Style>
+
+        <Style Selector="Button.SettingsButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate400Brush}"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="12"/>
+        </Style>
+        <Style Selector="Button.SettingsButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource Slate200Brush}"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate600Brush}"/>
+        </Style>
     </UserControl.Styles>
 
     <Grid ColumnDefinitions="*, *" Background="{StaticResource Slate50Brush}">
         <!-- Left Side: Branding/Info -->
+
         <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="48">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
                 <material:MaterialIcon Kind="PackageVariant" Width="120" Height="120" Foreground="White" />
@@ -73,8 +85,14 @@
         </Border>
 
         <!-- Right Side: PIN Entry -->
-        <Border Grid.Column="1" Padding="48" VerticalAlignment="Center">
-            <StackPanel MaxWidth="400" Spacing="16">
+        <Border Grid.Column="1" Padding="48">
+            <Grid>
+                <!-- Settings Button -->
+                <Button Classes="SettingsButton" VerticalAlignment="Top" HorizontalAlignment="Right" Command="{Binding OpenSettingsCommand}">
+                    <material:MaterialIcon Kind="Cog" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}" />
+                </Button>
+
+                <StackPanel MaxWidth="400" Spacing="16" VerticalAlignment="Center">
                 <TextBlock Text="Enter PIN" FontSize="32" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
 
                 <!-- PIN Display -->
@@ -115,6 +133,7 @@
                 <!-- Login Button -->
                 <Button Classes="LoginButton" Content="Login" Command="{Binding LoginCommand}" Height="72"/>
             </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

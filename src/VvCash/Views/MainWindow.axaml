@@ -18,6 +18,9 @@
             <DataTemplate DataType="{x:Type vm:MixedPaymentViewModel}">
             <views:MixedPaymentView />
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+            <views:SettingsView />
+        </DataTemplate>
     </Window.DataTemplates>
 
     <TransitioningContentControl Content="{Binding CurrentViewModel}" />
