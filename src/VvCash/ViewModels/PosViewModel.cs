@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
 using VvCash.Services;
+using VvCash.Services.Api;
 using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
@@ -13,6 +14,7 @@ namespace VvCash.ViewModels;
 public partial class PosViewModel : ViewModelBase
 {
     private readonly IProductService _productService;
+    private readonly ICategoryService _categoryService;
     private readonly ICartService _cartService;
     private readonly IDiscountService _discountService;
     private readonly IPrinterService _printerService;
@@ -21,8 +23,10 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
     [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
-    [ObservableProperty] private ObservableCollection<string> _categories = new();
-    [ObservableProperty] private string _selectedCategory = "All";
+    [ObservableProperty] private ObservableCollection<Category> _allCategories = new();
+    [ObservableProperty] private ObservableCollection<Category> _quickCategories = new();
+    [ObservableProperty] private Category? _selectedCategory;
+    [ObservableProperty] private bool _isViewingCategories = true;
     [ObservableProperty] private string _couponCode = string.Empty;
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
@@ -39,12 +43,14 @@ public partial class PosViewModel : ViewModelBase
 
     public PosViewModel(
         IProductService productService,
+        ICategoryService categoryService,
         ICartService cartService,
         IDiscountService discountService,
         IPrinterService printerService,
         ICustomerDisplayService customerDisplayService)
     {
         _productService = productService;
+        _categoryService = categoryService;
         _cartService = cartService;
         _discountService = discountService;
         _printerService = printerService;
@@ -58,15 +64,19 @@ public partial class PosViewModel : ViewModelBase
 
     private async Task InitializeAsync()
     {
-        var cats = await _productService.GetCategoriesAsync();
-        Categories = new ObservableCollection<string>(cats);
-        await LoadProductsAsync("All");
+        var allCats = await _categoryService.GetCategoriesAsync();
+        var quickCats = await _categoryService.GetQuickAccessCategoriesAsync();
+        AllCategories = new ObservableCollection<Category>(allCats);
+        QuickCategories = new ObservableCollection<Category>(quickCats);
+        IsViewingCategories = true;
+        // Initial view is just all categories
+        Products.Clear();
     }
 
-    private async Task LoadProductsAsync(string category)
+    private async Task LoadProductsAsync(string? categoryId)
     {
         var products = string.IsNullOrWhiteSpace(SearchQuery)
-            ? await _productService.GetProductsByCategoryAsync(category)
+            ? await _productService.GetProductsByCategoryAsync(categoryId ?? "All")
             : await _productService.SearchProductsAsync(SearchQuery);
         Products = new ObservableCollection<Product>(products);
     }
@@ -77,7 +87,7 @@ public partial class PosViewModel : ViewModelBase
         {
             IsCatalogOpen = true;
         }
-        _ = LoadProductsAsync(SelectedCategory);
+        _ = LoadProductsAsync(SelectedCategory?.Id);
     }
 
     private void OnCartChanged(object? sender, EventArgs e)
@@ -116,16 +126,26 @@ public partial class PosViewModel : ViewModelBase
     private async Task SearchProducts()
     {
         IsCatalogOpen = true;
-        await LoadProductsAsync(SelectedCategory);
+        await LoadProductsAsync(SelectedCategory?.Id);
     }
 
     [RelayCommand]
-    private async Task SelectCategory(string category)
+    private async Task SelectCategory(Category? category)
     {
         SelectedCategory = category;
         SearchQuery = string.Empty;
         IsCatalogOpen = true;
-        await LoadProductsAsync(category);
+
+        if (category == null)
+        {
+            IsViewingCategories = true;
+            Products.Clear();
+        }
+        else
+        {
+            IsViewingCategories = false;
+            await LoadProductsAsync(category.Id);
+        }
     }
 
     [RelayCommand]

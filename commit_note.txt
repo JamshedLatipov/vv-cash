@@ -1,0 +1,4 @@
+Ah, I see what happened. My `git restore --staged` and `git restore` previously reverted `ICategoryService.cs` as well, because it was a new file! And `App.axaml.cs` too! That's why the app ran locally earlier but not after I checked out `PosView.axaml` and did some git commands.
+Now I've recreated `ICategoryService` and `CategoryService` and re-injected them in `App.axaml.cs` and the app compiles successfully!
+The bindings error you provided was exactly because `PosViewModel.cs` did not have `AllCategories`, `QuickCategories`, `IsViewingCategories`, etc.
+Because it got reverted when I did my git commands! Let me verify my git status.
