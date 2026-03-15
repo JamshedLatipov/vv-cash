@@ -8,6 +8,7 @@ public class SettingsData
 {
     public string BackendUrl { get; set; } = string.Empty;
     public string CashRegisterToken { get; set; } = string.Empty;
+    public string AuthToken { get; set; } = string.Empty;
 }
 
 public class SettingsService : ISettingsService
@@ -25,6 +26,12 @@ public class SettingsService : ISettingsService
     {
         get => _data.CashRegisterToken;
         set => _data.CashRegisterToken = value;
+    }
+
+    public string AuthToken
+    {
+        get => _data.AuthToken;
+        set => _data.AuthToken = value;
     }
 
     public SettingsService()

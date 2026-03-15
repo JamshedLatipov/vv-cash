@@ -5,6 +5,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using VvCash.Services;
+using System.Net.Http;
 using VvCash.Services.Api;
 using VvCash.Services.Hardware;
 using VvCash.ViewModels;
@@ -80,8 +81,11 @@ public partial class App : Application
     {
         // Core Services
         services.AddSingleton<ISettingsService, SettingsService>();
-        services.AddHttpClient();
+        services.AddTransient<AuthHeaderHandler>();
+        services.AddHttpClient("DefaultClient").AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("DefaultClient"));
         services.AddSingleton<IAuthService, AuthService>();
+
 
         // POS Services
         services.AddSingleton<IProductService, MockProductService>();
