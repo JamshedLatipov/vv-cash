@@ -1,0 +1,14 @@
+Let's see the plan:
+1. Create `ICategoryService.cs` in `Services/` (or `Services/Api/ICategoryService.cs`)
+2. Create `CategoryService.cs` in `Services/Api/` implementing `ICategoryService` with `HttpClient` and `ISettingsService`.
+3. The interface will have:
+   `Task<IEnumerable<Category>> GetAllCategoriesAsync();`
+   `Task<IEnumerable<Category>> GetShowOnCashCategoriesAsync();`
+4. Update `PosViewModel.cs`:
+   - Inject `ICategoryService categoryService`
+   - Use `_categoryService` to load `Categories` (All categories) and `QuickCategories` (Show on cash categories).
+   - In `InitializeAsync`, load both lists.
+   - For the UI:
+     - Re-map the `CategoryButton`s in the sidebar to `QuickCategories`.
+     - Where do we show ALL categories? The user says "есть категории которые нужно показывать в не в all categories а списком где у нас сейчас стоят несколько". This means the sidebar is for the "show-on-cash" ones. The "All Categories" is where the others should go. We don't have an "All categories" view right now. So we should probably add an "All Categories" button to the sidebar, and when clicked, it opens the catalog pane (SplitView.Pane) but instead of showing products, it shows the FULL list of categories as clickable cards! When a user clicks a category card, it loads the products for that category.
+     Wait, currently `Products` (an ObservableCollection<Product>) is displayed in the catalog. We can just add a separate `ItemsControl` for `Categories` in the catalog drawer, and toggle its visibility depending on whether we are viewing "Categories" or "Products".

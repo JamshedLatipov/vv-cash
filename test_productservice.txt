@@ -1,0 +1,12 @@
+Actually, the user only mentions updating the categories endpoints:
+"все категории нужно брать отсюда, так же у нас есть категории которые нужно показывать в не в all categories а списком где у нас сейчас стоят несколько
+вот отсюда http://market.proffi.io/swagger/index.html#/cashes/get_cashes_category_show_on_cash_"
+
+We could either update MockProductService to fetch categories from the API, or create `ApiProductService` and inject it in `App.axaml.cs`. Since `MockProductService` currently mocks products, maybe it's better to just implement a real `ApiProductService`? But products API might be different!
+Let's see if the user specifically asked to implement `ApiProductService` for categories ONLY, or all.
+The instruction says: "все категории нужно брать отсюда" -> "all categories need to be taken from here".
+If I just replace MockProductService with ApiProductService, I would have to implement all product methods too (`GetAllProductsAsync`, `GetProductsByCategoryAsync`, etc.). Does the user want that?
+Wait, if I just update `IProductService.cs` to use API for categories, I can implement it in a separate `ICategoryService` or just inside `MockProductService` as a mixed mocked/real? The standard way is to create an `ApiProductService` and implement the category methods, while leaving the product methods mocked or unimplemented, or implementing them if the endpoints exist. But we can also just create `ApiCategoryService` and add it.
+
+Let's modify `IProductService.cs` directly, add the category endpoints, or just add a new `ICategoryService.cs`. Since `PosViewModel` uses `_productService.GetCategoriesAsync()`, I can just add `GetQuickCategoriesAsync` to `IProductService`, and inside `MockProductService` change them to actually make HTTP requests (or add an `ApiProductService` class in `Services/Api/ProductService.cs` that takes `HttpClient` and makes the requests for categories, and returns empty lists for products for now? No, if we break products, the POS won't work).
+Actually, it's safer to add `CategoryService` to handle categories, and inject it into `PosViewModel`.

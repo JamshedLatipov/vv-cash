@@ -1,0 +1,57 @@
+Let's see the swagger response again to understand the `List` type.
+`/cashes/category/` returns `{"body": [Category], "item_per_page": int, "page_count": int, "total_items": int}` where `body` is actually an array of `Category`? Let's check `response.List`.
+```json
+{
+  "type": "object",
+  "properties": {
+    "body": {},
+    "item_per_page": {
+      "type": "integer"
+    },
+    "page_count": {
+      "type": "integer"
+    },
+    "total_items": {
+      "type": "integer"
+    }
+  }
+}
+```
+Yes, `body` is typically the array of items.
+
+I will write a `CategoryService` class in `src/VvCash/Services/Api/CategoryService.cs`:
+```csharp
+namespace VvCash.Services.Api;
+
+public class CategoryService : ICategoryService
+{
+    private readonly HttpClient _httpClient;
+    private readonly ISettingsService _settingsService;
+
+    public CategoryService(HttpClient httpClient, ISettingsService settingsService)
+    {
+        _httpClient = httpClient;
+        _settingsService = settingsService;
+    }
+
+    public async Task<IEnumerable<Category>> GetCategoriesAsync()
+    {
+        // call baseUrl + cashes/category/
+    }
+
+    public async Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync()
+    {
+        // call baseUrl + cashes/category/show-on-cash/
+    }
+}
+```
+
+Wait, `MockProductService` currently implements `GetCategoriesAsync()`. I should probably just extract `ICategoryService` and create both a Mock and Api version.
+Actually, if I just add it to `IProductService`, it's easier and I can add `ApiProductService` that just implements the category endpoints and throws NotImplemented for the rest? No, that's bad design.
+I should create `ICategoryService` and inject it.
+
+Let's do:
+1.  Create `src/VvCash/Services/ICategoryService.cs`
+2.  Create `src/VvCash/Services/MockCategoryService.cs`
+3.  Create `src/VvCash/Services/Api/CategoryService.cs`
+4.  In `App.axaml.cs`, register `ICategoryService` as `CategoryService` if we want real API, but the existing code registers `MockProductService`. Wait, let's look at `App.axaml.cs`!

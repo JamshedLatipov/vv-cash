@@ -1,0 +1,31 @@
+So currently `SplitView.Pane` has an ItemsControl bound to `Products`.
+I need to update `PosView.axaml` and `PosViewModel.cs`:
+
+1.  **IProductService.cs / MockProductService.cs**:
+    Add `Task<IEnumerable<Category>> GetCategoriesAsync();` and `Task<IEnumerable<Category>> GetShowOnCashCategoriesAsync();` to `IProductService`. Remove the old `GetCategoriesAsync()` returning strings. Update `MockProductService` to return `Category` objects.
+    Wait, `MockProductService` already has `Task<IEnumerable<string>> GetCategoriesAsync()`. I'll replace it.
+
+2.  **Category Model**:
+    We already have `Models/Category.cs` with `Id` and `Name`. We should add `Code` and `ShowOnCash` if they are useful, but `Id` and `Name` is fine. Add `ImagePath` and `Icon` maybe? We can mock an icon. Wait, the `swagger.json` says `Category` has `id`, `name`, `code`, `image`, `parent`, `show_on_cash`.
+
+3.  **CategoryService.cs**:
+    I'll create `CategoryService` implementing `ICategoryService` in `Services/Api/CategoryService.cs`. Wait, does it make sense to just implement it in `ApiProductService` or just a dedicated `CategoryService`? I will create `ICategoryService` and `CategoryService`.
+
+4.  **App.axaml.cs**:
+    Register `ICategoryService` mapped to `CategoryService`. But for tests/design time it might need `MockCategoryService`. Let's just create `ICategoryService` and register it.
+
+5.  **PosViewModel.cs**:
+    Inject `ICategoryService`.
+    Add `ObservableCollection<Category> AllCategories` and `ObservableCollection<Category> QuickCategories`.
+    Add `Category? SelectedCategoryObject`. Keep `SelectedCategory` as a string for UI binding maybe, or just use `SelectedCategoryObject`. Let's change `SelectedCategory` to be of type `Category`. Or keep `string SelectedCategoryName` for the Header. Let's make `SelectedCategory` an `object` or just a string ID, or just `Category?`. Wait, `SelectedCategory` is currently `string` ("All", "Clothing", etc.). We can just use a `Category` object. Let's make it `Category? SelectedCategory`.
+
+6.  **PosView.axaml**:
+    In the Sidebar (`<!-- Sidebar -->`), replace the hardcoded `Button` elements with an `ItemsControl` bound to `QuickCategories`.
+    Add a static "ALL CATEGORIES" button at the top of the Sidebar.
+    When "ALL CATEGORIES" is clicked, it sets a state `IsViewingCategories = true`.
+    The `SplitView.Pane` will show `ItemsControl` for `AllCategories` when `IsViewingCategories` is true, otherwise it shows `ItemsControl` for `Products`.
+
+7.  **SelectCategoryCommand**:
+    Takes a `Category`. Sets `SelectedCategory = category`.
+    If `category == null` (meaning "All Categories"), `IsViewingCategories = true`.
+    Otherwise `IsViewingCategories = false` and we fetch products for the category and open the catalog.
