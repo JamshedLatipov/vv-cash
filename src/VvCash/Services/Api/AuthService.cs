@@ -64,7 +64,7 @@ public class AuthService : IAuthService
                 if (root.TryGetProperty("status", out var statusElement))
                 {
                     Console.WriteLine($"[AuthService] Found 'status' property in response: {statusElement.GetInt32()}");
-                    if (statusElement.GetInt32() == 200)
+                    if (statusElement.GetInt32() == 0)
                     {
                         Console.WriteLine("[AuthService] Login successful.");
                         return true;
