@@ -16,6 +16,7 @@ public partial class LoginViewModel : ViewModelBase
     public string MaskedPin => new string('•', Pin.Length);
 
     public event EventHandler? LoginSuccessful;
+    public event EventHandler? OpenSettingsRequested;
 
     [RelayCommand]
     private void AddDigit(string digit)
@@ -55,5 +56,11 @@ public partial class LoginViewModel : ViewModelBase
 
         // Simulating login logic. Accept any PIN for this prototype.
         LoginSuccessful?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private void OpenSettings()
+    {
+        OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 }

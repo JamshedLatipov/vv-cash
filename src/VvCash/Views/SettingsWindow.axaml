@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:VvCash.ViewModels"
+        xmlns:material="using:Material.Icons.Avalonia"
+        x:Class="VvCash.Views.SettingsWindow"
+        Title="Settings"
+        Width="600" Height="400"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        Background="Transparent">
+
+    <Border Background="White" CornerRadius="16" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" ClipToBounds="True">
+        <Grid RowDefinitions="Auto, *, Auto">
+            <!-- Header -->
+            <Border Grid.Row="0" Background="{StaticResource PrimaryBrush}" Padding="24">
+                <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                    <material:MaterialIcon Kind="Cog" Width="32" Height="32" Foreground="White" />
+                    <TextBlock Text="Settings" FontSize="24" FontWeight="Bold" Foreground="White" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <!-- Content -->
+            <StackPanel Grid.Row="1" Spacing="24" Margin="32">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Backend URL" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}" />
+                    <TextBox Text="{Binding BackendUrl}" Watermark="https://api.example.com" Classes="IconTextBox" Padding="12" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Cash Register Token" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}" />
+                    <TextBox Text="{Binding CashToken}" Watermark="Enter Token" Classes="IconTextBox" Padding="12" PasswordChar="•" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Footer -->
+            <Border Grid.Row="2" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,1,0,0" Padding="24,16">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="16">
+                    <Button Content="Cancel" Classes="SecondaryButton" Command="{Binding CancelCommand}" Width="120" />
+                    <Button Content="Save" Classes="PrimaryButton" Command="{Binding SaveCommand}" Width="120" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
