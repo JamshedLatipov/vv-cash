@@ -90,7 +90,7 @@ public partial class App : Application
 
 
         // POS Services
-        services.AddSingleton<IProductService, MockProductService>();
+        services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<ICartService, CartService>();
         services.AddSingleton<IDiscountService, DiscountService>();
 

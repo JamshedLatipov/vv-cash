@@ -16,6 +16,23 @@ public partial class PosView : UserControl
         KeyDown += OnWindowKeyDown;
     }
 
+    private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            if (sender is TextBox textBox && !string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                var barcode = textBox.Text;
+                if (DataContext is PosViewModel vm)
+                {
+                    _ = vm.HandleBarcodeAsync(barcode);
+                    vm.SearchQuery = string.Empty;
+                }
+                e.Handled = true;
+            }
+        }
+    }
+
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         var now = DateTime.UtcNow;
