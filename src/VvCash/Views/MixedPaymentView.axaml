@@ -1,17 +1,17 @@
-<Window xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
         xmlns:converters="using:VvCash.Converters"
-        x:Class="VvCash.Views.MixedPaymentWindow"
+        x:Class="VvCash.Views.MixedPaymentView"
         x:Name="RootWindow"
-        Title="Mixed Payment"
-        Width="1024" Height="768"
+
+
         Background="{StaticResource BackgroundBrush}">
 
-    <Window.Resources>
+    <UserControl.Resources>
         <converters:StringEqualityToBoolConverter x:Key="StringEqualityToBoolConverter"/>
-    </Window.Resources>
+    </UserControl.Resources>
 
     <Grid RowDefinitions="Auto, *" Background="{StaticResource BackgroundBrush}">
         <!-- Header -->
@@ -227,4 +227,4 @@
             </Border>
         </Grid>
     </Grid>
-</Window>
+</UserControl>

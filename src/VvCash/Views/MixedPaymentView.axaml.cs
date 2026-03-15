@@ -5,9 +5,9 @@ using VvCash.ViewModels;
 
 namespace VvCash.Views;
 
-public partial class MixedPaymentWindow : Window
+public partial class MixedPaymentView : UserControl
 {
-    public MixedPaymentWindow()
+    public MixedPaymentView()
     {
         InitializeComponent();
 
