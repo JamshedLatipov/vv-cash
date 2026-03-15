@@ -60,16 +60,35 @@
         <Style Selector="Button.LoginButton:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#0d8fa6"/> <!-- A bit darker than PrimaryBrush (#11b4d4) -->
         </Style>
+
+        <Style Selector="Button.SettingsButton">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate400Brush}"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="12"/>
+        </Style>
+        <Style Selector="Button.SettingsButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1AFFFFFF"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
     </UserControl.Styles>
 
     <Grid ColumnDefinitions="*, *" Background="{StaticResource Slate50Brush}">
         <!-- Left Side: Branding/Info -->
+
         <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="48">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
+            <Grid>
+                <!-- Settings Button -->
+                <Button Classes="SettingsButton" VerticalAlignment="Top" HorizontalAlignment="Left" Command="{Binding OpenSettingsCommand}">
+                    <material:MaterialIcon Kind="Cog" Width="28" Height="28"/>
+                </Button>
+
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
                 <material:MaterialIcon Kind="PackageVariant" Width="120" Height="120" Foreground="White" />
                 <TextBlock Text="Luxe Threads POS" FontSize="48" FontWeight="Black" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
                 <TextBlock Text="Welcome back! Please enter your PIN to continue." FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
             </StackPanel>
+            </Grid>
         </Border>
 
         <!-- Right Side: PIN Entry -->
