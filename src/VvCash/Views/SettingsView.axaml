@@ -21,21 +21,22 @@
             <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Padding" Value="24,12"/>
-            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="Padding" Value="0,16"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
         </Style>
         <Style Selector="Button.SaveButton:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#0d8fa6"/>
         </Style>
 
         <Style Selector="TextBox.SettingsInput">
-            <Setter Property="Background" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Slate300Brush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="8"/>
-            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Padding" Value="16,12"/>
             <Setter Property="FontSize" Value="16"/>
             <Setter Property="Foreground" Value="{StaticResource Slate900Brush}"/>
             <Setter Property="Margin" Value="0,8,0,24"/>
@@ -43,42 +44,67 @@
         <Style Selector="TextBox.SettingsInput:focus /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
             <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="Background" Value="White"/>
         </Style>
     </UserControl.Styles>
 
     <Grid RowDefinitions="Auto, *">
-        <!-- Top Bar -->
-        <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="16">
+        <!-- Top Navigation Bar -->
+        <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="16,12">
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <Button Grid.Column="0" Classes="BackButton" Command="{Binding GoBackCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <material:MaterialIcon Kind="ArrowLeft" Width="24" Height="24"/>
-                        <TextBlock Text="Back" VerticalAlignment="Center" FontSize="16" FontWeight="Medium"/>
+                        <TextBlock Text="Back to Login" VerticalAlignment="Center" FontSize="16" FontWeight="SemiBold"/>
                     </StackPanel>
                 </Button>
-                <TextBlock Grid.Column="1" Text="Settings" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <!-- Central Title -->
+                <TextBlock Grid.Column="1" Text="System Configuration" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Grid>
         </Border>
 
-        <!-- Content -->
-        <ScrollViewer Grid.Row="1" Padding="32">
-            <StackPanel MaxWidth="600" HorizontalAlignment="Center" Spacing="0">
+        <!-- Main Content Area -->
+        <ScrollViewer Grid.Row="1" Padding="32,48">
+            <StackPanel MaxWidth="640" HorizontalAlignment="Center" Spacing="32">
 
-                <!-- Server Configuration Section -->
-                <Border Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="12" Padding="24" Margin="0,0,0,24">
+                <!-- Header Description -->
+                <StackPanel Spacing="8" HorizontalAlignment="Center">
+                    <material:MaterialIcon Kind="ServerNetwork" Width="64" Height="64" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="Connect to Cash Register Backend" FontSize="28" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" TextAlignment="Center"/>
+                    <TextBlock Text="Configure the API endpoint and authorization token to synchronize transactions." FontSize="16" Foreground="{StaticResource Slate500Brush}" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center" MaxWidth="500"/>
+                </StackPanel>
+
+                <!-- Configuration Card -->
+                <Border Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="32" BoxShadow="0 4 6 0 #0D000000, 0 2 4 0 #0A000000">
                     <StackPanel>
-                        <TextBlock Text="Server Configuration" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" Margin="0,0,0,16"/>
+                        <!-- Section Header -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,24">
+                            <material:MaterialIcon Kind="Api" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                            <TextBlock Text="API Settings" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center"/>
+                        </StackPanel>
 
-                        <TextBlock Text="Backend URL" FontSize="14" FontWeight="Medium" Foreground="{StaticResource Slate700Brush}"/>
-                        <TextBox Classes="SettingsInput" Text="{Binding BackendUrl, Mode=TwoWay}" Watermark="https://api.example.com"/>
+                        <!-- Backend URL Input -->
+                        <TextBlock Text="Backend URL" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                        <TextBox Classes="SettingsInput" Text="{Binding BackendUrl, Mode=TwoWay}" Watermark="https://api.vvcash.com/v1" />
 
-                        <TextBlock Text="Cash Register Token" FontSize="14" FontWeight="Medium" Foreground="{StaticResource Slate700Brush}"/>
-                        <TextBox Classes="SettingsInput" Text="{Binding CashRegisterToken, Mode=TwoWay}" Watermark="Enter token" PasswordChar="•"/>
+                        <!-- Token Input -->
+                        <TextBlock Text="Cash Register Authorization Token" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                        <TextBox Classes="SettingsInput" Text="{Binding CashRegisterToken, Mode=TwoWay}" Watermark="Enter secure token" PasswordChar="•" Margin="0,8,0,32"/>
+
+                        <!-- Save Action -->
+                        <Button Classes="SaveButton" Content="Save Configuration" Command="{Binding SaveCommand}">
+                            <Button.ContentTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                                        <material:MaterialIcon Kind="ContentSave" Width="24" Height="24"/>
+                                        <TextBlock Text="Save Configuration" VerticalAlignment="Center" FontSize="18"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </Button.ContentTemplate>
+                        </Button>
 
                     </StackPanel>
                 </Border>
-
-                <Button Classes="SaveButton" Content="Save Changes" Command="{Binding SaveCommand}"/>
 
             </StackPanel>
         </ScrollViewer>
