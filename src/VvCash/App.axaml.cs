@@ -3,7 +3,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Microsoft.Extensions.DependencyInjection;
 using VvCash.Services;
+using VvCash.Services.Api;
 using VvCash.Services.Hardware;
 using VvCash.ViewModels;
 using VvCash.Views;
@@ -12,6 +14,8 @@ namespace VvCash;
 
 public partial class App : Application
 {
+    public IServiceProvider? Services { get; private set; }
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -19,11 +23,16 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        var services = new ServiceCollection();
+        ConfigureServices(services);
+        Services = services.BuildServiceProvider();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var loginVm = new LoginViewModel();
-            var mainVm = new MainViewModel(loginVm);
+            var loginVm = Services.GetRequiredService<LoginViewModel>();
+            var mainVm = Services.GetRequiredService<MainViewModel>();
 
+            mainVm.CurrentViewModel = loginVm;
 
             loginVm.SettingsRequested += (s, e) =>
             {
@@ -34,20 +43,14 @@ public partial class App : Application
 
             loginVm.LoginSuccessful += (s, e) =>
             {
-                var productService = new MockProductService();
-                var cartService = new CartService();
-                var discountService = new DiscountService();
-                var printerService = new MockPrinterService();
-                var customerDisplayService = new MockCustomerDisplayService();
-
-                var posVm = new PosViewModel(productService, cartService, discountService, printerService, customerDisplayService);
+                var posVm = Services.GetRequiredService<PosViewModel>();
                 posVm.NavigationRequest = mainVm.NavigateTo;
 
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)
                 {
                     var secondScreen = screens[1];
-                    var customerVm = new CustomerDisplayViewModel();
+                    var customerVm = Services.GetRequiredService<CustomerDisplayViewModel>();
                     posVm.CustomerDisplayViewModel = customerVm;
                     posVm.NavigationRequest = mainVm.NavigateTo;
 
@@ -70,5 +73,29 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void ConfigureServices(IServiceCollection services)
+    {
+        // Core Services
+        services.AddHttpClient();
+        services.AddSingleton<IAuthService, AuthService>();
+
+        // POS Services
+        services.AddSingleton<IProductService, MockProductService>();
+        services.AddSingleton<ICartService, CartService>();
+        services.AddSingleton<IDiscountService, DiscountService>();
+
+        // Hardware Services
+        services.AddSingleton<IPrinterService, MockPrinterService>();
+        services.AddSingleton<ICustomerDisplayService, MockCustomerDisplayService>();
+
+        // ViewModels
+        services.AddTransient<LoginViewModel>();
+        // SettingsViewModel is created dynamically currently since it requires a previous view model
+        // services.AddTransient<SettingsViewModel>();
+        services.AddTransient<PosViewModel>();
+        services.AddTransient<CustomerDisplayViewModel>();
+        services.AddSingleton<MainViewModel>();
     }
 }

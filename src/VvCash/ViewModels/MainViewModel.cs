@@ -6,11 +6,10 @@ namespace VvCash.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     [ObservableProperty]
-    private ViewModelBase _currentViewModel;
+    private ViewModelBase? _currentViewModel;
 
-    public MainViewModel(ViewModelBase initialViewModel)
+    public MainViewModel()
     {
-        _currentViewModel = initialViewModel;
     }
 
     public void NavigateTo(ViewModelBase viewModel)
