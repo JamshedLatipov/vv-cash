@@ -220,18 +220,33 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task Pay()
     {
         if (!CartItems.Any()) return;
-        await _printerService.PrintReceiptAsync(
-            _cartService.Items,
-            Subtotal, Tax, TotalDiscount, TotalAmount,
-            _cartService.AppliedCoupons);
-        _cartService.ClearCart();
-        StatusMessage = "Payment processed. Thank you!";
-        if (CustomerDisplayViewModel != null)
+
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
-            CustomerDisplayViewModel.IsIdle = true;
-            CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.MixedPaymentWindow();
+                dialog.DataContext = new MixedPaymentViewModel(dialog, TotalAmount);
+                var result = await dialog.ShowDialog<bool>(mainWindow);
+
+                if (result)
+                {
+                    await _printerService.PrintReceiptAsync(
+                        _cartService.Items,
+                        Subtotal, Tax, TotalDiscount, TotalAmount,
+                        _cartService.AppliedCoupons);
+                    _cartService.ClearCart();
+                    StatusMessage = "Payment processed. Thank you!";
+                    if (CustomerDisplayViewModel != null)
+                    {
+                        CustomerDisplayViewModel.IsIdle = true;
+                        CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
+                    }
+                    _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
+                }
+            }
         }
-        _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
     }
 
     public async Task HandleBarcodeAsync(string barcode)

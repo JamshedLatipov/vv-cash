@@ -40,27 +40,31 @@ public partial class MixedPaymentViewModel : ViewModelBase
     // Quick input text representation (shown above numpad)
     public string QuickInputText => _currentInputBuffer;
 
-    public MixedPaymentViewModel(decimal totalAmount)
+    private readonly Avalonia.Controls.Window _window;
+
+    public MixedPaymentViewModel(Avalonia.Controls.Window window, decimal totalAmount)
     {
         TotalAmount = totalAmount;
+        _window = window;
     }
 
     [RelayCommand]
+
     private void Close()
     {
-        // Implementation for closing the payment modal/window
+        _window.Close(false);
     }
 
     [RelayCommand]
     private void Back()
     {
-        // Implementation for going back to the previous screen
+        _window.Close(false);
     }
 
     [RelayCommand]
     private void ConfirmPayment()
     {
-        // Implementation for confirming the mixed payment transaction
+        _window.Close(true);
     }
 
     partial void OnSelectedMethodChanged(string value)
