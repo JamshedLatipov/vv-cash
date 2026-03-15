@@ -19,6 +19,7 @@ public partial class PosViewModel : ViewModelBase
     private readonly IDiscountService _discountService;
     private readonly IPrinterService _printerService;
     private readonly ICustomerDisplayService _customerDisplayService;
+    private readonly IShiftService _shiftService;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -38,9 +39,48 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isPrinterReady = true;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private bool _isCatalogOpen = false;
+    [ObservableProperty] private bool _isShiftOpen = false;
+    [ObservableProperty] private bool _isShiftModalVisible = false;
+    [ObservableProperty] private bool _isLoadingShift = false;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
+
+    [RelayCommand]
+    private async Task OpenShiftAsync()
+    {
+        IsLoadingShift = true;
+        bool success = await _shiftService.OpenShiftAsync();
+        IsLoadingShift = false;
+        if (success)
+        {
+            IsShiftOpen = true;
+            IsShiftModalVisible = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CloseShiftAsync()
+    {
+        IsLoadingShift = true;
+        bool success = await _shiftService.CloseShiftAsync();
+        IsLoadingShift = false;
+        if (success)
+        {
+            IsShiftOpen = false;
+            IsShiftModalVisible = true;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseApplication()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.MainWindow?.Close();
+        }
+    }
+
 
     public PosViewModel(
         IProductService productService,
@@ -48,7 +88,8 @@ public partial class PosViewModel : ViewModelBase
         ICartService cartService,
         IDiscountService discountService,
         IPrinterService printerService,
-        ICustomerDisplayService customerDisplayService)
+        ICustomerDisplayService customerDisplayService,
+        IShiftService shiftService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -56,6 +97,7 @@ public partial class PosViewModel : ViewModelBase
         _discountService = discountService;
         _printerService = printerService;
         _customerDisplayService = customerDisplayService;
+        _shiftService = shiftService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -70,6 +112,10 @@ public partial class PosViewModel : ViewModelBase
         AllCategories = new ObservableCollection<Category>(allCats);
         QuickCategories = new ObservableCollection<Category>(quickCats);
         IsViewingCategories = true;
+
+        IsShiftOpen = await _shiftService.GetShiftStateAsync();
+        IsShiftModalVisible = !IsShiftOpen;
+
         // Initial view is just all categories
         Products.Clear();
     }

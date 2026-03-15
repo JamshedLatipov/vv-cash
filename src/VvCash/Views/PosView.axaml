@@ -39,6 +39,12 @@
                     <Button Classes="NavButton" Content="Inventory" Margin="0,0,16,0" FontSize="14"/>
                     <Button Classes="NavButton" Content="Customers" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>
 
+                    <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding CloseShiftCommand}" ToolTip.Tip="Close Shift">
+                        <material:MaterialIcon Kind="CloseBoxOutline" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                    </Button>
+                    <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding CloseApplicationCommand}" ToolTip.Tip="Exit">
+                        <material:MaterialIcon Kind="Power" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                    </Button>
                     <Button Classes="IconButton" Margin="0,0,8,0">
                         <material:MaterialIcon Kind="History" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                     </Button>
@@ -370,6 +376,57 @@
                 <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{StaticResource Slate400Brush}" FontSize="10" Margin="0,0,24,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="2" Text="V 2.4.0 • TERMINAL ID: LXP-09921" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
             </Grid>
+        </Border>
+
+        <!-- Start Shift Modal Overlay -->
+        <Border Grid.RowSpan="3"
+                Background="#80000000"
+                IsVisible="{Binding IsShiftModalVisible}"
+                ZIndex="1000">
+            <Border Background="{StaticResource BackgroundBrush}"
+                    CornerRadius="16"
+                    Padding="32"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="400">
+                <StackPanel Spacing="24">
+                    <material:MaterialIcon Kind="CashRegister" Width="64" Height="64" Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+
+                    <TextBlock Text="Start Shift"
+                             FontSize="24"
+                             FontWeight="Bold"
+                             Foreground="{StaticResource Slate900Brush}"
+                             HorizontalAlignment="Center"/>
+
+                    <TextBlock Text="Please start your shift to begin accepting orders."
+                             FontSize="14"
+                             Foreground="{StaticResource Slate600Brush}"
+                             TextWrapping="Wrap"
+                             TextAlignment="Center"/>
+
+                    <Button Classes="PrimaryButton"
+                            Content="START SHIFT"
+                            Command="{Binding OpenShiftCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Height="48"
+                            FontSize="16"
+                            FontWeight="Bold">
+                        <Button.IsEnabled>
+                            <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                                <Binding Path="!IsLoadingShift"/>
+                            </MultiBinding>
+                        </Button.IsEnabled>
+                    </Button>
+
+                    <Button Classes="OutlineButton"
+                            Content="EXIT APPLICATION"
+                            Command="{Binding CloseApplicationCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Height="48"/>
+                </StackPanel>
+            </Border>
         </Border>
     </Grid>
 </UserControl>
