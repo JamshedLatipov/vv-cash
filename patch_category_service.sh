@@ -1,3 +1,4 @@
+cat << 'INNER_EOF' > src/VvCash/Services/Api/CategoryService.cs
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -96,3 +97,4 @@ public class CategoryService : ICategoryService
         return FetchPaginatedAsync("cashes/category/show-on-cash");
     }
 }
+INNER_EOF
