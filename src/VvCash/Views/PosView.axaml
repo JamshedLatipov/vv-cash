@@ -40,7 +40,7 @@
                     <Button Classes="NavButton" Content="Customers" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>
 
                     <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding CloseShiftCommand}" ToolTip.Tip="Close Shift">
-                        <material:MaterialIcon Kind="CloseBoxOutline" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                        <material:MaterialIcon Kind="CloseBoxOutline" Width="24" Height="24" Foreground="{Binding IsShiftOpen, Converter={StaticResource BoolToColorConverter}}"/>
                     </Button>
                     <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding CloseApplicationCommand}" ToolTip.Tip="Exit">
                         <material:MaterialIcon Kind="Power" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
