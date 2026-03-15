@@ -43,11 +43,12 @@ public class ShiftService : IShiftService
 
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
-            if (response.IsSuccessStatusCode)
+            var responseContent = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"[ShiftService] Response content: {responseContent}");
+            Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
+
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.BadRequest)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"[ShiftService] Response content: {responseContent}");
-                Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
                 using var jsonDoc = JsonDocument.Parse(responseContent);
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
@@ -78,11 +79,12 @@ public class ShiftService : IShiftService
 
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
-            if (response.IsSuccessStatusCode)
+            var responseContent = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"[ShiftService] Response content: {responseContent}");
+            Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
+
+            if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.BadRequest)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"[ShiftService] Response content: {responseContent}");
-                Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
                 using var jsonDoc = JsonDocument.Parse(responseContent);
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
