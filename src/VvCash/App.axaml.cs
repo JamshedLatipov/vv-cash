@@ -86,6 +86,7 @@ public partial class App : Application
         services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("DefaultClient"));
         services.AddSingleton<IAuthService, AuthService>();
         services.AddHttpClient<ICategoryService, CategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<IShiftService, ShiftService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
 
         // POS Services

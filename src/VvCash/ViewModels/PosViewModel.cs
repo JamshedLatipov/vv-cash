@@ -19,6 +19,7 @@ public partial class PosViewModel : ViewModelBase
     private readonly IDiscountService _discountService;
     private readonly IPrinterService _printerService;
     private readonly ICustomerDisplayService _customerDisplayService;
+    private readonly IShiftService _shiftService;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -38,9 +39,56 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isPrinterReady = true;
     [ObservableProperty] private string _statusMessage = string.Empty;
     [ObservableProperty] private bool _isCatalogOpen = false;
+    [ObservableProperty] private bool _isShiftOpen = false;
+    [ObservableProperty] private bool _isShiftModalVisible = false;
+    [ObservableProperty] private bool _isLoadingShift = false;
+    [ObservableProperty] private string? _currentShiftId;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
+
+    [RelayCommand]
+    private async Task OpenShiftAsync()
+    {
+        Console.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
+        IsLoadingShift = true;
+        CurrentShiftId = await _shiftService.OpenShiftAsync();
+        IsLoadingShift = false;
+        if (!string.IsNullOrEmpty(CurrentShiftId))
+        {
+            IsShiftOpen = true;
+            IsShiftModalVisible = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CloseShiftAsync()
+    {
+        Console.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
+        if (string.IsNullOrEmpty(CurrentShiftId)) return;
+
+        IsLoadingShift = true;
+        bool success = await _shiftService.CloseShiftAsync(CurrentShiftId);
+        IsLoadingShift = false;
+        if (success)
+        {
+            CurrentShiftId = null;
+            IsShiftOpen = false;
+            IsShiftModalVisible = true;
+        }
+    }
+
+    [RelayCommand]
+    private void CloseApplication()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.MainWindow?.Close();
+        }
+    }
+
 
     public PosViewModel(
         IProductService productService,
@@ -48,7 +96,8 @@ public partial class PosViewModel : ViewModelBase
         ICartService cartService,
         IDiscountService discountService,
         IPrinterService printerService,
-        ICustomerDisplayService customerDisplayService)
+        ICustomerDisplayService customerDisplayService,
+        IShiftService shiftService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -56,6 +105,7 @@ public partial class PosViewModel : ViewModelBase
         _discountService = discountService;
         _printerService = printerService;
         _customerDisplayService = customerDisplayService;
+        _shiftService = shiftService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -70,6 +120,15 @@ public partial class PosViewModel : ViewModelBase
         AllCategories = new ObservableCollection<Category>(allCats);
         QuickCategories = new ObservableCollection<Category>(quickCats);
         IsViewingCategories = true;
+
+        Console.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
+        CurrentShiftId = await _shiftService.GetShiftStateAsync();
+        IsShiftOpen = !string.IsNullOrEmpty(CurrentShiftId);
+        Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
+        System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
+        IsShiftModalVisible = !IsShiftOpen;
+
         // Initial view is just all categories
         Products.Clear();
     }
