@@ -10,7 +10,7 @@ using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
 
-public partial class MainWindowViewModel : ViewModelBase
+public partial class PosViewModel : ViewModelBase
 {
     private readonly IProductService _productService;
     private readonly ICartService _cartService;
@@ -36,7 +36,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
 
-    public MainWindowViewModel(
+    public PosViewModel(
         IProductService productService,
         ICartService cartService,
         IDiscountService discountService,
