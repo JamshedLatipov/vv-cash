@@ -54,36 +54,26 @@
             <!-- Sidebar -->
             <Border Grid.Column="0" Background="Transparent" Width="80" Margin="0,0,24,0" VerticalAlignment="Top" ZIndex="2">
                 <StackPanel Spacing="16">
-                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='All'}" Command="{Binding SelectCategoryCommand}" CommandParameter="All">
+                    <Button Classes="CategoryButton" Classes.Active="{Binding IsViewingCategories}" Command="{Binding SelectCategoryCommand}">
                         <StackPanel HorizontalAlignment="Center" Spacing="4">
                             <material:MaterialIcon Kind="ViewGrid" Width="24" Height="24" />
                             <TextBlock Text="ALL" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
                         </StackPanel>
                     </Button>
-                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Clothing'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Clothing">
-                        <StackPanel HorizontalAlignment="Center" Spacing="4">
-                            <material:MaterialIcon Kind="TshirtCrew" Width="24" Height="24" />
-                            <TextBlock Text="CLOTHING" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Shoes'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Shoes">
-                        <StackPanel HorizontalAlignment="Center" Spacing="4">
-                            <material:MaterialIcon Kind="ShoeSneaker" Width="24" Height="24" />
-                            <TextBlock Text="SHOES" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Accessories'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Accessories">
-                        <StackPanel HorizontalAlignment="Center" Spacing="4">
-                            <material:MaterialIcon Kind="Watch" Width="24" Height="24" />
-                            <TextBlock Text="ACCS" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
-                        </StackPanel>
-                    </Button>
-                    <Button Classes="CategoryButton" Classes.Active="{Binding SelectedCategory, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Sale'}" Command="{Binding SelectCategoryCommand}" CommandParameter="Sale" Foreground="{StaticResource Red500Brush}">
-                        <StackPanel HorizontalAlignment="Center" Spacing="4">
-                            <material:MaterialIcon Kind="Tag" Width="24" Height="24" />
-                            <TextBlock Text="SALE" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1"/>
-                        </StackPanel>
-                    </Button>
+                    <ItemsControl ItemsSource="{Binding QuickCategories}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:Category">
+                                <Button Classes="CategoryButton"
+                                        Command="{Binding DataContext.SelectCategoryCommand, ElementName=RootWindow}"
+                                        CommandParameter="{Binding}">
+                                    <StackPanel HorizontalAlignment="Center" Spacing="4">
+                                        <material:MaterialIcon Kind="FolderOutline" Width="24" Height="24" />
+                                        <TextBlock Text="{Binding Name}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1" TextWrapping="Wrap" TextAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
             </Border>
 
@@ -93,14 +83,38 @@
                     <Border Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,1,0" Padding="0,0,24,0">
                         <Grid RowDefinitions="Auto, *">
                             <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
-                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategory, StringFormat='{}Catalog - {0}'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategory.Name, StringFormat='{}Catalog - {0}', TargetNullValue='All Categories'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Classes="IconButton" Command="{Binding CloseCatalogCommand}" VerticalAlignment="Center">
                                     <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                                 </Button>
                             </Grid>
 
                             <ScrollViewer Grid.Row="1">
-                                <ItemsControl ItemsSource="{Binding Products}">
+                                <StackPanel Spacing="0">
+                                <ItemsControl ItemsSource="{Binding AllCategories}" IsVisible="{Binding IsViewingCategories}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="models:Category">
+                                            <Border Width="220" Height="100" Margin="0,0,16,16" Cursor="Hand" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Background="White" CornerRadius="8">
+                                                <Button Classes="Transparent"
+                                                        Command="{Binding DataContext.SelectCategoryCommand, ElementName=RootWindow}"
+                                                        CommandParameter="{Binding}"
+                                                        Padding="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+                                                        <material:MaterialIcon Kind="FolderOutline" Width="32" Height="32" Foreground="{StaticResource Slate500Brush}"/>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}" TextAlignment="Center" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                </Button>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <ItemsControl ItemsSource="{Binding Products}" IsVisible="{Binding !IsViewingCategories}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <WrapPanel/>
@@ -146,6 +160,7 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+                                </StackPanel>
                             </ScrollViewer>
                         </Grid>
                     </Border>
