@@ -29,7 +29,7 @@ public class ShiftService : IShiftService
         return baseUrl;
     }
 
-    public async Task<bool> OpenShiftAsync()
+    public async Task<string?> OpenShiftAsync()
     {
         Console.WriteLine("[ShiftService] OpenShiftAsync called.");
         Debug.WriteLine("[ShiftService] OpenShiftAsync called.");
@@ -53,28 +53,35 @@ public class ShiftService : IShiftService
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
                 {
-                    return true;
+                    if (root.TryGetProperty("body", out var bodyElement) && bodyElement.TryGetProperty("id", out var idElement))
+                    {
+                        return idElement.GetString();
+                    }
                 }
             }
-            return false;
+            return null;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[ShiftService] Error opening shift: {ex.Message}");
-            return false;
+            return null;
         }
     }
 
-    public async Task<bool> CloseShiftAsync()
+    public async Task<bool> CloseShiftAsync(string shiftId)
     {
-        Console.WriteLine("[ShiftService] CloseShiftAsync called.");
-        Debug.WriteLine("[ShiftService] CloseShiftAsync called.");
+        Console.WriteLine($"[ShiftService] CloseShiftAsync called with {shiftId}.");
+        Debug.WriteLine($"[ShiftService] CloseShiftAsync called with {shiftId}.");
         try
         {
             var url = $"{GetBaseUrl()}cashes/shift/close/";
             Console.WriteLine($"[ShiftService] POST to {url}");
             Debug.WriteLine($"[ShiftService] POST to {url}");
             var request = new HttpRequestMessage(HttpMethod.Post, url);
+
+            var payload = new { shift = shiftId };
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json");
+
             var response = await _httpClient.SendAsync(request);
 
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
@@ -101,7 +108,7 @@ public class ShiftService : IShiftService
         }
     }
 
-    public async Task<bool> GetShiftStateAsync()
+    public async Task<string?> GetShiftStateAsync()
     {
         Console.WriteLine("[ShiftService] GetShiftStateAsync called.");
         Debug.WriteLine("[ShiftService] GetShiftStateAsync called.");
@@ -126,20 +133,20 @@ public class ShiftService : IShiftService
                 {
                     if (root.TryGetProperty("body", out var bodyElement))
                     {
-                        if (bodyElement.ValueKind == JsonValueKind.Null) return false;
+                        if (bodyElement.ValueKind == JsonValueKind.Null) return null;
                         if (bodyElement.TryGetProperty("id", out var idElement))
                         {
-                            return !string.IsNullOrEmpty(idElement.GetString());
+                            return idElement.GetString();
                         }
                     }
                 }
             }
-            return false;
+            return null;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[ShiftService] Error getting shift state: {ex.Message}");
-            return false;
+            return null;
         }
     }
 }

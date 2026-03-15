@@ -42,6 +42,7 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isShiftOpen = false;
     [ObservableProperty] private bool _isShiftModalVisible = false;
     [ObservableProperty] private bool _isLoadingShift = false;
+    [ObservableProperty] private string? _currentShiftId;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -52,9 +53,9 @@ public partial class PosViewModel : ViewModelBase
         Console.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
         System.Diagnostics.Debug.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
         IsLoadingShift = true;
-        bool success = await _shiftService.OpenShiftAsync();
+        CurrentShiftId = await _shiftService.OpenShiftAsync();
         IsLoadingShift = false;
-        if (success)
+        if (!string.IsNullOrEmpty(CurrentShiftId))
         {
             IsShiftOpen = true;
             IsShiftModalVisible = false;
@@ -66,11 +67,14 @@ public partial class PosViewModel : ViewModelBase
     {
         Console.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
         System.Diagnostics.Debug.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
+        if (string.IsNullOrEmpty(CurrentShiftId)) return;
+
         IsLoadingShift = true;
-        bool success = await _shiftService.CloseShiftAsync();
+        bool success = await _shiftService.CloseShiftAsync(CurrentShiftId);
         IsLoadingShift = false;
         if (success)
         {
+            CurrentShiftId = null;
             IsShiftOpen = false;
             IsShiftModalVisible = true;
         }
@@ -119,9 +123,10 @@ public partial class PosViewModel : ViewModelBase
 
         Console.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
         System.Diagnostics.Debug.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
-        IsShiftOpen = await _shiftService.GetShiftStateAsync();
-        Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen}");
-        System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen}");
+        CurrentShiftId = await _shiftService.GetShiftStateAsync();
+        IsShiftOpen = !string.IsNullOrEmpty(CurrentShiftId);
+        Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
+        System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         IsShiftModalVisible = !IsShiftOpen;
 
         // Initial view is just all categories

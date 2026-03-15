@@ -4,7 +4,7 @@ namespace VvCash.Services.Api;
 
 public interface IShiftService
 {
-    Task<bool> OpenShiftAsync();
-    Task<bool> CloseShiftAsync();
-    Task<bool> GetShiftStateAsync();
+    Task<string?> OpenShiftAsync();
+    Task<bool> CloseShiftAsync(string shiftId);
+    Task<string?> GetShiftStateAsync();
 }
