@@ -88,7 +88,7 @@ public class CategoryService : ICategoryService
         // Request URL http://market.proffi.io/api/v1/products/category/?page=1
         // So I should probably use `products/category` for all categories, and `cashes/category/show-on-cash` for quick access.
         // Let's use what they pasted exactly!
-        return FetchPaginatedAsync("products/category");
+        return FetchPaginatedAsync("cashes/category");
     }
 
     public Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync()
