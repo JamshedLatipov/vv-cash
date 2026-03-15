@@ -12,4 +12,9 @@ public partial class MainViewModel : ViewModelBase
     {
         _currentViewModel = initialViewModel;
     }
+
+    public void NavigateTo(ViewModelBase viewModel)
+    {
+        CurrentViewModel = viewModel;
+    }
 }

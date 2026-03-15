@@ -35,6 +35,7 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isCatalogOpen = false;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
+    public Action<ViewModelBase>? NavigationRequest { get; set; }
 
     public PosViewModel(
         IProductService productService,
@@ -217,19 +218,14 @@ public partial class PosViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task Pay()
+    private void Pay()
     {
         if (!CartItems.Any()) return;
 
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        if (NavigationRequest != null)
         {
-            var mainWindow = desktop.MainWindow;
-            if (mainWindow != null)
+            var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result) =>
             {
-                var dialog = new VvCash.Views.MixedPaymentWindow();
-                dialog.DataContext = new MixedPaymentViewModel(dialog, TotalAmount);
-                var result = await dialog.ShowDialog<bool>(mainWindow);
-
                 if (result)
                 {
                     await _printerService.PrintReceiptAsync(
@@ -245,7 +241,12 @@ public partial class PosViewModel : ViewModelBase
                     }
                     _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
                 }
-            }
+
+                // Return to POS View
+                NavigationRequest(this);
+            });
+
+            NavigationRequest(mixedPaymentVm);
         }
     }
 

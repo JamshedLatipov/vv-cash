@@ -33,6 +33,7 @@ public partial class App : Application
                 var customerDisplayService = new MockCustomerDisplayService();
 
                 var posVm = new PosViewModel(productService, cartService, discountService, printerService, customerDisplayService);
+                posVm.NavigationRequest = mainVm.NavigateTo;
 
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)
@@ -40,6 +41,7 @@ public partial class App : Application
                     var secondScreen = screens[1];
                     var customerVm = new CustomerDisplayViewModel();
                     posVm.CustomerDisplayViewModel = customerVm;
+                    posVm.NavigationRequest = mainVm.NavigateTo;
 
                     var customerWindow = new CustomerDisplayWindow
                     {
