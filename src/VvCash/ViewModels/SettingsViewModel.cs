@@ -16,13 +16,11 @@ public partial class SettingsViewModel : ViewModelBase
 
     public SettingsViewModel()
     {
-        // We can load current settings here if any storage is added in future
     }
 
     [RelayCommand]
     private void Save()
     {
-        // Future: Save logic
         CloseRequested?.Invoke(this, EventArgs.Empty);
     }
 

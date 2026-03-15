@@ -1,14 +1,14 @@
-<Window xmlns="https://github.com/avaloniaui"
+<UserControl xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
-        x:Class="VvCash.Views.LoginWindow"
-        Title="Login"
-        Width="1024" Height="768"
-        WindowStartupLocation="CenterScreen"
+        x:Class="VvCash.Views.LoginView"
+
+
+
         Background="{StaticResource Slate50Brush}">
 
-    <Window.Styles>
+    <UserControl.Styles>
         <Style Selector="Button.NumpadButton">
             <Setter Property="Background" Value="White"/>
             <Setter Property="Foreground" Value="{StaticResource Slate800Brush}"/>
@@ -60,9 +60,16 @@
         <Style Selector="Button.LoginButton:pointerover /template/ ContentPresenter">
             <Setter Property="Background" Value="#0d8fa6"/> <!-- A bit darker than PrimaryBrush (#11b4d4) -->
         </Style>
-    </Window.Styles>
+    </UserControl.Styles>
 
     <Grid ColumnDefinitions="*, *" Background="{StaticResource Slate50Brush}">
+
+        <!-- Settings Button -->
+        <Button Grid.Column="1" Classes="IconButton" Command="{Binding OpenSettingsCommand}"
+                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="24" ZIndex="10">
+            <material:MaterialIcon Kind="Cog" Width="24" Height="24" Foreground="{StaticResource Slate600Brush}"/>
+        </Button>
+
         <!-- Left Side: Branding/Info -->
         <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="48">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
@@ -117,4 +124,4 @@
             </StackPanel>
         </Border>
     </Grid>
-</Window>
+</UserControl>

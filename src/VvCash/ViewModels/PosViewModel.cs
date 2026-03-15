@@ -10,7 +10,7 @@ using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
 
-public partial class MainWindowViewModel : ViewModelBase
+public partial class PosViewModel : ViewModelBase
 {
     private readonly IProductService _productService;
     private readonly ICartService _cartService;
@@ -35,8 +35,9 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty] private bool _isCatalogOpen = false;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
+    public Action<ViewModelBase>? NavigationRequest { get; set; }
 
-    public MainWindowViewModel(
+    public PosViewModel(
         IProductService productService,
         ICartService cartService,
         IDiscountService discountService,
@@ -217,19 +218,14 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task Pay()
+    private void Pay()
     {
         if (!CartItems.Any()) return;
 
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        if (NavigationRequest != null)
         {
-            var mainWindow = desktop.MainWindow;
-            if (mainWindow != null)
+            var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result) =>
             {
-                var dialog = new VvCash.Views.MixedPaymentWindow();
-                dialog.DataContext = new MixedPaymentViewModel(dialog, TotalAmount);
-                var result = await dialog.ShowDialog<bool>(mainWindow);
-
                 if (result)
                 {
                     await _printerService.PrintReceiptAsync(
@@ -245,7 +241,12 @@ public partial class MainWindowViewModel : ViewModelBase
                     }
                     _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
                 }
-            }
+
+                // Return to POS View
+                NavigationRequest(this);
+            });
+
+            NavigationRequest(mixedPaymentVm);
         }
     }
 
