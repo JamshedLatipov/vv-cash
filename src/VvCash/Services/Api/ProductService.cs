@@ -36,9 +36,132 @@ public class ProductService : IProductService
         return Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
     }
 
-    public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category)
+    public async Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category)
     {
-        return Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
+        var allProducts = new List<Product>();
+        try
+        {
+            var baseUrl = GetBaseUrl();
+            int currentPage = 1;
+            int totalPages = 1;
+
+            do
+            {
+                var url = $"{baseUrl}cashes/product/category/?category={Uri.EscapeDataString(category)}&page={currentPage}";
+                Console.WriteLine($"[ProductService] GET products by category to {url}");
+                Debug.WriteLine($"[ProductService] GET products by category to {url}");
+
+                var response = await _httpClient.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseContent = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine($"[ProductService] Category response content (page {currentPage}): {responseContent}");
+                    Debug.WriteLine($"[ProductService] Category response content (page {currentPage}): {responseContent}");
+
+                    using var jsonDoc = JsonDocument.Parse(responseContent);
+                    var root = jsonDoc.RootElement;
+
+                    if (root.TryGetProperty("page_count", out var pageCountElement) && pageCountElement.ValueKind == JsonValueKind.Number)
+                    {
+                        totalPages = pageCountElement.GetInt32();
+                    }
+                    else
+                    {
+                        totalPages = 1;
+                    }
+
+                    if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
+                    {
+                        if (root.TryGetProperty("body", out var bodyElement) && bodyElement.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in bodyElement.EnumerateArray())
+                            {
+                                try
+                                {
+                                    string productId = Guid.NewGuid().ToString();
+                                    string productName = string.Empty;
+                                    string productSku = string.Empty;
+                                    string productCategory = category;
+                                    decimal productPrice = 0m;
+                                    string barcode = string.Empty;
+
+                                    // Try nested structure first
+                                    if (item.TryGetProperty("product", out var productElem) && productElem.ValueKind == JsonValueKind.Object)
+                                    {
+                                        if (productElem.TryGetProperty("id", out var idElem))
+                                            productId = idElem.GetString() ?? productId;
+
+                                        if (productElem.TryGetProperty("name", out var nameElem))
+                                            productName = nameElem.GetString() ?? string.Empty;
+
+                                        if (productElem.TryGetProperty("article", out var articleElem))
+                                            productSku = articleElem.GetString() ?? string.Empty;
+
+                                        if (productElem.TryGetProperty("category", out var catElem) && catElem.ValueKind == JsonValueKind.Object)
+                                        {
+                                            if (catElem.TryGetProperty("name", out var catNameElem))
+                                                productCategory = catNameElem.GetString() ?? category;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Flat structure
+                                        if (item.TryGetProperty("id", out var idElem))
+                                            productId = idElem.GetString() ?? productId;
+
+                                        if (item.TryGetProperty("name", out var nameElem))
+                                            productName = nameElem.GetString() ?? string.Empty;
+
+                                        if (item.TryGetProperty("article", out var articleElem))
+                                            productSku = articleElem.GetString() ?? string.Empty;
+                                    }
+
+                                    // Extract price from body element or root product
+                                    if (item.TryGetProperty("sell_price", out var priceElem))
+                                    {
+                                        productPrice = priceElem.ValueKind == JsonValueKind.Number ? priceElem.GetDecimal() : 0m;
+                                    }
+                                    else if (item.TryGetProperty("price", out var pElem))
+                                    {
+                                        productPrice = pElem.ValueKind == JsonValueKind.Number ? pElem.GetDecimal() : 0m;
+                                    }
+
+                                    allProducts.Add(new Product
+                                    {
+                                        Id = productId,
+                                        Name = productName,
+                                        Sku = productSku,
+                                        Category = productCategory,
+                                        Price = productPrice,
+                                        Barcode = barcode
+                                    });
+                                }
+                                catch (Exception itemEx)
+                                {
+                                    Console.WriteLine($"[ProductService] Error parsing item in category: {itemEx.Message}");
+                                    Debug.WriteLine($"[ProductService] Error parsing item in category: {itemEx.Message}");
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[ProductService] Failed to get category products: {response.StatusCode}");
+                    Debug.WriteLine($"[ProductService] Failed to get category products: {response.StatusCode}");
+                    break;
+                }
+
+                currentPage++;
+            } while (currentPage <= totalPages);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ProductService] Error fetching products by category: {ex.Message}");
+            Debug.WriteLine($"[ProductService] Error fetching products by category: {ex.Message}");
+        }
+
+        return allProducts;
     }
 
     public Task<IEnumerable<Product>> SearchProductsAsync(string query)
