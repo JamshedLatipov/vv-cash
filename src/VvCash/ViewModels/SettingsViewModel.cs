@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
 using VvCash.Services;
+using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
 
@@ -14,13 +15,60 @@ public partial class PrinterConfigViewModel : ObservableObject
     private string _name = string.Empty;
 
     [ObservableProperty]
-    private PrinterConnectionType _connectionType;
-
-    [ObservableProperty]
     private string _connectionString = string.Empty;
 
     [ObservableProperty]
     private bool _isEnabled = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsLan))]
+    [NotifyPropertyChangedFor(nameof(IsUsbOrCom))]
+    [NotifyPropertyChangedFor(nameof(ConnectionLabel))]
+    private PrinterConnectionType _connectionType;
+
+    public ObservableCollection<string> AvailableConnections { get; } = new();
+
+    public bool IsLan => ConnectionType == PrinterConnectionType.LAN;
+    public bool IsUsbOrCom => ConnectionType == PrinterConnectionType.USB || ConnectionType == PrinterConnectionType.COM;
+
+    public string ConnectionLabel => ConnectionType switch
+    {
+        PrinterConnectionType.LAN => "IP Address / Port",
+        PrinterConnectionType.USB => "Select Printer",
+        PrinterConnectionType.COM => "Select Port",
+        _ => "Address"
+    };
+
+    partial void OnConnectionTypeChanged(PrinterConnectionType value)
+    {
+        UpdateAvailableConnections();
+    }
+
+    public void UpdateAvailableConnections()
+    {
+        AvailableConnections.Clear();
+        if (ConnectionType == PrinterConnectionType.USB)
+        {
+            var printers = PrinterDiscoveryService.GetUsbPrinters();
+            foreach (var printer in printers)
+                AvailableConnections.Add(printer);
+        }
+        else if (ConnectionType == PrinterConnectionType.COM)
+        {
+            var ports = PrinterDiscoveryService.GetComPorts();
+            foreach (var port in ports)
+                AvailableConnections.Add(port);
+        }
+
+        if (IsUsbOrCom && !AvailableConnections.Contains(ConnectionString) && AvailableConnections.Any())
+        {
+            ConnectionString = AvailableConnections.First();
+        }
+        else if (IsLan && string.IsNullOrWhiteSpace(ConnectionString))
+        {
+            ConnectionString = "192.168.1.100:9100";
+        }
+    }
 }
 
 public partial class SettingsViewModel : ViewModelBase
@@ -55,26 +103,30 @@ public partial class SettingsViewModel : ViewModelBase
 
         foreach (var printer in _settingsService.Printers)
         {
-            Printers.Add(new PrinterConfigViewModel
+            var vm = new PrinterConfigViewModel
             {
                 Name = printer.Name,
                 ConnectionType = printer.ConnectionType,
                 ConnectionString = printer.ConnectionString,
                 IsEnabled = printer.IsEnabled
-            });
+            };
+            vm.UpdateAvailableConnections();
+            Printers.Add(vm);
         }
     }
 
     [RelayCommand]
     private void AddPrinter()
     {
-        Printers.Add(new PrinterConfigViewModel
+        var vm = new PrinterConfigViewModel
         {
             Name = "New Printer",
             ConnectionType = PrinterConnectionType.LAN,
             ConnectionString = "192.168.1.100:9100",
             IsEnabled = true
-        });
+        };
+        vm.UpdateAvailableConnections();
+        Printers.Add(vm);
     }
 
     [RelayCommand]
