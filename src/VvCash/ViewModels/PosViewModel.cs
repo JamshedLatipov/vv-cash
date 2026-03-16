@@ -27,99 +27,82 @@ public partial class PosViewModel : ViewModelBase
     private readonly ISyncService _syncService;
     private readonly ISettingsService _settingsService;
     private readonly IExpenseDocumentService _expenseDocumentService;
-
-    public Action<ViewModelBase>? NavigationRequest { get; set; }
-
-    [ObservableProperty] private ObservableCollection<Product> _products = new();
-    [ObservableProperty] private ObservableCollection<Category> _allCategories = new();
-    [ObservableProperty] private ObservableCollection<Category> _quickCategories = new();
-    [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
-    [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
-
-    [ObservableProperty] private Category? _selectedCategory;
-    public string SelectedCategoryName => SelectedCategory?.Name ?? "All Categories";
+    private CancellationTokenSource? _syncCancellationTokenSource;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
-    [ObservableProperty] private string _couponCode = string.Empty;
+    [ObservableProperty] private ObservableCollection<Product> _products = new();
+    [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
+    [ObservableProperty] private ObservableCollection<Category> _allCategories = new();
+    [ObservableProperty] private ObservableCollection<Category> _quickCategories = new();
+    [ObservableProperty] private Category? _selectedCategory;
+    public string SelectedCategoryName => SelectedCategory?.Name ?? "All Categories";
+    [ObservableProperty] private bool _isViewingCategories = true;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUnsyncedDocuments))]
+    private int _unsyncedDocumentsCount;
+
+    public bool HasUnsyncedDocuments => UnsyncedDocumentsCount > 0;
+    [ObservableProperty] private string _couponCode = string.Empty;
+    [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
     [ObservableProperty] private decimal _tax;
     [ObservableProperty] private decimal _totalDiscount;
     [ObservableProperty] private decimal _totalAmount;
-
-    [ObservableProperty] private bool _isPrinterReady;
-    [ObservableProperty] private string _printerStatusText = "Initializing...";
-
-    [ObservableProperty] private CustomerDisplayViewModel? _customerDisplayViewModel;
-
-    [ObservableProperty] private bool _isShiftModalVisible;
-    [ObservableProperty] private bool _isAlertModalVisible;
-    [ObservableProperty] private string _alertMessage = string.Empty;
-    [ObservableProperty] private bool _isShiftOpen;
+    [ObservableProperty] private string _printerStatusText = "Printer Ready";
+    [ObservableProperty] private bool _isPrinterReady = true;
+    [ObservableProperty] private string _statusMessage = string.Empty;
+    [ObservableProperty] private bool _isCatalogOpen = false;
+    [ObservableProperty] private bool _isShiftOpen = false;
+    [ObservableProperty] private bool _isShiftModalVisible = false;
+    [ObservableProperty] private bool _isLoadingShift = false;
     [ObservableProperty] private string? _currentShiftId;
-    [ObservableProperty] private string _statusMessage = "Ready";
-    [ObservableProperty] private bool _isCatalogOpen;
-    [ObservableProperty] private bool _isViewingCategories = true;
+    [ObservableProperty] private bool _isAlertModalVisible = false;
+    [ObservableProperty] private string _alertMessage = string.Empty;
 
-    private CancellationTokenSource? _syncCancellationTokenSource;
-
-    [RelayCommand]
-    private void CloseShiftModal()
-    {
-        IsShiftModalVisible = false;
-    }
-
-    [RelayCommand]
-    private void CloseAlertModal()
-    {
-        IsAlertModalVisible = false;
-        AlertMessage = string.Empty;
-    }
+    public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
+    public Action<ViewModelBase>? NavigationRequest { get; set; }
 
     [RelayCommand]
     private async Task OpenShiftAsync()
     {
-        StatusMessage = "Opening shift...";
-        var shiftId = await _shiftService.OpenShiftAsync();
-        if (!string.IsNullOrEmpty(shiftId))
+        Console.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
+        IsLoadingShift = true;
+        CurrentShiftId = await _shiftService.OpenShiftAsync();
+        IsLoadingShift = false;
+        if (!string.IsNullOrEmpty(CurrentShiftId))
         {
-            CurrentShiftId = shiftId;
             IsShiftOpen = true;
             IsShiftModalVisible = false;
-            StatusMessage = "Shift opened successfully.";
-        }
-        else
-        {
-            StatusMessage = "Failed to open shift.";
         }
     }
 
     [RelayCommand]
     private async Task CloseShiftAsync()
     {
+        Console.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
         if (string.IsNullOrEmpty(CurrentShiftId)) return;
 
-        StatusMessage = "Closing shift...";
-        var success = await _shiftService.CloseShiftAsync(CurrentShiftId);
+        IsLoadingShift = true;
+        bool success = await _shiftService.CloseShiftAsync(CurrentShiftId);
+        IsLoadingShift = false;
         if (success)
         {
             CurrentShiftId = null;
             IsShiftOpen = false;
-            StatusMessage = "Shift closed successfully.";
-
-            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-            {
-                desktop.MainWindow?.Close();
-            }
-        }
-        else
-        {
-            StatusMessage = "Failed to close shift.";
+            IsShiftModalVisible = true;
         }
     }
 
     [RelayCommand]
-    private void QuitApplication()
+    private void CloseAlertModal()
+    {
+        IsAlertModalVisible = false;
+    }
+
+    private void CloseApplication()
     {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -205,11 +188,25 @@ public partial class PosViewModel : ViewModelBase
         QuickCategories = new ObservableCollection<Category>(quickCats);
         IsViewingCategories = true;
 
+        Console.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
         CurrentShiftId = await _shiftService.GetShiftStateAsync();
         IsShiftOpen = !string.IsNullOrEmpty(CurrentShiftId);
+        Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
+        System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         IsShiftModalVisible = !IsShiftOpen;
 
+        // Initial view is just all categories
         Products.Clear();
+
+        UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
+        _expenseDocumentService.UnsyncedDocumentsCountChanged += (s, count) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                UnsyncedDocumentsCount = count;
+            });
+        };
     }
 
     private async Task LoadProductsAsync(string? categoryId)

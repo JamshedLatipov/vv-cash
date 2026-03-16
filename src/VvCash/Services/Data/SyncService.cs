@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Services.Api;
 
 namespace VvCash.Services.Data;
 
@@ -20,11 +21,14 @@ public class SyncService : ISyncService
     private readonly ISettingsService _settingsService;
     private readonly IOfflineStorageService _storageService;
 
-    public SyncService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService storageService)
+    private readonly IExpenseDocumentService _expenseDocumentService;
+
+    public SyncService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService storageService, IExpenseDocumentService expenseDocumentService)
     {
         _httpClient = httpClient;
         _settingsService = settingsService;
         _storageService = storageService;
+        _expenseDocumentService = expenseDocumentService;
     }
 
     private string GetBaseUrl()
@@ -50,6 +54,7 @@ public class SyncService : ISyncService
 
     public async Task SyncProductsAsync()
     {
+        await _expenseDocumentService.SyncOfflineDocumentsAsync();
         try
         {
             var baseUrl = GetBaseUrl();

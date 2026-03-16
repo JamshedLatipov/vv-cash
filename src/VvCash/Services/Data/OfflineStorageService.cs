@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Threading.Tasks;
+using System.IO;
 using Microsoft.Data.Sqlite;
 using VvCash.Models;
 
@@ -34,6 +34,11 @@ public class OfflineStorageService : IOfflineStorageService
             CREATE TABLE IF NOT EXISTS Settings (
                 Key TEXT PRIMARY KEY,
                 Value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
+                Hash TEXT PRIMARY KEY,
+                Payload TEXT
             );
 
             CREATE TABLE IF NOT EXISTS Categories (
@@ -303,5 +308,54 @@ public class OfflineStorageService : IOfflineStorageService
         }
 
         return 0;
+    }
+
+
+    public async Task SaveUnsyncedDocumentAsync(string hash, string payload)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO UnsyncedDocuments (Hash, Payload) VALUES ($Hash, $Payload)
+            ON CONFLICT(Hash) DO UPDATE SET Payload=excluded.Payload;
+        ";
+        command.Parameters.AddWithValue("$Hash", hash);
+        command.Parameters.AddWithValue("$Payload", payload);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync()
+    {
+        var docs = new List<KeyValuePair<string, string>>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Hash, Payload FROM UnsyncedDocuments";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var hash = reader.GetString(0);
+            var payload = reader.GetString(1);
+            docs.Add(new KeyValuePair<string, string>(hash, payload));
+        }
+
+        return docs;
+    }
+
+    public async Task DeleteUnsyncedDocumentAsync(string hash)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM UnsyncedDocuments WHERE Hash = $Hash";
+        command.Parameters.AddWithValue("$Hash", hash);
+
+        await command.ExecuteNonQueryAsync();
     }
 }
