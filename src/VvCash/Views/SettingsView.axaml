@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:VvCash.ViewModels"
+        xmlns:models="using:VvCash.Models"
         xmlns:material="using:Material.Icons.Avalonia"
         x:Class="VvCash.Views.SettingsView"
         Background="{StaticResource Slate50Brush}">
@@ -31,6 +32,18 @@
             <Setter Property="Background" Value="#0d8fa6"/>
         </Style>
 
+        <Style Selector="Button.AddButton">
+            <Setter Property="Background" Value="{StaticResource Slate200Brush}"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate700Brush}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,10"/>
+        </Style>
+        <Style Selector="Button.AddButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource Slate300Brush}"/>
+        </Style>
+
         <Style Selector="TextBox.SettingsInput">
             <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Slate300Brush}"/>
@@ -45,6 +58,18 @@
             <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
             <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="Background" Value="White"/>
+        </Style>
+
+        <Style Selector="ComboBox.SettingsCombo">
+            <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Slate300Brush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Foreground" Value="{StaticResource Slate900Brush}"/>
+            <Setter Property="Margin" Value="0,8,0,24"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
         </Style>
     </UserControl.Styles>
 
@@ -65,7 +90,7 @@
 
         <!-- Main Content Area -->
         <ScrollViewer Grid.Row="1" Padding="32,48">
-            <StackPanel MaxWidth="640" HorizontalAlignment="Center" Spacing="32">
+            <StackPanel MaxWidth="700" HorizontalAlignment="Center" Spacing="32">
 
                 <!-- Header Description -->
                 <StackPanel Spacing="8" HorizontalAlignment="Center">
@@ -95,8 +120,54 @@
                         <TextBlock Text="Sync Interval (Minutes)" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
                         <TextBox Classes="SettingsInput" Text="{Binding SyncIntervalText, Mode=TwoWay}" Watermark="e.g. 10" Margin="0,8,0,32"/>
 
+                        <!-- Printers Section Header -->
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
+                                <material:MaterialIcon Kind="Printer" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                                <TextBlock Text="Printers" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <Button Grid.Column="1" Classes="AddButton" Command="{Binding AddPrinterCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <material:MaterialIcon Kind="Plus" Width="20" Height="20"/>
+                                    <TextBlock Text="Add Printer" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <ItemsControl ItemsSource="{Binding Printers}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16">
+                                        <Grid ColumnDefinitions="*, *, *, Auto, Auto" RowDefinitions="Auto, Auto">
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Name" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                            <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding Name, Mode=TwoWay}" Classes="SettingsInput" Margin="0,0,8,0"/>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="1" Text="Type" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                            <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding $parent[UserControl].DataContext.ConnectionTypes}" SelectedItem="{Binding ConnectionType, Mode=TwoWay}" Classes="SettingsCombo" Margin="0,0,8,0"/>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding ConnectionLabel}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                            <Panel Grid.Row="1" Grid.Column="2" Margin="0,0,8,0">
+                                                <TextBox Text="{Binding ConnectionString, Mode=TwoWay}" Classes="SettingsInput" Margin="0" IsVisible="{Binding IsLan}"/>
+                                                <ComboBox ItemsSource="{Binding AvailableConnections}" SelectedItem="{Binding ConnectionString, Mode=TwoWay}" Classes="SettingsCombo" Margin="0" IsVisible="{Binding IsUsbOrCom}"/>
+                                            </Panel>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="3" Text="Enabled" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,16,4" HorizontalAlignment="Center"/>
+                                            <CheckBox Grid.Row="1" Grid.Column="3" IsChecked="{Binding IsEnabled, Mode=TwoWay}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,16,0"/>
+
+                                            <Button Grid.Row="1" Grid.Column="4" Background="Transparent" Foreground="{StaticResource ErrorBrush}" VerticalAlignment="Center"
+                                                    Command="{Binding $parent[UserControl].DataContext.RemovePrinterCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <material:MaterialIcon Kind="TrashCan" Width="24" Height="24"/>
+                                            </Button>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
                         <!-- Save Action -->
-                        <Button Classes="SaveButton" Content="Save Configuration" Command="{Binding SaveCommand}">
+                        <Button Classes="SaveButton" Content="Save Configuration" Command="{Binding SaveCommand}" Margin="0,16,0,0">
                             <Button.ContentTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">

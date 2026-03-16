@@ -9,8 +9,6 @@ using VvCash.Models;
 
 namespace VvCash.Services.Hardware;
 
-public enum PrinterConnectionType { USB, COM, LAN }
-
 public class EscPosPrinterService : IPrinterService
 {
     private readonly PrinterConnectionType _connectionType;
@@ -127,6 +125,9 @@ public class EscPosPrinterService : IPrinterService
             case PrinterConnectionType.LAN:
                 await SendViaLan(data);
                 break;
+            case PrinterConnectionType.USB:
+                await SendViaUsb(data);
+                break;
             default:
                 await Task.CompletedTask;
                 break;
@@ -149,6 +150,14 @@ public class EscPosPrinterService : IPrinterService
         await client.ConnectAsync(host, port);
         using var stream = client.GetStream();
         await stream.WriteAsync(data, 0, data.Length);
+    }
+
+    private Task SendViaUsb(byte[] data)
+    {
+        // For USB raw printing, integrating with Windows Spooler API via PInvoke is required.
+        // As a fallback/stub for now, we just output to console to avoid crashing and to allow compilation.
+        Console.WriteLine($"[USB Printer '{_connectionString}'] Outputting {data.Length} bytes.");
+        return Task.CompletedTask;
     }
 
     private void SetStatus(PrinterStatus status)
