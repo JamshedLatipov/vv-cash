@@ -29,7 +29,7 @@
                     <Border Background="{StaticResource Slate100Brush}" CornerRadius="8" Padding="12,8" Width="300">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <material:MaterialIcon Kind="Magnify" Width="20" Height="20" Foreground="{StaticResource Slate500Brush}"/>
-                            <TextBox Text="{Binding SearchQuery}" Watermark="Search products or scan barcode..." Classes="SearchBox" Padding="0" VerticalAlignment="Center" Width="250" FontSize="14" Foreground="{StaticResource Slate900Brush}"/>
+                            <TextBox Text="{Binding SearchQuery}" Watermark="Search products or scan barcode..." Classes="SearchBox" Padding="0" VerticalAlignment="Center" Width="250" FontSize="14" Foreground="{StaticResource Slate900Brush}" KeyDown="OnSearchBoxKeyDown"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -388,6 +388,45 @@
                 <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{StaticResource Slate400Brush}" FontSize="10" Margin="0,0,24,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="2" Text="V 2.4.0 • TERMINAL ID: LXP-09921" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
             </Grid>
+        </Border>
+
+        <!-- Product Not Found Alert Modal -->
+        <Border Grid.RowSpan="3" Background="#80000000"
+                IsVisible="{Binding IsAlertModalVisible}"
+                ZIndex="2000">
+            <Border Background="{StaticResource BackgroundBrush}"
+                    CornerRadius="16"
+                    Padding="32"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="400">
+                <StackPanel Spacing="24">
+                    <material:MaterialIcon Kind="AlertCircleOutline" Width="64" Height="64" Foreground="#ef4444" HorizontalAlignment="Center"/>
+
+                    <TextBlock Text="Товар не найден"
+                             FontSize="24"
+                             FontWeight="Bold"
+                             Foreground="{StaticResource Slate900Brush}"
+                             HorizontalAlignment="Center"/>
+
+                    <TextBlock Text="{Binding AlertMessage}"
+                             FontSize="14"
+                             Foreground="{StaticResource Slate600Brush}"
+                             TextWrapping="Wrap"
+                             TextAlignment="Center"/>
+
+                    <Button Classes="PrimaryButton"
+                            Content="ОК"
+                            Command="{Binding CloseAlertModalCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Height="48"
+                            FontSize="16"
+                            Background="#ef4444"
+                            FontWeight="Bold">
+                    </Button>
+                </StackPanel>
+            </Border>
         </Border>
 
         <!-- Start Shift Modal Overlay -->
