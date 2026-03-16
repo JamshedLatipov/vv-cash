@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -23,6 +24,8 @@ public partial class PosViewModel : ViewModelBase
     private readonly IShiftService _shiftService;
     private readonly IOfflineStorageService _offlineStorageService;
     private readonly ISyncService _syncService;
+    private readonly ISettingsService _settingsService;
+    private CancellationTokenSource? _syncCancellationTokenSource;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -99,6 +102,14 @@ public partial class PosViewModel : ViewModelBase
         }
     }
 
+    [RelayCommand]
+    private async Task FullReinitializeAsync()
+    {
+        StatusMessage = "Starting full database reinitialization...";
+        await _syncService.FullReinitializeAsync();
+        StatusMessage = "Reinitialization complete. Catalog updated.";
+        await LoadProductsAsync(SelectedCategory?.Id);
+    }
 
     public PosViewModel(
         IProductService productService,
@@ -109,7 +120,8 @@ public partial class PosViewModel : ViewModelBase
         ICustomerDisplayService customerDisplayService,
         IShiftService shiftService,
         IOfflineStorageService offlineStorageService,
-        ISyncService syncService)
+        ISyncService syncService,
+        ISettingsService settingsService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -120,6 +132,7 @@ public partial class PosViewModel : ViewModelBase
         _shiftService = shiftService;
         _offlineStorageService = offlineStorageService;
         _syncService = syncService;
+        _settingsService = settingsService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -127,12 +140,37 @@ public partial class PosViewModel : ViewModelBase
         _ = InitializeAsync();
     }
 
+    private void StartBackgroundSync()
+    {
+        _syncCancellationTokenSource?.Cancel();
+        _syncCancellationTokenSource = new CancellationTokenSource();
+        var token = _syncCancellationTokenSource.Token;
+
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await _syncService.SyncProductsAsync();
+                int intervalMinutes = _settingsService.SyncIntervalMinutes;
+                if (intervalMinutes <= 0) intervalMinutes = 10;
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), token);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+            }
+        }, token);
+    }
+
     private async Task InitializeAsync()
     {
         await _offlineStorageService.InitializeAsync();
 
-        // Start background sync
-        _ = _syncService.SyncProductsAsync();
+        StartBackgroundSync();
 
         var allCats = await _categoryService.GetCategoriesAsync();
         var quickCats = await _categoryService.GetQuickAccessCategoriesAsync();
@@ -304,7 +342,6 @@ public partial class PosViewModel : ViewModelBase
     [RelayCommand]
     private async Task OpenCustomerRegistration()
     {
-        // Simple integration point assuming IClassicDesktopStyleApplicationLifetime or parent window lookup
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             var mainWindow = desktop.MainWindow;

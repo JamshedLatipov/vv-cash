@@ -9,6 +9,7 @@ public class SettingsData
     public string BackendUrl { get; set; } = string.Empty;
     public string CashRegisterToken { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
+    public int SyncIntervalMinutes { get; set; } = 10;
 }
 
 public class SettingsService : ISettingsService
@@ -34,6 +35,12 @@ public class SettingsService : ISettingsService
         set => _data.AuthToken = value;
     }
 
+    public int SyncIntervalMinutes
+    {
+        get => _data.SyncIntervalMinutes <= 0 ? 10 : _data.SyncIntervalMinutes;
+        set => _data.SyncIntervalMinutes = value;
+    }
+
     public SettingsService()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -52,6 +59,10 @@ public class SettingsService : ISettingsService
             {
                 var json = File.ReadAllText(_settingsFilePath);
                 _data = JsonSerializer.Deserialize<SettingsData>(json) ?? new SettingsData();
+                if (_data.SyncIntervalMinutes <= 0)
+                {
+                    _data.SyncIntervalMinutes = 10;
+                }
             }
             catch
             {

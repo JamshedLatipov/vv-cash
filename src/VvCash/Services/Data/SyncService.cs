@@ -11,6 +11,7 @@ namespace VvCash.Services.Data;
 public interface ISyncService
 {
     Task SyncProductsAsync();
+    Task FullReinitializeAsync();
 }
 
 public class SyncService : ISyncService
@@ -32,6 +33,19 @@ public class SyncService : ISyncService
         if (string.IsNullOrWhiteSpace(baseUrl)) return string.Empty;
         if (!baseUrl.EndsWith("/")) baseUrl += "/";
         return baseUrl;
+    }
+
+    public async Task FullReinitializeAsync()
+    {
+        try
+        {
+            await _storageService.SetLastSyncVersionAsync(0);
+            await SyncProductsAsync();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
+        }
     }
 
     public async Task SyncProductsAsync()

@@ -15,6 +15,9 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _cashRegisterToken = string.Empty;
 
+    [ObservableProperty]
+    private string _syncIntervalText = string.Empty;
+
     public Action<ViewModelBase>? NavigationRequest { get; set; }
     private ViewModelBase _previousViewModel;
 
@@ -26,6 +29,7 @@ public partial class SettingsViewModel : ViewModelBase
         // Load existing settings
         BackendUrl = _settingsService.BackendUrl;
         CashRegisterToken = _settingsService.CashRegisterToken;
+        SyncIntervalText = _settingsService.SyncIntervalMinutes.ToString();
     }
 
     [RelayCommand]
@@ -39,6 +43,15 @@ public partial class SettingsViewModel : ViewModelBase
     {
         _settingsService.BackendUrl = BackendUrl;
         _settingsService.CashRegisterToken = CashRegisterToken;
+        if (int.TryParse(SyncIntervalText, out int interval) && interval > 0)
+        {
+            _settingsService.SyncIntervalMinutes = interval;
+        }
+        else
+        {
+            _settingsService.SyncIntervalMinutes = 10;
+        }
+
         _settingsService.Save();
 
         GoBack();
