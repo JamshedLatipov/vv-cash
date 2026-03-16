@@ -89,7 +89,11 @@
 
                         <!-- Token Input -->
                         <TextBlock Text="Cash Register Authorization Token" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
-                        <TextBox Classes="SettingsInput" Text="{Binding CashRegisterToken, Mode=TwoWay}" Watermark="Enter secure token" PasswordChar="•" Margin="0,8,0,32"/>
+                        <TextBox Classes="SettingsInput" Text="{Binding CashRegisterToken, Mode=TwoWay}" Watermark="Enter secure token" PasswordChar="•" />
+
+                        <!-- Sync Interval Input -->
+                        <TextBlock Text="Sync Interval (Minutes)" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                        <TextBox Classes="SettingsInput" Text="{Binding SyncIntervalText, Mode=TwoWay}" Watermark="e.g. 10" Margin="0,8,0,32"/>
 
                         <!-- Save Action -->
                         <Button Classes="SaveButton" Content="Save Configuration" Command="{Binding SaveCommand}">
