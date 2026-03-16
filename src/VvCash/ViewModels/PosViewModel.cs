@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
+using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
@@ -25,76 +26,100 @@ public partial class PosViewModel : ViewModelBase
     private readonly IOfflineStorageService _offlineStorageService;
     private readonly ISyncService _syncService;
     private readonly ISettingsService _settingsService;
-    private CancellationTokenSource? _syncCancellationTokenSource;
+    private readonly IExpenseDocumentService _expenseDocumentService;
 
-    [ObservableProperty] private string _searchQuery = string.Empty;
+    public Action<ViewModelBase>? NavigationRequest { get; set; }
+
     [ObservableProperty] private ObservableCollection<Product> _products = new();
-    [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
     [ObservableProperty] private ObservableCollection<Category> _allCategories = new();
     [ObservableProperty] private ObservableCollection<Category> _quickCategories = new();
+    [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
+    [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
+
     [ObservableProperty] private Category? _selectedCategory;
     public string SelectedCategoryName => SelectedCategory?.Name ?? "All Categories";
-    [ObservableProperty] private bool _isViewingCategories = true;
+
+    [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private string _couponCode = string.Empty;
-    [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
+
     [ObservableProperty] private decimal _subtotal;
     [ObservableProperty] private decimal _tax;
     [ObservableProperty] private decimal _totalDiscount;
     [ObservableProperty] private decimal _totalAmount;
-    [ObservableProperty] private string _printerStatusText = "Printer Ready";
-    [ObservableProperty] private bool _isPrinterReady = true;
-    [ObservableProperty] private string _statusMessage = string.Empty;
-    [ObservableProperty] private bool _isCatalogOpen = false;
-    [ObservableProperty] private bool _isShiftOpen = false;
-    [ObservableProperty] private bool _isShiftModalVisible = false;
-    [ObservableProperty] private bool _isLoadingShift = false;
-    [ObservableProperty] private string? _currentShiftId;
-    [ObservableProperty] private bool _isAlertModalVisible = false;
+
+    [ObservableProperty] private bool _isPrinterReady;
+    [ObservableProperty] private string _printerStatusText = "Initializing...";
+
+    [ObservableProperty] private CustomerDisplayViewModel? _customerDisplayViewModel;
+
+    [ObservableProperty] private bool _isShiftModalVisible;
+    [ObservableProperty] private bool _isAlertModalVisible;
     [ObservableProperty] private string _alertMessage = string.Empty;
+    [ObservableProperty] private bool _isShiftOpen;
+    [ObservableProperty] private string? _currentShiftId;
+    [ObservableProperty] private string _statusMessage = "Ready";
+    [ObservableProperty] private bool _isCatalogOpen;
+    [ObservableProperty] private bool _isViewingCategories = true;
 
-    public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
-    public Action<ViewModelBase>? NavigationRequest { get; set; }
-
-    [RelayCommand]
-    private async Task OpenShiftAsync()
-    {
-        Console.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
-        System.Diagnostics.Debug.WriteLine("[PosViewModel] OpenShiftAsync command executed.");
-        IsLoadingShift = true;
-        CurrentShiftId = await _shiftService.OpenShiftAsync();
-        IsLoadingShift = false;
-        if (!string.IsNullOrEmpty(CurrentShiftId))
-        {
-            IsShiftOpen = true;
-            IsShiftModalVisible = false;
-        }
-    }
+    private CancellationTokenSource? _syncCancellationTokenSource;
 
     [RelayCommand]
-    private async Task CloseShiftAsync()
+    private void CloseShiftModal()
     {
-        Console.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
-        System.Diagnostics.Debug.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
-        if (string.IsNullOrEmpty(CurrentShiftId)) return;
-
-        IsLoadingShift = true;
-        bool success = await _shiftService.CloseShiftAsync(CurrentShiftId);
-        IsLoadingShift = false;
-        if (success)
-        {
-            CurrentShiftId = null;
-            IsShiftOpen = false;
-            IsShiftModalVisible = true;
-        }
+        IsShiftModalVisible = false;
     }
 
     [RelayCommand]
     private void CloseAlertModal()
     {
         IsAlertModalVisible = false;
+        AlertMessage = string.Empty;
     }
 
-    private void CloseApplication()
+    [RelayCommand]
+    private async Task OpenShiftAsync()
+    {
+        StatusMessage = "Opening shift...";
+        var shiftId = await _shiftService.OpenShiftAsync();
+        if (!string.IsNullOrEmpty(shiftId))
+        {
+            CurrentShiftId = shiftId;
+            IsShiftOpen = true;
+            IsShiftModalVisible = false;
+            StatusMessage = "Shift opened successfully.";
+        }
+        else
+        {
+            StatusMessage = "Failed to open shift.";
+        }
+    }
+
+    [RelayCommand]
+    private async Task CloseShiftAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentShiftId)) return;
+
+        StatusMessage = "Closing shift...";
+        var success = await _shiftService.CloseShiftAsync(CurrentShiftId);
+        if (success)
+        {
+            CurrentShiftId = null;
+            IsShiftOpen = false;
+            StatusMessage = "Shift closed successfully.";
+
+            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                desktop.MainWindow?.Close();
+            }
+        }
+        else
+        {
+            StatusMessage = "Failed to close shift.";
+        }
+    }
+
+    [RelayCommand]
+    private void QuitApplication()
     {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -121,7 +146,8 @@ public partial class PosViewModel : ViewModelBase
         IShiftService shiftService,
         IOfflineStorageService offlineStorageService,
         ISyncService syncService,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        IExpenseDocumentService expenseDocumentService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -133,6 +159,7 @@ public partial class PosViewModel : ViewModelBase
         _offlineStorageService = offlineStorageService;
         _syncService = syncService;
         _settingsService = settingsService;
+        _expenseDocumentService = expenseDocumentService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -178,15 +205,10 @@ public partial class PosViewModel : ViewModelBase
         QuickCategories = new ObservableCollection<Category>(quickCats);
         IsViewingCategories = true;
 
-        Console.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
-        System.Diagnostics.Debug.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
         CurrentShiftId = await _shiftService.GetShiftStateAsync();
         IsShiftOpen = !string.IsNullOrEmpty(CurrentShiftId);
-        Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
-        System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         IsShiftModalVisible = !IsShiftOpen;
 
-        // Initial view is just all categories
         Products.Clear();
     }
 
@@ -359,24 +381,72 @@ public partial class PosViewModel : ViewModelBase
     {
         if (!CartItems.Any()) return;
 
+        if (string.IsNullOrEmpty(CurrentShiftId))
+        {
+            AlertMessage = "Cannot process payment: No active shift.";
+            IsAlertModalVisible = true;
+            return;
+        }
+
         if (NavigationRequest != null)
         {
-            var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result) =>
+            var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result, cashAmount, cardAmount) =>
             {
                 if (result)
                 {
-                    await _printerService.PrintReceiptAsync(
-                        _cartService.Items,
-                        Subtotal, Tax, TotalDiscount, TotalAmount,
-                        _cartService.AppliedCoupons);
-                    _cartService.ClearCart();
-                    StatusMessage = "Payment processed. Thank you!";
-                    if (CustomerDisplayViewModel != null)
+                    var request = new DocumentRequest
                     {
-                        CustomerDisplayViewModel.IsIdle = true;
-                        CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
+                        DocumentHash = Guid.NewGuid().ToString(),
+                        ShiftId = CurrentShiftId,
+                        SoldSource = SoldSourcesEnum.CASH,
+                        Payment = new Payment
+                        {
+                            ToPay = TotalAmount,
+                            PaidInCash = cashAmount,
+                            PaidByCreditCard = cardAmount,
+                            DiscountType = "cash",
+                            Discount = TotalDiscount,
+                            Remained = Math.Max(0, TotalAmount - (cashAmount + cardAmount))
+                        },
+                        Products = _cartService.Items.Select(item => new DocumentProduct
+                        {
+                            Name = item.Product.Name,
+                            ProductId = item.Product.Id,
+                            Quantity = item.Quantity,
+                            SellPrice = item.Product.Price,
+                            PriceBeforeDiscount = item.Product.OriginalPrice ?? item.Product.Price,
+                            DiscountPercent = item.Product.DiscountPercent ?? 0m
+                        }).ToList()
+                    };
+
+                    StatusMessage = "Creating expense document...";
+                    var success = await _expenseDocumentService.CreateExpenseDocumentAsync(request);
+
+                    if (success)
+                    {
+                        await _printerService.PrintReceiptAsync(
+                            _cartService.Items,
+                            Subtotal, Tax, TotalDiscount, TotalAmount,
+                            _cartService.AppliedCoupons);
+                        _cartService.ClearCart();
+                        StatusMessage = "Payment processed. Thank you!";
+
+                        if (CustomerDisplayViewModel != null)
+                        {
+                            CustomerDisplayViewModel.IsIdle = true;
+                            CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
+                        }
+                        _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
                     }
-                    _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
+                    else
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            AlertMessage = "Failed to create expense document on the server. Please try again.";
+                            IsAlertModalVisible = true;
+                            StatusMessage = "Payment failed.";
+                        });
+                    }
                 }
 
                 // Return to POS View

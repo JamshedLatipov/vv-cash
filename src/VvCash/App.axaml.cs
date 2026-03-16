@@ -91,6 +91,7 @@ public partial class App : Application
         services.AddSingleton<IAuthService, AuthService>();
         services.AddHttpClient<ICategoryService, CategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<IShiftService, ShiftService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<IExpenseDocumentService, ExpenseDocumentService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ISyncService, SyncService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // POS Services
