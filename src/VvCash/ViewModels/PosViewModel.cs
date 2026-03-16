@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
 using VvCash.Services;
 using VvCash.Services.Api;
+using VvCash.Services.Data;
 using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
@@ -20,6 +21,8 @@ public partial class PosViewModel : ViewModelBase
     private readonly IPrinterService _printerService;
     private readonly ICustomerDisplayService _customerDisplayService;
     private readonly IShiftService _shiftService;
+    private readonly IOfflineStorageService _offlineStorageService;
+    private readonly ISyncService _syncService;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -104,7 +107,9 @@ public partial class PosViewModel : ViewModelBase
         IDiscountService discountService,
         IPrinterService printerService,
         ICustomerDisplayService customerDisplayService,
-        IShiftService shiftService)
+        IShiftService shiftService,
+        IOfflineStorageService offlineStorageService,
+        ISyncService syncService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -113,6 +118,8 @@ public partial class PosViewModel : ViewModelBase
         _printerService = printerService;
         _customerDisplayService = customerDisplayService;
         _shiftService = shiftService;
+        _offlineStorageService = offlineStorageService;
+        _syncService = syncService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -122,6 +129,11 @@ public partial class PosViewModel : ViewModelBase
 
     private async Task InitializeAsync()
     {
+        await _offlineStorageService.InitializeAsync();
+
+        // Start background sync
+        _ = _syncService.SyncProductsAsync();
+
         var allCats = await _categoryService.GetCategoriesAsync();
         var quickCats = await _categoryService.GetQuickAccessCategoriesAsync();
         AllCategories = new ObservableCollection<Category>(allCats);

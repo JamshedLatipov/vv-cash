@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Services.Data;
 
 namespace VvCash.Services.Api;
 
@@ -12,16 +14,20 @@ public class CategoryService : ICategoryService
 {
     private readonly HttpClient _httpClient;
     private readonly ISettingsService _settingsService;
+    private readonly IOfflineStorageService _storageService;
 
-    public CategoryService(HttpClient httpClient, ISettingsService settingsService)
+    public CategoryService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService storageService)
     {
         _httpClient = httpClient;
         _settingsService = settingsService;
+        _storageService = storageService;
     }
 
     private async Task<IEnumerable<Category>> FetchPaginatedAsync(string endpoint)
     {
         var allCategories = new List<Category>();
+        bool isSuccess = true;
+
         try
         {
             var baseUrl = _settingsService.BackendUrl;
@@ -33,7 +39,6 @@ public class CategoryService : ICategoryService
 
             do
             {
-                // Remove trailing slash from endpoint if it exists so we can safely add query params
                 var cleanEndpoint = endpoint.TrimEnd('/');
                 var url = $"{baseUrl}{cleanEndpoint}/?page={currentPage}";
                 var response = await _httpClient.GetAsync(url);
@@ -50,7 +55,6 @@ public class CategoryService : ICategoryService
                     }
                     else
                     {
-                        // If there is no page_count, assume it's just a single page response and exit loop after this
                         totalPages = 1;
                     }
 
@@ -65,6 +69,7 @@ public class CategoryService : ICategoryService
                 }
                 else
                 {
+                    isSuccess = false;
                     break;
                 }
 
@@ -74,6 +79,39 @@ public class CategoryService : ICategoryService
         catch (Exception ex)
         {
             Debug.WriteLine($"[CategoryService] Error fetching categories from {endpoint}: {ex.Message}");
+            isSuccess = false;
+        }
+
+        if (isSuccess && allCategories.Any())
+        {
+            if (endpoint.Contains("show-on-cash"))
+            {
+                await _storageService.SaveQuickAccessCategoriesAsync(allCategories);
+            }
+            else
+            {
+                await _storageService.SaveCategoriesAsync(allCategories);
+            }
+        }
+        else
+        {
+            // Fallback to local storage
+            if (endpoint.Contains("show-on-cash"))
+            {
+                var cached = await _storageService.GetQuickAccessCategoriesAsync();
+                if (cached != null && cached.Any())
+                {
+                    allCategories = cached.ToList();
+                }
+            }
+            else
+            {
+                var cached = await _storageService.GetCategoriesAsync();
+                if (cached != null && cached.Any())
+                {
+                    allCategories = cached.ToList();
+                }
+            }
         }
 
         return allCategories;
@@ -81,13 +119,6 @@ public class CategoryService : ICategoryService
 
     public Task<IEnumerable<Category>> GetCategoriesAsync()
     {
-        // the user's trace showed /products/category/ but swagger said /cashes/category/
-        // I will use cashes/category/ as instructed initially, if it fails they might need to change it
-        // Or wait, the user specifically pasted the trace for `http://market.proffi.io/api/v1/products/category/?page=1`!
-        // The message was:
-        // Request URL http://market.proffi.io/api/v1/products/category/?page=1
-        // So I should probably use `products/category` for all categories, and `cashes/category/show-on-cash` for quick access.
-        // Let's use what they pasted exactly!
         return FetchPaginatedAsync("cashes/category");
     }
 

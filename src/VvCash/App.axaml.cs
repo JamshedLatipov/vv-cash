@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using VvCash.Services;
 using System.Net.Http;
 using VvCash.Services.Api;
+using VvCash.Services.Data;
 using VvCash.Services.Hardware;
 using VvCash.ViewModels;
 using VvCash.Views;
@@ -81,13 +82,16 @@ public partial class App : Application
     {
         // Core Services
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
+
         services.AddTransient<AuthHeaderHandler>();
         services.AddHttpClient("DefaultClient").AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("DefaultClient"));
+
         services.AddSingleton<IAuthService, AuthService>();
         services.AddHttpClient<ICategoryService, CategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<IShiftService, ShiftService>().AddHttpMessageHandler<AuthHeaderHandler>();
-
+        services.AddHttpClient<ISyncService, SyncService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // POS Services
         services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();
