@@ -76,13 +76,43 @@ public class ProductService : IProductService
                 {
                     if (root.TryGetProperty("body", out var bodyElement) && bodyElement.ValueKind == JsonValueKind.Object)
                     {
+                        string productId = Guid.NewGuid().ToString();
+                        string productName = string.Empty;
+                        string productSku = string.Empty;
+                        string productCategory = string.Empty;
+                        decimal productPrice = 0m;
+
+                        if (bodyElement.TryGetProperty("sell_price", out var priceElem))
+                        {
+                            productPrice = priceElem.ValueKind == JsonValueKind.Number ? priceElem.GetDecimal() : 0m;
+                        }
+
+                        if (bodyElement.TryGetProperty("product", out var productElem) && productElem.ValueKind == JsonValueKind.Object)
+                        {
+                            if (productElem.TryGetProperty("id", out var idElem))
+                                productId = idElem.GetString() ?? productId;
+
+                            if (productElem.TryGetProperty("name", out var nameElem))
+                                productName = nameElem.GetString() ?? string.Empty;
+
+                            if (productElem.TryGetProperty("article", out var articleElem))
+                                productSku = articleElem.GetString() ?? string.Empty;
+
+                            if (productElem.TryGetProperty("category", out var catElem) && catElem.ValueKind == JsonValueKind.Object)
+                            {
+                                if (catElem.TryGetProperty("name", out var catNameElem))
+                                    productCategory = catNameElem.GetString() ?? string.Empty;
+                            }
+                        }
+
                         var product = new Product
                         {
                             Barcode = barcode,
-                            Id = bodyElement.TryGetProperty("id", out var idElem) ? idElem.GetInt32().ToString() : Guid.NewGuid().ToString(),
-                            Name = bodyElement.TryGetProperty("name", out var nameElem) ? nameElem.GetString() ?? string.Empty : string.Empty,
-                            Sku = bodyElement.TryGetProperty("sku", out var skuElem) ? skuElem.GetString() ?? string.Empty : string.Empty,
-                            Price = bodyElement.TryGetProperty("price", out var priceElem) ? priceElem.GetDecimal() : 0m,
+                            Id = productId,
+                            Name = productName,
+                            Sku = productSku,
+                            Category = productCategory,
+                            Price = productPrice
                         };
                         return product;
                     }
