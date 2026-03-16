@@ -1,6 +1,8 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using VvCash.ViewModels;
 
 namespace VvCash.Views;
@@ -13,7 +15,26 @@ public partial class PosView : UserControl
     public PosView()
     {
         InitializeComponent();
-        KeyDown += OnWindowKeyDown;
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel != null)
+        {
+            topLevel.AddHandler(InputElement.KeyDownEvent, OnGlobalKeyDown, RoutingStrategies.Tunnel);
+        }
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel != null)
+        {
+            topLevel.RemoveHandler(InputElement.KeyDownEvent, OnGlobalKeyDown);
+        }
+        base.OnDetachedFromVisualTree(e);
     }
 
     private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
@@ -33,7 +54,7 @@ public partial class PosView : UserControl
         }
     }
 
-    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
+    private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         var now = DateTime.UtcNow;
         var elapsed = (now - _lastKeyTime).TotalMilliseconds;
@@ -52,6 +73,7 @@ public partial class PosView : UserControl
             if (DataContext is PosViewModel vm)
             {
                 _ = vm.HandleBarcodeAsync(barcode);
+                vm.SearchQuery = string.Empty; // clear out accidental typing in active search box
             }
             e.Handled = true;
             return;
