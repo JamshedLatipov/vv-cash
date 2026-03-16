@@ -43,6 +43,8 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isShiftModalVisible = false;
     [ObservableProperty] private bool _isLoadingShift = false;
     [ObservableProperty] private string? _currentShiftId;
+    [ObservableProperty] private bool _isAlertModalVisible = false;
+    [ObservableProperty] private string _alertMessage = string.Empty;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -81,6 +83,11 @@ public partial class PosViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void CloseAlertModal()
+    {
+        IsAlertModalVisible = false;
+    }
+
     private void CloseApplication()
     {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
@@ -340,7 +347,9 @@ public partial class PosViewModel : ViewModelBase
         }
         else
         {
-            StatusMessage = $"Product not found for barcode: {barcode}";
+            AlertMessage = $"Товар со штрихкодом {barcode} не найден";
+            IsAlertModalVisible = true;
+            StatusMessage = AlertMessage;
         }
     }
 }
