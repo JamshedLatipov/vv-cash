@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using VvCash.Models;
 
 namespace VvCash.Services;
 
@@ -10,12 +12,15 @@ public class SettingsData
     public string CashRegisterToken { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
     public int SyncIntervalMinutes { get; set; } = 10;
+    public List<PrinterConfig> Printers { get; set; } = new();
 }
 
 public class SettingsService : ISettingsService
 {
     private readonly string _settingsFilePath;
     private SettingsData _data = new SettingsData();
+
+    public event EventHandler? SettingsChanged;
 
     public string BackendUrl
     {
@@ -41,6 +46,12 @@ public class SettingsService : ISettingsService
         set => _data.SyncIntervalMinutes = value;
     }
 
+    public List<PrinterConfig> Printers
+    {
+        get => _data.Printers;
+        set => _data.Printers = value ?? new List<PrinterConfig>();
+    }
+
     public SettingsService()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -63,6 +74,10 @@ public class SettingsService : ISettingsService
                 {
                     _data.SyncIntervalMinutes = 10;
                 }
+                if (_data.Printers == null)
+                {
+                    _data.Printers = new List<PrinterConfig>();
+                }
             }
             catch
             {
@@ -81,6 +96,7 @@ public class SettingsService : ISettingsService
         {
             var json = JsonSerializer.Serialize(_data, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_settingsFilePath, json);
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception)
         {

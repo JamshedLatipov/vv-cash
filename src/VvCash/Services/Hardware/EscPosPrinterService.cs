@@ -9,7 +9,6 @@ using VvCash.Models;
 
 namespace VvCash.Services.Hardware;
 
-public enum PrinterConnectionType { USB, COM, LAN }
 
 public class EscPosPrinterService : IPrinterService
 {

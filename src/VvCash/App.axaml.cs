@@ -99,7 +99,7 @@ public partial class App : Application
         services.AddSingleton<IDiscountService, DiscountService>();
 
         // Hardware Services
-        services.AddSingleton<IPrinterService, MockPrinterService>();
+        services.AddSingleton<IPrinterService, CompositePrinterService>();
         services.AddSingleton<ICustomerDisplayService, MockCustomerDisplayService>();
 
         // ViewModels
