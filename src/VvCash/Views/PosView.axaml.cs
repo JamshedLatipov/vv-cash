@@ -59,7 +59,7 @@ public partial class PosView : UserControl
         var now = DateTime.UtcNow;
         var elapsed = (now - _lastKeyTime).TotalMilliseconds;
 
-        if (elapsed > 100 && !string.IsNullOrEmpty(_barcodeBuffer))
+        if (elapsed > 100)
         {
             _barcodeBuffer = string.Empty;
         }
@@ -94,7 +94,7 @@ public partial class PosView : UserControl
             _ => null
         };
 
-        if (ch != null && elapsed < 100)
+        if (ch != null)
         {
             _barcodeBuffer += ch;
         }

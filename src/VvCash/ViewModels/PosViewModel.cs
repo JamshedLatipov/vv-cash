@@ -341,15 +341,18 @@ public partial class PosViewModel : ViewModelBase
     public async Task HandleBarcodeAsync(string barcode)
     {
         var product = await _productService.GetProductByBarcodeAsync(barcode);
-        if (product != null)
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            AddToCart(product);
-        }
-        else
-        {
-            AlertMessage = $"Товар со штрихкодом {barcode} не найден";
-            IsAlertModalVisible = true;
-            StatusMessage = AlertMessage;
-        }
+            if (product != null)
+            {
+                AddToCart(product);
+            }
+            else
+            {
+                AlertMessage = $"Товар со штрихкодом {barcode} не найден";
+                IsAlertModalVisible = true;
+                StatusMessage = AlertMessage;
+            }
+        });
     }
 }
