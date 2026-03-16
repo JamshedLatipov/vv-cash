@@ -40,9 +40,9 @@ public partial class MixedPaymentViewModel : ViewModelBase
     // Quick input text representation (shown above numpad)
     public string QuickInputText => _currentInputBuffer;
 
-    private readonly Action<bool> _onCompletion;
+    private readonly Action<bool, decimal, decimal> _onCompletion;
 
-    public MixedPaymentViewModel(decimal totalAmount, Action<bool> onCompletion)
+    public MixedPaymentViewModel(decimal totalAmount, Action<bool, decimal, decimal> onCompletion)
     {
         TotalAmount = totalAmount;
         _onCompletion = onCompletion;
@@ -51,19 +51,19 @@ public partial class MixedPaymentViewModel : ViewModelBase
     [RelayCommand]
     private void Close()
     {
-        _onCompletion(false);
+        _onCompletion(false, 0, 0);
     }
 
     [RelayCommand]
     private void Back()
     {
-        _onCompletion(false);
+        _onCompletion(false, 0, 0);
     }
 
     [RelayCommand]
     private void ConfirmPayment()
     {
-        _onCompletion(true);
+        _onCompletion(true, CashAmount, CardAmount);
     }
 
     partial void OnSelectedMethodChanged(string value)

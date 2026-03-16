@@ -18,6 +18,9 @@ public interface IOfflineStorageService
     Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync();
 
     Task SetLastSyncVersionAsync(int version);
+    Task SaveUnsyncedDocumentAsync(string hash, string payload);
+    Task<IEnumerable<System.Collections.Generic.KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync();
+    Task DeleteUnsyncedDocumentAsync(string hash);
     Task<int> GetLastSyncVersionAsync();
 
     Task InitializeAsync();

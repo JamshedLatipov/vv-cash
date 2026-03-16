@@ -385,6 +385,10 @@
                         <Ellipse Width="6" Height="6" Fill="{Binding IsPrinterReady, Converter={StaticResource BoolToColorConverter}}"/>
                         <TextBlock Text="{Binding PrinterStatusText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" Classes="Uppercase"/>
                     </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasUnsyncedDocuments}">
+                        <material:MaterialIcon Kind="CloudOffOutline" Width="14" Height="14" Foreground="#ef4444"/>
+                        <TextBlock Text="{Binding UnsyncedDocumentsCount, StringFormat={}{0} unsynced orders}" Foreground="#ef4444" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
+                    </StackPanel>
                 </StackPanel>
                 <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{StaticResource Slate400Brush}" FontSize="10" Margin="0,0,24,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="2" Text="V 2.4.0 • TERMINAL ID: LXP-09921" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>

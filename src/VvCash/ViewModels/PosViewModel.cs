@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
+using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
@@ -25,6 +26,7 @@ public partial class PosViewModel : ViewModelBase
     private readonly IOfflineStorageService _offlineStorageService;
     private readonly ISyncService _syncService;
     private readonly ISettingsService _settingsService;
+    private readonly IExpenseDocumentService _expenseDocumentService;
     private CancellationTokenSource? _syncCancellationTokenSource;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
@@ -35,6 +37,12 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private Category? _selectedCategory;
     public string SelectedCategoryName => SelectedCategory?.Name ?? "All Categories";
     [ObservableProperty] private bool _isViewingCategories = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUnsyncedDocuments))]
+    private int _unsyncedDocumentsCount;
+
+    public bool HasUnsyncedDocuments => UnsyncedDocumentsCount > 0;
     [ObservableProperty] private string _couponCode = string.Empty;
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
@@ -121,7 +129,8 @@ public partial class PosViewModel : ViewModelBase
         IShiftService shiftService,
         IOfflineStorageService offlineStorageService,
         ISyncService syncService,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        IExpenseDocumentService expenseDocumentService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -133,6 +142,7 @@ public partial class PosViewModel : ViewModelBase
         _offlineStorageService = offlineStorageService;
         _syncService = syncService;
         _settingsService = settingsService;
+        _expenseDocumentService = expenseDocumentService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -188,6 +198,15 @@ public partial class PosViewModel : ViewModelBase
 
         // Initial view is just all categories
         Products.Clear();
+
+        UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
+        _expenseDocumentService.UnsyncedDocumentsCountChanged += (s, count) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                UnsyncedDocumentsCount = count;
+            });
+        };
     }
 
     private async Task LoadProductsAsync(string? categoryId)
@@ -359,24 +378,72 @@ public partial class PosViewModel : ViewModelBase
     {
         if (!CartItems.Any()) return;
 
+        if (string.IsNullOrEmpty(CurrentShiftId))
+        {
+            AlertMessage = "Cannot process payment: No active shift.";
+            IsAlertModalVisible = true;
+            return;
+        }
+
         if (NavigationRequest != null)
         {
-            var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result) =>
+            var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result, cashAmount, cardAmount) =>
             {
                 if (result)
                 {
-                    await _printerService.PrintReceiptAsync(
-                        _cartService.Items,
-                        Subtotal, Tax, TotalDiscount, TotalAmount,
-                        _cartService.AppliedCoupons);
-                    _cartService.ClearCart();
-                    StatusMessage = "Payment processed. Thank you!";
-                    if (CustomerDisplayViewModel != null)
+                    var request = new DocumentRequest
                     {
-                        CustomerDisplayViewModel.IsIdle = true;
-                        CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
+                        DocumentHash = Guid.NewGuid().ToString(),
+                        ShiftId = CurrentShiftId,
+                        SoldSource = SoldSourcesEnum.CASH,
+                        Payment = new Payment
+                        {
+                            ToPay = TotalAmount,
+                            PaidInCash = cashAmount,
+                            PaidByCreditCard = cardAmount,
+                            DiscountType = "cash",
+                            Discount = TotalDiscount,
+                            Remained = Math.Max(0, TotalAmount - (cashAmount + cardAmount))
+                        },
+                        Products = _cartService.Items.Select(item => new DocumentProduct
+                        {
+                            Name = item.Product.Name,
+                            ProductId = item.Product.Id,
+                            Quantity = item.Quantity,
+                            SellPrice = item.Product.Price,
+                            PriceBeforeDiscount = item.Product.OriginalPrice ?? item.Product.Price,
+                            DiscountPercent = item.Product.DiscountPercent ?? 0m
+                        }).ToList()
+                    };
+
+                    StatusMessage = "Creating expense document...";
+                    var success = await _expenseDocumentService.CreateExpenseDocumentAsync(request);
+
+                    if (success)
+                    {
+                        await _printerService.PrintReceiptAsync(
+                            _cartService.Items,
+                            Subtotal, Tax, TotalDiscount, TotalAmount,
+                            _cartService.AppliedCoupons);
+                        _cartService.ClearCart();
+                        StatusMessage = "Payment processed. Thank you!";
+
+                        if (CustomerDisplayViewModel != null)
+                        {
+                            CustomerDisplayViewModel.IsIdle = true;
+                            CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
+                        }
+                        _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
                     }
-                    _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
+                    else
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            AlertMessage = "Failed to create expense document on the server. Please try again.";
+                            IsAlertModalVisible = true;
+                            StatusMessage = "Payment failed.";
+                        });
+                    }
                 }
 
                 // Return to POS View
