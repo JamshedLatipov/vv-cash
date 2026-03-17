@@ -70,6 +70,8 @@ public partial class PosViewModel : ViewModelBase
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
+    public IAsyncRelayCommand OpenCustomerRegistrationCommand { get; }
+    public IRelayCommand CloseApplicationCommand { get; }
 
     [RelayCommand]
     private async Task OpenShiftAsync()
@@ -153,6 +155,9 @@ public partial class PosViewModel : ViewModelBase
         _settingsService = settingsService;
         _expenseDocumentService = expenseDocumentService;
         _counterpartyService = counterpartyService;
+
+        OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
+        CloseApplicationCommand = new RelayCommand(CloseApplication);
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
