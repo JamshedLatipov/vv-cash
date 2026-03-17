@@ -1,0 +1,29 @@
+--- ./src/VvCash/ViewModels/PosViewModel.cs
++++ ./src/VvCash/ViewModels/PosViewModel.cs
+@@ -370,6 +370,19 @@
+             }
+         }
+     }
++
++    [RelayCommand]
++    private async Task OpenCustomerSearch()
++    {
++        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
++        {
++            var mainWindow = desktop.MainWindow;
++            if (mainWindow != null)
++            {
++                var dialog = new VvCash.Views.CustomerSearchWindow();
++                dialog.DataContext = new CustomerSearchViewModel(dialog, _counterpartyService);
++                var result = await dialog.ShowDialog<CounterpartyResponse?>(mainWindow);
++                if (result != null)
++                {
++                    // Add to order or display selected counterparty logic here
++                    StatusMessage = $"Selected customer: {result.FullName}";
++                }
++            }
++        }
++    }
+
+     [RelayCommand]
+     private void Pay()

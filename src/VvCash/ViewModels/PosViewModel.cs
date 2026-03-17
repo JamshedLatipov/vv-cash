@@ -396,6 +396,25 @@ public partial class PosViewModel : ViewModelBase
         StatusMessage = success ? "Receipt printed." : "Print failed.";
     }
 
+    [RelayCommand]
+    private async Task OpenCustomerSearch()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.CustomerSearchWindow();
+                dialog.DataContext = new CustomerSearchViewModel(dialog, _counterpartyService);
+                var result = (CounterpartyResponse?) await dialog.ShowDialog<object>(mainWindow);
+                if (result != null)
+                {
+                    StatusMessage = $"Выбран клиент: {result.FullName}";
+                }
+            }
+        }
+    }
+
     private async Task OpenCustomerRegistration()
     {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
