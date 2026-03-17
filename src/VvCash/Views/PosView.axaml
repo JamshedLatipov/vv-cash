@@ -37,7 +37,8 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                     <Button Classes="NavButton" Content="Orders" Margin="0,0,16,0" FontSize="14"/>
                     <Button Classes="NavButton" Content="Inventory" Margin="0,0,16,0" FontSize="14"/>
-                    <Button Classes="NavButton" Content="Customers" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="Клиенты" Command="{Binding OpenCustomerSearchCommand}" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="Создать клиента" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>
                     <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding FullReinitializeCommand}" ToolTip.Tip="Sync Data"><material:MaterialIcon Kind="Sync" Width="24" Height="24" Foreground="{StaticResource Slate600Brush}"/></Button>
 
 <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding CloseShiftCommand}" ToolTip.Tip="Close Shift">

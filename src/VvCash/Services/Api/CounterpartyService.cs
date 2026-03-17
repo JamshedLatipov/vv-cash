@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using VvCash.Models.Api;
 
@@ -64,6 +65,37 @@ public class CounterpartyService : ICounterpartyService
             Debug.WriteLine($"[CounterpartyService] Error creating counterparty: {ex.Message}");
         }
 
+        return null;
+    }
+
+    public async Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query)
+    {
+        try
+        {
+            var baseUrl = _settingsService.BackendUrl;
+            if (string.IsNullOrWhiteSpace(baseUrl)) return null;
+            if (!baseUrl.EndsWith("/")) baseUrl += "/";
+
+            var url = $"{baseUrl}users/counterparty/?phone={Uri.EscapeDataString(query)}&first_name={Uri.EscapeDataString(query)}&last_name={Uri.EscapeDataString(query)}";
+
+            var response = await _httpClient.GetAsync(url);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                var result = JsonSerializer.Deserialize<CounterpartySearchResponse>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                return result?.Body;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[CounterpartyService] Error searching counterparties: {ex.Message}");
+        }
         return null;
     }
 }
