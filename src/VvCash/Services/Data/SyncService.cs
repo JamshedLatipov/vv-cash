@@ -11,12 +11,16 @@ namespace VvCash.Services.Data;
 
 public interface ISyncService
 {
+    event EventHandler<bool>? SyncStatusChanged;
     Task SyncProductsAsync();
     Task FullReinitializeAsync();
+    Task<bool> CheckSystemOnlineAsync();
 }
 
 public class SyncService : ISyncService
 {
+    public event EventHandler<bool>? SyncStatusChanged;
+
     private readonly HttpClient _httpClient;
     private readonly ISettingsService _settingsService;
     private readonly IOfflineStorageService _storageService;
@@ -37,6 +41,27 @@ public class SyncService : ISyncService
         if (string.IsNullOrWhiteSpace(baseUrl)) return string.Empty;
         if (!baseUrl.EndsWith("/")) baseUrl += "/";
         return baseUrl;
+    }
+
+    public async Task<bool> CheckSystemOnlineAsync()
+    {
+        try
+        {
+            var baseUrl = GetBaseUrl();
+            if (string.IsNullOrEmpty(baseUrl)) return false;
+
+            // Just ping the versions endpoint which is fast
+            var url = $"{baseUrl}cashes/product/versions/";
+            var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            bool isOnline = response.IsSuccessStatusCode;
+            SyncStatusChanged?.Invoke(this, isOnline);
+            return isOnline;
+        }
+        catch
+        {
+            SyncStatusChanged?.Invoke(this, false);
+            return false;
+        }
     }
 
     public async Task FullReinitializeAsync()
@@ -169,10 +194,12 @@ public class SyncService : ISyncService
                     }
                 }
             }
+            SyncStatusChanged?.Invoke(this, true);
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[SyncService] Sync error: {ex.Message}");
+            SyncStatusChanged?.Invoke(this, false);
         }
     }
 }

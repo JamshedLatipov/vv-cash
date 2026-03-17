@@ -378,8 +378,8 @@
             <Grid ColumnDefinitions="*, Auto, Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <Ellipse Width="6" Height="6" Fill="{StaticResource SuccessBrush}"/>
-                        <TextBlock Text="SYSTEM ONLINE" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
+                        <Ellipse Width="6" Height="6" Fill="{Binding IsSystemOnline, Converter={StaticResource BoolToColorConverter}}"/>
+                        <TextBlock Text="{Binding SystemStatusText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <Ellipse Width="6" Height="6" Fill="{Binding IsPrinterReady, Converter={StaticResource BoolToColorConverter}}"/>
