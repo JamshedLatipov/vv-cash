@@ -77,57 +77,43 @@ public class CounterpartyService : ICounterpartyService
             if (string.IsNullOrWhiteSpace(baseUrl)) return null;
             if (!baseUrl.EndsWith("/")) baseUrl += "/";
 
-            int currentPage = 1;
-            int totalPages = 1;
+            var url = $"{baseUrl}cashes/counterparty/?q={Uri.EscapeDataString(query)}";
+            var response = await _httpClient.GetAsync(url);
 
-            do
+            if (response.IsSuccessStatusCode)
             {
-                var url = $"{baseUrl}cashes/counterparty/?q={Uri.EscapeDataString(query)}&page={currentPage}";
-                var response = await _httpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+                using var jsonDoc = JsonDocument.Parse(content);
+                var root = jsonDoc.RootElement;
 
-                if (response.IsSuccessStatusCode)
+                if (root.ValueKind == JsonValueKind.Array)
                 {
-                    var content = await response.Content.ReadAsStringAsync();
-                    using var jsonDoc = JsonDocument.Parse(content);
-                    var root = jsonDoc.RootElement;
-
+                    var result = JsonSerializer.Deserialize<List<CounterpartyResponse>>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    if (result != null)
+                    {
+                        return result;
+                    }
+                }
+                else if (root.ValueKind == JsonValueKind.Object)
+                {
                     if (root.TryGetProperty("status", out var statusProp) && statusProp.GetInt32() == 0)
                     {
                         if (root.TryGetProperty("body", out var bodyElement))
                         {
-                            var result = JsonSerializer.Deserialize<CounterpartySearchResponse>(bodyElement.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            var result = JsonSerializer.Deserialize<List<CounterpartyResponse>>(bodyElement.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                             if (result != null)
                             {
-                                if (result.Body != null)
-                                {
-                                    allResults.AddRange(result.Body);
-                                }
-                                totalPages = result.PageCount > 0 ? result.PageCount : 1;
-                            }
-                            else
-                            {
-                                break;
+                                return result;
                             }
                         }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        break;
                     }
                 }
-                else
-                {
-                    var errorContent = await response.Content.ReadAsStringAsync();
-                    Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
-                    break;
-                }
-
-                currentPage++;
-            } while (currentPage <= totalPages);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
+            }
 
             return allResults;
         }
