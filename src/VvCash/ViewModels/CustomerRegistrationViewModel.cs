@@ -15,7 +15,7 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
 
     [ObservableProperty] private string _fullName = string.Empty;
     [ObservableProperty] private string _email = string.Empty;
-    [ObservableProperty] private string _dateOfBirth = string.Empty;
+    [ObservableProperty] private DateTimeOffset? _dateOfBirth;
     [ObservableProperty] private bool _isLoyaltyEnrolled = true;
     [ObservableProperty] private string _phoneNumber = string.Empty;
 
@@ -108,7 +108,7 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
             LastName = lastName,
             Email = string.IsNullOrWhiteSpace(Email) ? null : Email,
             Phone = string.IsNullOrWhiteSpace(PhoneNumber) ? null : $"7{PhoneNumber}", // Assuming format requires Country Code
-            Birthday = string.IsNullOrWhiteSpace(DateOfBirth) ? null : DateOfBirth, // Should ideally be parsed/formatted to correct ISO string if needed by backend
+            Birthday = DateOfBirth?.ToString("yyyy-MM-ddTHH:mm:sszzz"), // Should ideally be parsed/formatted to correct ISO string if needed by backend
             Form = "individual" // Default based on requirement
         };
 

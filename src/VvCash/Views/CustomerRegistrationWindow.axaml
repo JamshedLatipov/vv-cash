@@ -62,11 +62,14 @@
                         <!-- Date of Birth -->
                         <StackPanel Spacing="8">
                             <TextBlock Text="ДАТА РОЖДЕНИЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
-                            <TextBox Text="{Binding DateOfBirth}" Classes="IconTextBox" Watermark="ДД.ММ.ГГГГ" FontSize="18">
-                                <TextBox.InnerLeftContent>
-                                    <material:MaterialIcon Kind="CalendarToday" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
-                                </TextBox.InnerLeftContent>
-                            </TextBox>
+                            <CalendarDatePicker SelectedDate="{Binding DateOfBirth}"
+                                                Watermark="ДД.ММ.ГГГГ"
+                                                HorizontalAlignment="Stretch"
+                                                Height="56"
+                                                FontSize="18"
+                                                CornerRadius="12"
+                                                BorderBrush="{StaticResource Slate200Brush}"
+                                                BorderThickness="2" />
                         </StackPanel>
 
                         <!-- Loyalty Program Toggle -->
