@@ -157,6 +157,7 @@ public partial class PosViewModel : ViewModelBase
         _ = InitializeAsync();
     }
 
+
     private void StartBackgroundSync()
     {
         _syncCancellationTokenSource?.Cancel();
@@ -165,25 +166,26 @@ public partial class PosViewModel : ViewModelBase
 
         _ = Task.Run(async () =>
         {
+            DateTime lastSyncTime = DateTime.MinValue;
+
             while (!token.IsCancellationRequested)
             {
-                try
-                {
-                    await _syncService.SyncProductsAsync();
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = true);
-                }
-                catch (Exception ex)
-                {
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = false);
-                    Console.WriteLine($"[BackgroundSync] Sync failed: {ex.Message}");
-                }
+                // Ping the server every 10 seconds to update IsSystemOnline status
+                await _syncService.CheckSystemOnlineAsync();
 
                 int intervalMinutes = _settingsService.SyncIntervalMinutes;
                 if (intervalMinutes <= 0) intervalMinutes = 10;
 
+                // Sync products if enough time has passed
+                if (DateTime.Now - lastSyncTime >= TimeSpan.FromMinutes(intervalMinutes))
+                {
+                    await _syncService.SyncProductsAsync();
+                    lastSyncTime = DateTime.Now;
+                }
+
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), token);
+                    await Task.Delay(TimeSpan.FromSeconds(10), token);
                 }
                 catch (TaskCanceledException)
                 {
@@ -196,6 +198,23 @@ public partial class PosViewModel : ViewModelBase
     private async Task InitializeAsync()
     {
         await _offlineStorageService.InitializeAsync();
+
+        _expenseDocumentService.UnsyncedDocumentsCountChanged += (s, count) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                UnsyncedDocumentsCount = count;
+            });
+        };
+        UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
+
+        _syncService.SyncStatusChanged += (s, isOnline) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                IsSystemOnline = isOnline;
+            });
+        };
 
         StartBackgroundSync();
 
@@ -215,15 +234,6 @@ public partial class PosViewModel : ViewModelBase
 
         // Initial view is just all categories
         Products.Clear();
-
-        UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
-        _expenseDocumentService.UnsyncedDocumentsCountChanged += (s, count) =>
-        {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                UnsyncedDocumentsCount = count;
-            });
-        };
     }
 
     private async Task LoadProductsAsync(string? categoryId)
