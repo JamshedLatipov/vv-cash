@@ -13,9 +13,12 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     private readonly Window _window;
     private readonly ICounterpartyService _counterpartyService;
 
-    [ObservableProperty] private string _fullName = string.Empty;
+    [ObservableProperty] private string _firstName = string.Empty;
+    [ObservableProperty] private string _lastName = string.Empty;
+    [ObservableProperty] private int _selectedGenderIndex = 0; // 0 = MALE, 1 = FEMALE
+
     [ObservableProperty] private string _email = string.Empty;
-    [ObservableProperty] private DateTimeOffset? _dateOfBirth;
+    [ObservableProperty] private DateTime? _dateOfBirth;
     [ObservableProperty] private bool _isLoyaltyEnrolled = true;
     [ObservableProperty] private string _phoneNumber = string.Empty;
 
@@ -86,29 +89,14 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     [RelayCommand]
     private async Task SubmitAsync()
     {
-        string? firstName = null;
-        string? lastName = null;
-
-        if (!string.IsNullOrWhiteSpace(FullName))
-        {
-            var parts = FullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length > 0)
-            {
-                firstName = parts[0];
-                if (parts.Length > 1)
-                {
-                    lastName = string.Join(" ", parts, 1, parts.Length - 1);
-                }
-            }
-        }
-
         var request = new CounterpartyCreateRequest
         {
-            FirstName = firstName,
-            LastName = lastName,
+            FirstName = string.IsNullOrWhiteSpace(FirstName) ? "-" : FirstName.Trim(),
+            LastName = string.IsNullOrWhiteSpace(LastName) ? "-" : LastName.Trim(),
+            Gender = SelectedGenderIndex == 0 ? "MALE" : "FEMALE",
             Email = string.IsNullOrWhiteSpace(Email) ? null : Email,
             Phone = string.IsNullOrWhiteSpace(PhoneNumber) ? null : $"7{PhoneNumber}", // Assuming format requires Country Code
-            Birthday = DateOfBirth?.ToString("yyyy-MM-ddTHH:mm:sszzz"), // Should ideally be parsed/formatted to correct ISO string if needed by backend
+            Birthday = DateOfBirth?.ToString("yyyy-MM-ddT00:00:00+00:00"), // Parse into valid string
             Form = "individual" // Default based on requirement
         };
 
