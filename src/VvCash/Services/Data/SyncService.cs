@@ -173,6 +173,7 @@ public class SyncService : ISyncService
         catch (Exception ex)
         {
             Debug.WriteLine($"[SyncService] Sync error: {ex.Message}");
+            throw; // Re-throw to inform ViewModel that system is offline
         }
     }
 }

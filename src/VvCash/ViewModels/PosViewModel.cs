@@ -60,6 +60,13 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isAlertModalVisible = false;
     [ObservableProperty] private string _alertMessage = string.Empty;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SystemStatusText))]
+    private bool _isSystemOnline = true;
+
+    public string SystemStatusText => IsSystemOnline ? "SYSTEM ONLINE" : "SYSTEM OFFLINE";
+
+
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
 
@@ -160,7 +167,17 @@ public partial class PosViewModel : ViewModelBase
         {
             while (!token.IsCancellationRequested)
             {
-                await _syncService.SyncProductsAsync();
+                try
+                {
+                    await _syncService.SyncProductsAsync();
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = true);
+                }
+                catch (Exception ex)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = false);
+                    Console.WriteLine($"[BackgroundSync] Sync failed: {ex.Message}");
+                }
+
                 int intervalMinutes = _settingsService.SyncIntervalMinutes;
                 if (intervalMinutes <= 0) intervalMinutes = 10;
 
@@ -247,15 +264,18 @@ public partial class PosViewModel : ViewModelBase
 
     private void OnPrinterStatusChanged(object? sender, PrinterStatus status)
     {
-        IsPrinterReady = status == PrinterStatus.Ready;
-        PrinterStatusText = status switch
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            PrinterStatus.Ready => "Printer Ready",
-            PrinterStatus.NoPaper => "No Paper",
-            PrinterStatus.Error => "Printer Error",
-            PrinterStatus.Offline => "Printer Offline",
-            _ => "Unknown"
-        };
+            IsPrinterReady = status == PrinterStatus.Ready;
+            PrinterStatusText = status switch
+            {
+                PrinterStatus.Ready => "Printer Ready",
+                PrinterStatus.NoPaper => "No Paper",
+                PrinterStatus.Error => "Printer Error",
+                PrinterStatus.Offline => "Printer Offline",
+                _ => "Unknown"
+            };
+        });
     }
 
     [RelayCommand]
