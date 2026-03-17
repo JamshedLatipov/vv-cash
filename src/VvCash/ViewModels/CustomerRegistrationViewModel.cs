@@ -1,17 +1,24 @@
+using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Controls;
+using VvCash.Models.Api;
+using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
 
 public partial class CustomerRegistrationViewModel : ViewModelBase
 {
     private readonly Window _window;
+    private readonly ICounterpartyService _counterpartyService;
 
-    [ObservableProperty] private string _fullName = string.Empty;
+    [ObservableProperty] private string _firstName = string.Empty;
+    [ObservableProperty] private string _lastName = string.Empty;
+    [ObservableProperty] private int _selectedGenderIndex = 0; // 0 = MALE, 1 = FEMALE
+
     [ObservableProperty] private string _email = string.Empty;
-    [ObservableProperty] private string _dateOfBirth = string.Empty;
+    [ObservableProperty] private DateTime? _dateOfBirth;
     [ObservableProperty] private bool _isLoyaltyEnrolled = true;
     [ObservableProperty] private string _phoneNumber = string.Empty;
 
@@ -50,9 +57,10 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
         }
     }
 
-    public CustomerRegistrationViewModel(Window window)
+    public CustomerRegistrationViewModel(Window window, ICounterpartyService counterpartyService)
     {
         _window = window;
+        _counterpartyService = counterpartyService;
     }
 
     partial void OnPhoneNumberChanged(string value)
@@ -79,15 +87,36 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void Submit()
+    private async Task SubmitAsync()
     {
-        // Add business logic for saving customer here if needed
-        _window.Close(true); // Return success
+        var request = new CounterpartyCreateRequest
+        {
+            FirstName = string.IsNullOrWhiteSpace(FirstName) ? "-" : FirstName.Trim(),
+            LastName = string.IsNullOrWhiteSpace(LastName) ? "-" : LastName.Trim(),
+            Gender = SelectedGenderIndex == 0 ? "MALE" : "FEMALE",
+            Email = string.IsNullOrWhiteSpace(Email) ? null : Email,
+            Phone = PhoneNumber.Length == 10 ? $"7{PhoneNumber}" : null, // Assuming format requires Country Code
+            Birthday = DateOfBirth?.ToString("yyyy-MM-dd'T'00:00:00Z"), // Parse into valid string
+            Form = "individual" // Default based on requirement
+        };
+
+        var response = await _counterpartyService.CreateCounterpartyAsync(request);
+
+        if (response != null)
+        {
+            // Close window and potentially return the created user ID or details
+            _window.Close(response);
+        }
+        else
+        {
+            // For now, close with null to signify failure (or we could show an error)
+            _window.Close(null);
+        }
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        _window.Close(false); // Return cancelled
+        _window.Close(null); // Return cancelled
     }
 }

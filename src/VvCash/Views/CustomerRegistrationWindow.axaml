@@ -40,14 +40,27 @@
                     <StackPanel Spacing="24">
 
                         <!-- Full Name -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="ФИО" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
-                            <TextBox Text="{Binding FullName}" Classes="IconTextBox" Watermark="Иван Иванов" FontSize="18">
-                                <TextBox.InnerLeftContent>
-                                    <material:MaterialIcon Kind="BadgeAccountHorizontalOutline" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
-                                </TextBox.InnerLeftContent>
-                            </TextBox>
-                        </StackPanel>
+                        <!-- Name Fields -->
+                        <Grid ColumnDefinitions="*,16,*">
+                            <!-- First Name -->
+                            <StackPanel Grid.Column="0" Spacing="8">
+                                <TextBlock Text="ИМЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <TextBox Text="{Binding FirstName}" Classes="IconTextBox" Watermark="Иван" FontSize="18">
+                                    <TextBox.InnerLeftContent>
+                                        <material:MaterialIcon Kind="BadgeAccountHorizontalOutline" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
+                                    </TextBox.InnerLeftContent>
+                                </TextBox>
+                            </StackPanel>
+                            <!-- Last Name -->
+                            <StackPanel Grid.Column="2" Spacing="8">
+                                <TextBlock Text="ФАМИЛИЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <TextBox Text="{Binding LastName}" Classes="IconTextBox" Watermark="Иванов" FontSize="18">
+                                    <TextBox.InnerLeftContent>
+                                        <material:MaterialIcon Kind="BadgeAccountHorizontalOutline" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
+                                    </TextBox.InnerLeftContent>
+                                </TextBox>
+                            </StackPanel>
+                        </Grid>
 
                         <!-- Email -->
                         <StackPanel Spacing="8">
@@ -60,14 +73,34 @@
                         </StackPanel>
 
                         <!-- Date of Birth -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="ДАТА РОЖДЕНИЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
-                            <TextBox Text="{Binding DateOfBirth}" Classes="IconTextBox" Watermark="ДД.ММ.ГГГГ" FontSize="18">
-                                <TextBox.InnerLeftContent>
-                                    <material:MaterialIcon Kind="CalendarToday" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
-                                </TextBox.InnerLeftContent>
-                            </TextBox>
-                        </StackPanel>
+                        <Grid ColumnDefinitions="*,16,*">
+                            <!-- Date of Birth -->
+                            <StackPanel Grid.Column="0" Spacing="8">
+                                <TextBlock Text="ДАТА РОЖДЕНИЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <CalendarDatePicker SelectedDate="{Binding DateOfBirth}"
+                                                    Watermark="ДД.ММ.ГГГГ"
+                                                    HorizontalAlignment="Stretch"
+                                                    Height="56"
+                                                    FontSize="18"
+                                                    CornerRadius="12"
+                                                    BorderBrush="{StaticResource Slate200Brush}"
+                                                    BorderThickness="2" />
+                            </StackPanel>
+                            <!-- Gender -->
+                            <StackPanel Grid.Column="2" Spacing="8">
+                                <TextBlock Text="ПОЛ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <ComboBox SelectedIndex="{Binding SelectedGenderIndex}"
+                                          HorizontalAlignment="Stretch"
+                                          Height="56"
+                                          FontSize="18"
+                                          CornerRadius="12"
+                                          BorderBrush="{StaticResource Slate200Brush}"
+                                          BorderThickness="2">
+                                    <ComboBoxItem Content="Мужской" />
+                                    <ComboBoxItem Content="Женский" />
+                                </ComboBox>
+                            </StackPanel>
+                        </Grid>
 
                         <!-- Loyalty Program Toggle -->
                         <Border Background="{StaticResource PrimaryLightBrush}" BorderBrush="{StaticResource PrimaryLightBrush}" BorderThickness="1" CornerRadius="12" Padding="16">
