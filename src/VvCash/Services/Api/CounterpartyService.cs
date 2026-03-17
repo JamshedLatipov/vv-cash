@@ -70,27 +70,66 @@ public class CounterpartyService : ICounterpartyService
 
     public async Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query)
     {
+        var allResults = new List<CounterpartyResponse>();
         try
         {
             var baseUrl = _settingsService.BackendUrl;
             if (string.IsNullOrWhiteSpace(baseUrl)) return null;
             if (!baseUrl.EndsWith("/")) baseUrl += "/";
 
-            var url = $"{baseUrl}cashes/counterparty/?q={Uri.EscapeDataString(query)}";
+            int currentPage = 1;
+            int totalPages = 1;
 
-            var response = await _httpClient.GetAsync(url);
+            do
+            {
+                var url = $"{baseUrl}cashes/counterparty/?q={Uri.EscapeDataString(query)}&page={currentPage}";
+                var response = await _httpClient.GetAsync(url);
 
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsStringAsync();
-                var result = JsonSerializer.Deserialize<CounterpartySearchResponse>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                return result?.Body;
-            }
-            else
-            {
-                var errorContent = await response.Content.ReadAsStringAsync();
-                Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
-            }
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    using var jsonDoc = JsonDocument.Parse(content);
+                    var root = jsonDoc.RootElement;
+
+                    if (root.TryGetProperty("status", out var statusProp) && statusProp.GetInt32() == 0)
+                    {
+                        if (root.TryGetProperty("body", out var bodyElement))
+                        {
+                            var result = JsonSerializer.Deserialize<CounterpartySearchResponse>(bodyElement.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (result != null)
+                            {
+                                if (result.Body != null)
+                                {
+                                    allResults.AddRange(result.Body);
+                                }
+                                totalPages = result.PageCount > 0 ? result.PageCount : 1;
+                            }
+                            else
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                else
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
+                    break;
+                }
+
+                currentPage++;
+            } while (currentPage <= totalPages);
+
+            return allResults;
         }
         catch (Exception ex)
         {
