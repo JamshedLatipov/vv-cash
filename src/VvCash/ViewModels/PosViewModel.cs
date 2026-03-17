@@ -27,6 +27,7 @@ public partial class PosViewModel : ViewModelBase
     private readonly ISyncService _syncService;
     private readonly ISettingsService _settingsService;
     private readonly IExpenseDocumentService _expenseDocumentService;
+    private readonly ICounterpartyService _counterpartyService;
     private CancellationTokenSource? _syncCancellationTokenSource;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
@@ -137,7 +138,8 @@ public partial class PosViewModel : ViewModelBase
         IOfflineStorageService offlineStorageService,
         ISyncService syncService,
         ISettingsService settingsService,
-        IExpenseDocumentService expenseDocumentService)
+        IExpenseDocumentService expenseDocumentService,
+        ICounterpartyService counterpartyService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -150,6 +152,7 @@ public partial class PosViewModel : ViewModelBase
         _syncService = syncService;
         _settingsService = settingsService;
         _expenseDocumentService = expenseDocumentService;
+        _counterpartyService = counterpartyService;
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
@@ -397,7 +400,7 @@ public partial class PosViewModel : ViewModelBase
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.CustomerRegistrationWindow();
-                dialog.DataContext = new CustomerRegistrationViewModel(dialog);
+                dialog.DataContext = new CustomerRegistrationViewModel(dialog, _counterpartyService);
                 await dialog.ShowDialog(mainWindow);
             }
         }

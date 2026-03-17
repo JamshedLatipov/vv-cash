@@ -1,13 +1,17 @@
+using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Controls;
+using VvCash.Models.Api;
+using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
 
 public partial class CustomerRegistrationViewModel : ViewModelBase
 {
     private readonly Window _window;
+    private readonly ICounterpartyService _counterpartyService;
 
     [ObservableProperty] private string _fullName = string.Empty;
     [ObservableProperty] private string _email = string.Empty;
@@ -50,9 +54,10 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
         }
     }
 
-    public CustomerRegistrationViewModel(Window window)
+    public CustomerRegistrationViewModel(Window window, ICounterpartyService counterpartyService)
     {
         _window = window;
+        _counterpartyService = counterpartyService;
     }
 
     partial void OnPhoneNumberChanged(string value)
@@ -79,15 +84,51 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void Submit()
+    private async Task SubmitAsync()
     {
-        // Add business logic for saving customer here if needed
-        _window.Close(true); // Return success
+        string? firstName = null;
+        string? lastName = null;
+
+        if (!string.IsNullOrWhiteSpace(FullName))
+        {
+            var parts = FullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length > 0)
+            {
+                firstName = parts[0];
+                if (parts.Length > 1)
+                {
+                    lastName = string.Join(" ", parts, 1, parts.Length - 1);
+                }
+            }
+        }
+
+        var request = new CounterpartyCreateRequest
+        {
+            FirstName = firstName,
+            LastName = lastName,
+            Email = string.IsNullOrWhiteSpace(Email) ? null : Email,
+            Phone = string.IsNullOrWhiteSpace(PhoneNumber) ? null : $"7{PhoneNumber}", // Assuming format requires Country Code
+            Birthday = string.IsNullOrWhiteSpace(DateOfBirth) ? null : DateOfBirth, // Should ideally be parsed/formatted to correct ISO string if needed by backend
+            Form = "individual" // Default based on requirement
+        };
+
+        var response = await _counterpartyService.CreateCounterpartyAsync(request);
+
+        if (response != null)
+        {
+            // Close window and potentially return the created user ID or details
+            _window.Close(response);
+        }
+        else
+        {
+            // For now, close with null to signify failure (or we could show an error)
+            _window.Close(null);
+        }
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        _window.Close(false); // Return cancelled
+        _window.Close(null); // Return cancelled
     }
 }

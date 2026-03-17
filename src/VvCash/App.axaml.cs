@@ -9,6 +9,7 @@ using System.Net.Http;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Hardware;
+using VvCash.Services.Api;
 using VvCash.ViewModels;
 using VvCash.Views;
 
@@ -90,6 +91,7 @@ public partial class App : Application
 
         services.AddSingleton<IAuthService, AuthService>();
         services.AddHttpClient<ICategoryService, CategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<ICounterpartyService, CounterpartyService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<IShiftService, ShiftService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ExpenseDocumentService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<IExpenseDocumentService>(sp => sp.GetRequiredService<ExpenseDocumentService>());
