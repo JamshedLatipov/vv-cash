@@ -50,6 +50,14 @@ public class CounterpartyResponse
     [JsonPropertyName("current_balance")]
     public decimal? CurrentBalance { get; set; }
 
+    // Fallback property because some endpoints return "balance" directly instead of "current_balance"
+    [JsonPropertyName("balance")]
+    public decimal? Balance
+    {
+        get => CurrentBalance;
+        set => CurrentBalance = value;
+    }
+
     [JsonPropertyName("credit_limit")]
     public decimal? CreditLimit { get; set; }
 }
