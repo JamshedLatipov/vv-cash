@@ -95,7 +95,7 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
             LastName = string.IsNullOrWhiteSpace(LastName) ? "-" : LastName.Trim(),
             Gender = SelectedGenderIndex == 0 ? "MALE" : "FEMALE",
             Email = string.IsNullOrWhiteSpace(Email) ? null : Email,
-            Phone = string.IsNullOrWhiteSpace(PhoneNumber) ? null : $"7{PhoneNumber}", // Assuming format requires Country Code
+            Phone = PhoneNumber.Length == 10 ? $"7{PhoneNumber}" : null, // Assuming format requires Country Code
             Birthday = DateOfBirth?.ToString("yyyy-MM-dd'T'00:00:00Z"), // Parse into valid string
             Form = "individual" // Default based on requirement
         };

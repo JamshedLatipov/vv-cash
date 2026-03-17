@@ -36,13 +36,12 @@ public class CounterpartyCreateRequest
     public string? FootSize { get; set; }
 
     [JsonPropertyName("form")]
-    public string? Form { get; set; } = "individual";
+    public string? Form { get; set; }
 
     [JsonPropertyName("gender")]
     public string? Gender { get; set; }
 
     [JsonPropertyName("id")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Id { get; set; }
 
     [JsonPropertyName("last_name")]
