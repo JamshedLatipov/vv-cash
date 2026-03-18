@@ -104,7 +104,7 @@
                     <Border Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,1,0" Padding="0,0,24,0">
                         <Grid RowDefinitions="Auto, *">
                             <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
-                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategoryName, StringFormat='{}Catalog - {0}'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategoryName, StringFormat='{}{0}'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                                 <Button Grid.Column="1" Classes="IconButton" Command="{Binding CloseCatalogCommand}" VerticalAlignment="Center">
                                     <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                                 </Button>
@@ -297,7 +297,7 @@
                                         <TextBlock Text="{Binding [PROMOTIONSampCOUPONS], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" LetterSpacing="1"/>
                                         <Grid ColumnDefinitions="*, Auto">
                                             <TextBox Grid.Column="0" Text="{Binding CouponCode}" Watermark="{Binding [Entercouponcode], Source={x:Static services:I18nService.Instance}}" Margin="0,0,8,0" Classes="CouponBox"/>
-                                            <Button Grid.Column="1" Content="Apply" Command="{Binding ApplyCouponCommand}" Classes="SecondaryButton" Width="80"/>
+                                            <Button Grid.Column="1" Content="{Binding [Apply], Source={x:Static services:I18nService.Instance}}" Command="{Binding ApplyCouponCommand}" Classes="SecondaryButton" Width="80"/>
                                         </Grid>
 
                                         <ItemsControl ItemsSource="{Binding AppliedCoupons}">
@@ -363,7 +363,7 @@
                                     <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding PayCommand}" MinHeight="80" CornerRadius="12" HorizontalAlignment="Stretch">
                                         <StackPanel Orientation="Horizontal" Spacing="16">
                                             <material:MaterialIcon Kind="CashMultiple" Width="36" Height="36"/>
-                                            <TextBlock Text="{Binding TotalAmount, StringFormat='Pay ${0:F2}'}" FontSize="28" FontWeight="Black"/>
+                                            <TextBlock Text="{Binding TotalAmount, StringFormat='${0:F2}'}" FontSize="28" FontWeight="Black"/>
                                         </StackPanel>
                                     </Button>
                                 </Grid>

@@ -69,5 +69,8 @@
   "Name": "Nomi",
   "Type": "Turi",
   "Enabled": "Faol",
-  "SaveConfiguration": "Sozlamalarni saqlash"
+  "SaveConfiguration": "Сохранить настройки",
+  "Мужской": "Erkak",
+  "Женский": "Ayol",
+  "Apply": "Qo'llash"
 }

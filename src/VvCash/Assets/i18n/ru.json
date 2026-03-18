@@ -81,5 +81,8 @@
   "Name": "Name",
   "Type": "Type",
   "Enabled": "Enabled",
-  "SaveConfiguration": "Save Configuration"
+  "SaveConfiguration": "Сохранить настройки",
+  "Мужской": "Мужской",
+  "Женский": "Женский",
+  "Apply": "Применить"
 }

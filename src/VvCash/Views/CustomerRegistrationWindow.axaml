@@ -97,8 +97,8 @@
                                           CornerRadius="12"
                                           BorderBrush="{StaticResource Slate200Brush}"
                                           BorderThickness="2">
-                                    <ComboBoxItem Content="Мужской" />
-                                    <ComboBoxItem Content="Женский" />
+                                    <ComboBoxItem Content="{Binding [Мужской], Source={x:Static services:I18nService.Instance}}" />
+                                    <ComboBoxItem Content="{Binding [Женский], Source={x:Static services:I18nService.Instance}}" />
                                 </ComboBox>
                             </StackPanel>
                         </Grid>
