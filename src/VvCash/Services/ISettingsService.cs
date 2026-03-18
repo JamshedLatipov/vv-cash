@@ -10,6 +10,7 @@ public interface ISettingsService
     string CashRegisterToken { get; set; }
     string AuthToken { get; set; }
     int SyncIntervalMinutes { get; set; }
+    string Language { get; set; }
     List<PrinterConfig> Printers { get; set; }
 
     event EventHandler? SettingsChanged;

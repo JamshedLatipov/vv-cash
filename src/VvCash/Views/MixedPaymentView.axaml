@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
         xmlns:converters="using:VvCash.Converters"
@@ -20,8 +21,8 @@
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
                     <material:MaterialIcon Kind="PointOfSale" Width="36" Height="36" Foreground="{StaticResource PrimaryBrush}" />
                     <StackPanel>
-                        <TextBlock Text="Смешанная оплата" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
-                        <TextBlock Text="Заказ #8824 • Модный Бутик" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                        <TextBlock Text="{Binding [Смешаннаяоплата], Source={x:Static services:I18nService.Instance}}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                        <TextBlock Text="{Binding [Заказ8824МодныйБутик], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -40,14 +41,14 @@
                 <Grid Grid.Row="0" ColumnDefinitions="*, *" Margin="0,0,0,24">
                     <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="12" Padding="24" Margin="0,0,16,0" BoxShadow="0 1 2 0 #10000000">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Общая сумма" FontSize="14" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}"/>
+                            <TextBlock Text="{Binding [Общаясумма], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}"/>
                             <TextBlock Text="{Binding TotalAmount, StringFormat='{}{0:N0} ₽'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
                         </StackPanel>
                     </Border>
 
                     <Border Grid.Column="1" Background="{StaticResource PrimaryLightBrush}" BorderBrush="{StaticResource PrimaryDarkBrush}" BorderThickness="1" CornerRadius="12" Padding="24" BoxShadow="0 1 2 0 #10000000">
                         <StackPanel Spacing="4">
-                            <TextBlock Text="Остаток к оплате" FontSize="14" FontWeight="Medium" Foreground="{StaticResource PrimaryBrush}"/>
+                            <TextBlock Text="{Binding [Остатоккоплате], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Medium" Foreground="{StaticResource PrimaryBrush}"/>
                             <TextBlock Text="{Binding RemainingAmount, StringFormat='{}{0:N0} ₽'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource PrimaryBrush}" LetterSpacing="-1"/>
                         </StackPanel>
                     </Border>
@@ -55,7 +56,7 @@
 
                 <!-- Payment Methods -->
                 <StackPanel Grid.Row="1" Spacing="16">
-                    <TextBlock Text="Распределение оплаты" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                    <TextBlock Text="{Binding [Распределениеоплаты], Source={x:Static services:I18nService.Instance}}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
 
                     <!-- Cash -->
                     <Border Background="White" BorderThickness="2" CornerRadius="12" Padding="16" BoxShadow="0 1 2 0 #10000000" Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Cash'}">
@@ -72,11 +73,11 @@
                                 <material:MaterialIcon Kind="CashMultiple" Width="24" Height="24" Foreground="{StaticResource Emerald600Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="Наличные" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
-                                <TextBlock Text="Введено основной валютой" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                <TextBlock Text="{Binding [Наличные], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                <TextBlock Text="{Binding [Введеноосновнойвалют], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                             </StackPanel>
-                            <TextBox Grid.Column="2" Name="CashTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CashAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="0"/>
-                            <TextBlock Grid.Column="2" Text="₽" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                            <TextBox Grid.Column="2" Name="CashTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CashAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="{Binding [0], Source={x:Static services:I18nService.Instance}}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                         </Grid>
                     </Border>
 
@@ -95,11 +96,11 @@
                                 <material:MaterialIcon Kind="CreditCard" Width="24" Height="24" Foreground="{StaticResource Blue600Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="Банковская карта" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
-                                <TextBlock Text="Через терминал эквайринга" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                <TextBlock Text="{Binding [Банковскаякарта], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                <TextBlock Text="{Binding [Черезтерминалэквайри], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                             </StackPanel>
-                            <TextBox Grid.Column="2" Name="CardTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CardAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="0"/>
-                            <TextBlock Grid.Column="2" Text="₽" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                            <TextBox Grid.Column="2" Name="CardTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CardAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="{Binding [0], Source={x:Static services:I18nService.Instance}}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                         </Grid>
                     </Border>
 
@@ -118,11 +119,11 @@
                                 <material:MaterialIcon Kind="Gift" Width="24" Height="24" Foreground="{StaticResource Purple600Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                             </Border>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="Подарочный сертификат" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
-                                <TextBlock Text="Баланс: 5 000 ₽" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                <TextBlock Text="{Binding [Подарочныйсертификат], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                                <TextBlock Text="{Binding [Баланс5000], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                             </StackPanel>
-                            <TextBox Grid.Column="2" Name="GiftTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding GiftAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="0"/>
-                            <TextBlock Grid.Column="2" Text="₽" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
+                            <TextBox Grid.Column="2" Name="GiftTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding GiftAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="{Binding [0], Source={x:Static services:I18nService.Instance}}"/>
+                            <TextBlock Grid.Column="2" Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                         </Grid>
                     </Border>
                 </StackPanel>
@@ -132,13 +133,13 @@
                     <Button Grid.Column="0" Margin="0,0,16,0" Classes="SecondaryButton" Command="{Binding BackCommand}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="2" CornerRadius="12" HorizontalAlignment="Stretch" Padding="24,16">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <material:MaterialIcon Kind="ArrowLeft" Width="24" Height="24" Foreground="{StaticResource Slate900Brush}"/>
-                            <TextBlock Text="Назад" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                            <TextBlock Text="{Binding [Назад], Source={x:Static services:I18nService.Instance}}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
                         </StackPanel>
                     </Button>
                     <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding ConfirmPaymentCommand}" CornerRadius="12" HorizontalAlignment="Stretch" Padding="24,16" Background="{StaticResource PrimaryBrush}">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <material:MaterialIcon Kind="CheckCircle" Width="24" Height="24"/>
-                            <TextBlock Text="Подтвердить оплату" FontSize="16" FontWeight="Bold"/>
+                            <TextBlock Text="{Binding [Подтвердитьоплату], Source={x:Static services:I18nService.Instance}}" FontSize="16" FontWeight="Bold"/>
                         </StackPanel>
                     </Button>
                 </Grid>
@@ -148,10 +149,10 @@
             <Border Grid.Column="1" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="24" Width="380" BoxShadow="0 20 25 -5 #10000000, 0 8 10 -6 #10000000">
                 <Grid RowDefinitions="Auto, *, Auto">
                     <StackPanel Grid.Row="0" HorizontalAlignment="Center" Margin="0,0,0,24">
-                        <TextBlock Text="БЫСТРЫЙ ВВОД" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate400Brush}" LetterSpacing="2" HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                        <TextBlock Text="{Binding [БЫСТРЫЙВВОД], Source={x:Static services:I18nService.Instance}}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate400Brush}" LetterSpacing="2" HorizontalAlignment="Center" Margin="0,0,0,4"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
                             <TextBlock Text="{Binding QuickInputText}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
-                            <TextBlock Text="₽" FontSize="20" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
+                            <TextBlock Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" FontSize="20" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
                         </StackPanel>
                     </StackPanel>
 

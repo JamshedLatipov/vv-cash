@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:VvCash.ViewModels"
@@ -24,7 +25,7 @@
                 <Grid ColumnDefinitions="*,Auto">
                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
                         <material:MaterialIcon Kind="AccountPlus" Width="36" Height="36" Foreground="{StaticResource PrimaryBrush}" />
-                        <TextBlock Text="Регистрация клиента" FontSize="28" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding [Регистрацияклиента], Source={x:Static services:I18nService.Instance}}" FontSize="28" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                     </StackPanel>
                     <Button Grid.Column="1" Classes="Transparent" Command="{Binding CancelCommand}" Padding="8" CornerRadius="99" Background="Transparent">
                         <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate500Brush}"/>
@@ -44,8 +45,8 @@
                         <Grid ColumnDefinitions="*,16,*">
                             <!-- First Name -->
                             <StackPanel Grid.Column="0" Spacing="8">
-                                <TextBlock Text="ИМЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
-                                <TextBox Text="{Binding FirstName}" Classes="IconTextBox" Watermark="Иван" FontSize="18">
+                                <TextBlock Text="{Binding [ИМЯ], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <TextBox Text="{Binding FirstName}" Classes="IconTextBox" Watermark="{Binding [Иван], Source={x:Static services:I18nService.Instance}}" FontSize="18">
                                     <TextBox.InnerLeftContent>
                                         <material:MaterialIcon Kind="BadgeAccountHorizontalOutline" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
                                     </TextBox.InnerLeftContent>
@@ -53,8 +54,8 @@
                             </StackPanel>
                             <!-- Last Name -->
                             <StackPanel Grid.Column="2" Spacing="8">
-                                <TextBlock Text="ФАМИЛИЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
-                                <TextBox Text="{Binding LastName}" Classes="IconTextBox" Watermark="Иванов" FontSize="18">
+                                <TextBlock Text="{Binding [ФАМИЛИЯ], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <TextBox Text="{Binding LastName}" Classes="IconTextBox" Watermark="{Binding [Иванов], Source={x:Static services:I18nService.Instance}}" FontSize="18">
                                     <TextBox.InnerLeftContent>
                                         <material:MaterialIcon Kind="BadgeAccountHorizontalOutline" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
                                     </TextBox.InnerLeftContent>
@@ -64,8 +65,8 @@
 
                         <!-- Email -->
                         <StackPanel Spacing="8">
-                            <TextBlock Text="EMAIL" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
-                            <TextBox Text="{Binding Email}" Classes="IconTextBox" Watermark="example@mail.com" FontSize="18">
+                            <TextBlock Text="{Binding [EMAIL], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                            <TextBox Text="{Binding Email}" Classes="IconTextBox" Watermark="{Binding [examplemailcom], Source={x:Static services:I18nService.Instance}}" FontSize="18">
                                 <TextBox.InnerLeftContent>
                                     <material:MaterialIcon Kind="EmailOutline" Width="24" Height="24" Foreground="{StaticResource Slate400Brush}" Margin="16,0,12,0"/>
                                 </TextBox.InnerLeftContent>
@@ -76,9 +77,9 @@
                         <Grid ColumnDefinitions="*,16,*">
                             <!-- Date of Birth -->
                             <StackPanel Grid.Column="0" Spacing="8">
-                                <TextBlock Text="ДАТА РОЖДЕНИЯ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <TextBlock Text="{Binding [ДАТАРОЖДЕНИЯ], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
                                 <CalendarDatePicker SelectedDate="{Binding DateOfBirth}"
-                                                    Watermark="ДД.ММ.ГГГГ"
+                                                    Watermark="{Binding [ДДММГГГГ], Source={x:Static services:I18nService.Instance}}"
                                                     HorizontalAlignment="Stretch"
                                                     Height="56"
                                                     FontSize="18"
@@ -88,7 +89,7 @@
                             </StackPanel>
                             <!-- Gender -->
                             <StackPanel Grid.Column="2" Spacing="8">
-                                <TextBlock Text="ПОЛ" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                                <TextBlock Text="{Binding [ПОЛ], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
                                 <ComboBox SelectedIndex="{Binding SelectedGenderIndex}"
                                           HorizontalAlignment="Stretch"
                                           Height="56"
@@ -107,8 +108,8 @@
                             <Grid ColumnDefinitions="Auto, *, Auto">
                                 <material:MaterialIcon Grid.Column="0" Kind="CardAccountDetailsOutline" Width="32" Height="32" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Text="Программа лояльности" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
-                                    <TextBlock Text="Начисление бонусов с первой покупки" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                    <TextBlock Text="{Binding [Программалояльности], Source={x:Static services:I18nService.Instance}}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
+                                    <TextBlock Text="{Binding [Начислениебонусовспе], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="2" IsChecked="{Binding IsLoyaltyEnrolled}" OnContent="" OffContent="" VerticalAlignment="Center" Classes="PrimarySwitch"/>
                             </Grid>
@@ -121,7 +122,7 @@
                 <Border Grid.Column="1" Background="{StaticResource Slate50Brush}" Padding="32">
                     <Grid RowDefinitions="Auto, *">
                         <StackPanel Grid.Row="0" Spacing="8" Margin="0,0,0,24">
-                            <TextBlock Text="НОМЕР ТЕЛЕФОНА" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
+                            <TextBlock Text="{Binding [НОМЕРТЕЛЕФОНА], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate600Brush}" Classes="Uppercase" LetterSpacing="1"/>
                             <Border Background="White" BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="2" CornerRadius="12" Height="64" Padding="16">
                                 <TextBlock Text="{Binding FormattedPhoneNumber}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" TextAlignment="Center" VerticalAlignment="Center" LetterSpacing="2"/>
                             </Border>
@@ -164,7 +165,7 @@
                     <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding SubmitCommand}" HorizontalAlignment="Stretch">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <material:MaterialIcon Kind="AccountPlus" Width="24" Height="24"/>
-                            <TextBlock Text="ЗАРЕГИСТРИРОВАТЬ КЛИЕНТА" Classes="Uppercase" LetterSpacing="1" FontSize="16"/>
+                            <TextBlock Text="{Binding [ЗАРЕГИСТРИРОВАТЬКЛИЕ], Source={x:Static services:I18nService.Instance}}" Classes="Uppercase" LetterSpacing="1" FontSize="16"/>
                         </StackPanel>
                     </Button>
                 </Grid>

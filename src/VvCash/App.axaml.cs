@@ -32,6 +32,9 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            var initSettingsService = Services.GetRequiredService<ISettingsService>();
+            I18nService.Instance.Initialize(string.IsNullOrEmpty(initSettingsService.Language) ? "ru" : initSettingsService.Language);
+
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
 
@@ -39,6 +42,9 @@ public partial class App : Application
 
             loginVm.SettingsRequested += (s, e) =>
             {
+            var initSettingsService = Services.GetRequiredService<ISettingsService>();
+            I18nService.Instance.Initialize(initSettingsService.Language ?? "ru");
+
                 var settingsService = Services.GetRequiredService<ISettingsService>();
                 var settingsVm = new SettingsViewModel(loginVm, settingsService);
                 settingsVm.NavigationRequest = mainVm.NavigateTo;

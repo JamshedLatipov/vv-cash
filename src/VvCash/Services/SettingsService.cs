@@ -12,6 +12,7 @@ public class SettingsData
     public string CashRegisterToken { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
     public int SyncIntervalMinutes { get; set; } = 10;
+    public string Language { get; set; } = "ru";
     public List<PrinterConfig> Printers { get; set; } = new();
 }
 
@@ -46,6 +47,12 @@ public class SettingsService : ISettingsService
         set => _data.SyncIntervalMinutes = value;
     }
 
+    public string Language
+    {
+        get => _data.Language;
+        set => _data.Language = value;
+    }
+
     public List<PrinterConfig> Printers
     {
         get => _data.Printers;
@@ -73,6 +80,10 @@ public class SettingsService : ISettingsService
                 if (_data.SyncIntervalMinutes <= 0)
                 {
                     _data.SyncIntervalMinutes = 10;
+                }
+                if (string.IsNullOrEmpty(_data.Language))
+                {
+                    _data.Language = "ru";
                 }
                 if (_data.Printers == null)
                 {
