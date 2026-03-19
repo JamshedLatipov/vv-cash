@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:views="using:VvCash.Views"
         x:Class="VvCash.Views.MainWindow"

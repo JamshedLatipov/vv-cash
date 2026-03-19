@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:models="using:VvCash.Models"
         x:Class="VvCash.Views.CustomerDisplayWindow"
@@ -18,7 +19,7 @@
                        FontSize="48" FontWeight="Bold"
                        Foreground="White"
                        HorizontalAlignment="Center"/>
-            <TextBlock Text="Scan items to begin."
+            <TextBlock Text="{Binding [Scanitemstobegin], Source={x:Static services:I18nService.Instance}}"
                        FontSize="24"
                        Foreground="#a0a0b8"
                        HorizontalAlignment="Center"/>
@@ -47,7 +48,7 @@
             </ScrollViewer>
             <Border Grid.Row="1" Background="#11b4d4" CornerRadius="12" Padding="24,16" Margin="0,16,0,0">
                 <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="TOTAL" FontSize="32" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="0" Text="{Binding [TOTAL], Source={x:Static services:I18nService.Instance}}" FontSize="32" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="1" Text="{Binding Total, StringFormat='${0:F2}'}"
                                FontSize="42" FontWeight="Bold" Foreground="White"/>
                 </Grid>

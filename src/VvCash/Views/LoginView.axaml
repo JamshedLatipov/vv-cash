@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
         xmlns:vm="using:VvCash.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
         x:Class="VvCash.Views.LoginView"
@@ -60,8 +61,8 @@
         <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="48">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
                 <material:MaterialIcon Kind="PackageVariant" Width="120" Height="120" Foreground="White" />
-                <TextBlock Text="Luxe Threads POS" FontSize="48" FontWeight="Black" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
-                <TextBlock Text="Welcome back! Please enter your credentials to continue." FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
+                <TextBlock Text="{Binding [LuxeThreadsPOS], Source={x:Static services:I18nService.Instance}}" FontSize="48" FontWeight="Black" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding [WelcomebackPleaseent], Source={x:Static services:I18nService.Instance}}" FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
             </StackPanel>
         </Border>
 
@@ -74,26 +75,26 @@
                 </Button>
 
                 <StackPanel MaxWidth="400" VerticalAlignment="Center" HorizontalAlignment="Stretch">
-                    <TextBlock Text="Sign In" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,32"/>
+                    <TextBlock Text="{Binding [SignIn], Source={x:Static services:I18nService.Instance}}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,32"/>
 
                     <!-- Error Message -->
                     <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,0,0,16" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
                     <!-- Email -->
-                    <TextBlock Text="Email Address" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
-                    <TextBox Classes="LoginInput" Text="{Binding Email, Mode=TwoWay}" Watermark="Enter your email" IsEnabled="{Binding !IsBusy}"/>
+                    <TextBlock Text="{Binding [EmailAddress], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
+                    <TextBox Classes="LoginInput" Text="{Binding Email, Mode=TwoWay}" Watermark="{Binding [Enteryouremail], Source={x:Static services:I18nService.Instance}}" IsEnabled="{Binding !IsBusy}"/>
 
                     <!-- Password -->
-                    <TextBlock Text="Password" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
-                    <TextBox Classes="LoginInput" Text="{Binding Password, Mode=TwoWay}" Watermark="Enter your password" PasswordChar="•" IsEnabled="{Binding !IsBusy}"/>
+                    <TextBlock Text="{Binding [Password], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
+                    <TextBox Classes="LoginInput" Text="{Binding Password, Mode=TwoWay}" Watermark="{Binding [Enteryourpassword], Source={x:Static services:I18nService.Instance}}" PasswordChar="•" IsEnabled="{Binding !IsBusy}"/>
 
                     <!-- Login Button -->
                     <Button Classes="LoginButton" Command="{Binding LoginCommand}" IsEnabled="{Binding !IsBusy}">
                         <Panel>
-                            <TextBlock Text="Login" IsVisible="{Binding !IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding [Login], Source={x:Static services:I18nService.Instance}}" IsVisible="{Binding !IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsBusy}" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <material:MaterialIcon Kind="Loading" Classes="spin" Width="20" Height="20"/>
-                                <TextBlock Text="Authenticating..." VerticalAlignment="Center" FontSize="16"/>
+                                <TextBlock Text="{Binding [Authenticating], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center" FontSize="16"/>
                             </StackPanel>
                         </Panel>
                     </Button>

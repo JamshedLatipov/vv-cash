@@ -86,6 +86,11 @@ public partial class SettingsViewModel : ViewModelBase
 
     public ObservableCollection<PrinterConfigViewModel> Printers { get; } = new();
 
+    public ObservableCollection<string> AvailableLanguages { get; } = new() { "ru", "en", "tg", "uz", "kk" };
+
+    [ObservableProperty]
+    private string _selectedLanguage = "ru";
+
     public Array ConnectionTypes => Enum.GetValues(typeof(PrinterConnectionType));
 
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -100,6 +105,7 @@ public partial class SettingsViewModel : ViewModelBase
         BackendUrl = _settingsService.BackendUrl;
         CashRegisterToken = _settingsService.CashRegisterToken;
         SyncIntervalText = _settingsService.SyncIntervalMinutes.ToString();
+        SelectedLanguage = string.IsNullOrEmpty(_settingsService.Language) ? "ru" : _settingsService.Language;
 
         foreach (var printer in _settingsService.Printers)
         {
@@ -157,6 +163,9 @@ public partial class SettingsViewModel : ViewModelBase
         {
             _settingsService.SyncIntervalMinutes = 10;
         }
+
+        _settingsService.Language = SelectedLanguage;
+        I18nService.Instance.Initialize(SelectedLanguage);
 
         _settingsService.Printers = Printers.Select(p => new PrinterConfig
         {
