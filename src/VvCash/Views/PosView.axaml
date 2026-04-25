@@ -88,7 +88,12 @@
                                         Command="{Binding DataContext.SelectCategoryCommand, ElementName=RootWindow}"
                                         CommandParameter="{Binding}">
                                     <StackPanel HorizontalAlignment="Center" Spacing="4">
-                                        <material:MaterialIcon Kind="FolderOutline" Width="24" Height="24" />
+                                        <Panel Width="28" Height="28">
+                                            <material:MaterialIcon Kind="FolderOutline" Width="28" Height="28"
+                                                IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                            <Image Source="{Binding ImageBitmap}" Width="28" Height="28" Stretch="UniformToFill"
+                                                IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                                        </Panel>
                                         <TextBlock Text="{Binding Name}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" LetterSpacing="1" TextWrapping="Wrap" TextAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
@@ -126,7 +131,12 @@
                                                         CommandParameter="{Binding}"
                                                         Padding="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                                                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-                                                        <material:MaterialIcon Kind="FolderOutline" Width="32" Height="32" Foreground="{StaticResource Slate500Brush}"/>
+                                                        <Panel Width="36" Height="36">
+                                                            <material:MaterialIcon Kind="FolderOutline" Width="36" Height="36" Foreground="{StaticResource Slate500Brush}"
+                                                                IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                                            <Image Source="{Binding ImageBitmap}" Width="36" Height="36" Stretch="Uniform"
+                                                                IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                                                        </Panel>
                                                         <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}" TextAlignment="Center" TextWrapping="Wrap"/>
                                                     </StackPanel>
                                                 </Button>

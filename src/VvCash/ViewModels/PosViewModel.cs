@@ -1,8 +1,11 @@
 using System;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
@@ -28,6 +31,7 @@ public partial class PosViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private readonly IExpenseDocumentService _expenseDocumentService;
     private readonly ICounterpartyService _counterpartyService;
+    private readonly HttpClient _httpClient;
     private CancellationTokenSource? _syncCancellationTokenSource;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
@@ -126,7 +130,17 @@ public partial class PosViewModel : ViewModelBase
         StatusMessage = "Starting full database reinitialization...";
         await _syncService.FullReinitializeAsync();
         StatusMessage = "Reinitialization complete. Catalog updated.";
+        await LoadCategoriesAsync();
         await LoadProductsAsync(SelectedCategory?.Id);
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        var allCats = (await _categoryService.GetCategoriesAsync()).ToList();
+        var quickCats = (await _categoryService.GetQuickAccessCategoriesAsync()).ToList();
+        AllCategories = new ObservableCollection<Category>(allCats);
+        QuickCategories = new ObservableCollection<Category>(quickCats);
+        _ = Task.WhenAll(allCats.Concat(quickCats).Where(c => !string.IsNullOrEmpty(c.ImageUrl)).Select(LoadCategoryImageAsync));
     }
 
     public PosViewModel(
@@ -141,7 +155,8 @@ public partial class PosViewModel : ViewModelBase
         ISyncService syncService,
         ISettingsService settingsService,
         IExpenseDocumentService expenseDocumentService,
-        ICounterpartyService counterpartyService)
+        ICounterpartyService counterpartyService,
+        HttpClient httpClient)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -155,6 +170,7 @@ public partial class PosViewModel : ViewModelBase
         _settingsService = settingsService;
         _expenseDocumentService = expenseDocumentService;
         _counterpartyService = counterpartyService;
+        _httpClient = httpClient;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
@@ -226,10 +242,11 @@ public partial class PosViewModel : ViewModelBase
 
         StartBackgroundSync();
 
-        var allCats = await _categoryService.GetCategoriesAsync();
-        var quickCats = await _categoryService.GetQuickAccessCategoriesAsync();
+        var allCats = (await _categoryService.GetCategoriesAsync()).ToList();
+        var quickCats = (await _categoryService.GetQuickAccessCategoriesAsync()).ToList();
         AllCategories = new ObservableCollection<Category>(allCats);
         QuickCategories = new ObservableCollection<Category>(quickCats);
+        _ = Task.WhenAll(allCats.Concat(quickCats).Where(c => !string.IsNullOrEmpty(c.ImageUrl)).Select(LoadCategoryImageAsync));
         IsViewingCategories = true;
 
         Console.WriteLine("[PosViewModel] Calling GetShiftStateAsync during initialization.");
@@ -250,6 +267,24 @@ public partial class PosViewModel : ViewModelBase
             ? await _productService.GetProductsByCategoryAsync(categoryId ?? "All")
             : await _productService.SearchProductsAsync(SearchQuery);
         Products = new ObservableCollection<Product>(products);
+    }
+
+    private async Task LoadCategoryImageAsync(Category category)
+    {
+        if (string.IsNullOrEmpty(category.ImageUrl)) return;
+        try
+        {
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Loading image for '{category.Name}': {category.ImageUrl}");
+            var bytes = await _httpClient.GetByteArrayAsync(category.ImageUrl);
+            using var ms = new MemoryStream(bytes);
+            var bitmap = new Bitmap(ms);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => category.ImageBitmap = bitmap);
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Loaded image for '{category.Name}'");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Failed to load image for '{category.Name}' ({category.ImageUrl}): {ex.Message}");
+        }
     }
 
     partial void OnSearchQueryChanged(string value)

@@ -63,6 +63,16 @@ public class CategoryService : ICategoryService
                         var pageItems = JsonSerializer.Deserialize<List<Category>>(bodyElement.GetRawText(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                         if (pageItems != null)
                         {
+                            foreach (var cat in pageItems)
+                            {
+                                if (cat.Image?.Path != null)
+                                {
+                                    var uri = new Uri(baseUrl);
+                                    var origin = $"{uri.Scheme}://{uri.Authority}";
+                                    cat.ImageUrl = $"{origin}/{cat.Image.Path.TrimStart('/')}";
+                                    Debug.WriteLine($"[CategoryService] Image URL for '{cat.Name}': {cat.ImageUrl}");
+                                }
+                            }
                             allCategories.AddRange(pageItems);
                         }
                     }
