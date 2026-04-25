@@ -37,7 +37,7 @@
                                         <TextBlock Text="{Binding Product.Name}" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
                                         <TextBlock Text="{Binding Quantity, StringFormat='Qty: {0}'}" FontSize="16" Foreground="#a0a0b8"/>
                                     </StackPanel>
-                                    <TextBlock Grid.Column="1" Text="{Binding LineTotal, StringFormat='${0:F2}'}"
+                                    <TextBlock Grid.Column="1" Text="{Binding LineTotal, StringFormat='{}{0:F2}'}"
                                                FontSize="24" FontWeight="Bold" Foreground="#11b4d4"
                                                VerticalAlignment="Center"/>
                                 </Grid>
@@ -49,7 +49,7 @@
             <Border Grid.Row="1" Background="#11b4d4" CornerRadius="12" Padding="24,16" Margin="0,16,0,0">
                 <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Grid.Column="0" Text="{Binding [TOTAL], Source={x:Static services:I18nService.Instance}}" FontSize="32" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="1" Text="{Binding Total, StringFormat='${0:F2}'}"
+                    <TextBlock Grid.Column="1" Text="{Binding Total, StringFormat='{}{0:F2}'}"
                                FontSize="42" FontWeight="Bold" Foreground="White"/>
                 </Grid>
             </Border>

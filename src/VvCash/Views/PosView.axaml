@@ -196,8 +196,8 @@
                                                                     <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Slate900Brush}" TextTrimming="CharacterEllipsis"/>
                                                                     <TextBlock Text="{Binding Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                                                                     <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
-                                                                        <TextBlock Text="{Binding Price, StringFormat='${0:F2}'}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
-                                                                        <TextBlock Text="{Binding OriginalPrice, StringFormat='${0:F2}'}"
+                                                                        <TextBlock Text="{Binding Price, StringFormat='{}{0:F2}'}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
+                                                                        <TextBlock Text="{Binding OriginalPrice, StringFormat='{}{0:F2}'}"
                                                                                    IsVisible="{Binding OriginalPrice, Converter={x:Static ObjectConverters.IsNotNull}}"
                                                                                    Foreground="{StaticResource Slate400Brush}" FontSize="12" TextDecorations="Strikethrough" VerticalAlignment="Bottom" Margin="0,0,0,1"/>
                                                                     </StackPanel>
@@ -226,11 +226,11 @@
                             <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Bottom">
                                 <TextBlock Text="{Binding [CurrentOrder], Source={x:Static services:I18nService.Instance}}" FontSize="30" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-0.5"/>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock Text="{Binding [Order8429], Source={x:Static services:I18nService.Instance}}" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
-                                    <Ellipse Width="4" Height="4" Fill="{StaticResource Slate300Brush}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding [Terminal01], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
-                                    <Ellipse Width="4" Height="4" Fill="{StaticResource Slate300Brush}" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding [Oct242023245PM], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
+                                    <TextBlock Text="{Binding OrderNumber, StringFormat='# {0}'}" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}" FontSize="14"/>
+                                    <Ellipse Width="4" Height="4" Fill="{StaticResource Slate300Brush}" VerticalAlignment="Center"
+                                             IsVisible="{Binding OrderDateTime, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                    <TextBlock Text="{Binding OrderDateTime}" Foreground="{StaticResource Slate500Brush}" FontSize="14"
+                                               IsVisible="{Binding OrderDateTime, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                                 </StackPanel>
                             </StackPanel>
 
@@ -271,8 +271,8 @@
                                                         </StackPanel>
 
                                                         <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                                                            <TextBlock Text="{Binding LineTotal, StringFormat='${0:F2}'}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Right"/>
-                                                            <TextBlock Text="{Binding LineTotalOriginal, StringFormat='${0:F2}'}"
+                                                            <TextBlock Text="{Binding LineTotal, StringFormat='{}{0:F2}'}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Right"/>
+                                                            <TextBlock Text="{Binding LineTotalOriginal, StringFormat='{}{0:F2}'}"
                                                                        IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
                                                                        Foreground="{StaticResource Slate400Brush}" FontSize="12" TextDecorations="Strikethrough" HorizontalAlignment="Right"/>
                                                         </StackPanel>
@@ -282,10 +282,6 @@
 
                                                     <!-- Labels / Badges -->
                                                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
-                                                        <Border IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNull}}"
-                                                                Background="{StaticResource PrimaryLightBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
-                                                            <TextBlock Text="{Binding [NEWARRIVAL], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource PrimaryBrush}" FontSize="12" FontWeight="Bold" LetterSpacing="1"/>
-                                                        </Border>
                                                         <TextBlock IsVisible="{Binding Product.DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
                                                                    Text="{Binding [SeasonalDiscountAppl], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Red500Brush}" FontSize="12" FontWeight="Medium" VerticalAlignment="Center"/>
                                                     </StackPanel>
@@ -360,25 +356,25 @@
                                     <StackPanel Grid.Column="1" Spacing="12" Margin="32,0,0,0">
                                         <Grid ColumnDefinitions="*, Auto">
                                             <TextBlock Grid.Column="0" Text="{Binding [Subtotal], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='${0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='{}{0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
                                         </Grid>
                                         <Grid ColumnDefinitions="*, Auto">
                                             <TextBlock Grid.Column="0" Text="{Binding [Tax85], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Tax, StringFormat='${0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Tax, StringFormat='{}{0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
                                         </Grid>
                                         <Grid ColumnDefinitions="*, Auto">
                                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
                                                 <material:MaterialIcon Kind="Tag" Width="16" Height="16" Foreground="{StaticResource Red500Brush}"/>
                                                 <TextBlock Text="{Binding [TotalDiscount], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Red500Brush}" FontSize="16" FontWeight="Medium"/>
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" Text="{Binding TotalDiscount, StringFormat='-${0:F2}'}" Foreground="{StaticResource Red500Brush}" FontSize="16" FontWeight="Bold"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TotalDiscount, StringFormat='-{0:F2}'}" Foreground="{StaticResource Red500Brush}" FontSize="16" FontWeight="Bold"/>
                                         </Grid>
 
                                         <Border Height="1" Background="{StaticResource Slate100Brush}" Margin="0,4"/>
 
                                         <Grid ColumnDefinitions="*, Auto">
                                             <TextBlock Grid.Column="0" Text="{Binding [TotalAmount], Source={x:Static services:I18nService.Instance}}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Bottom"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat='${0:F2}'}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat='{}{0:F2}'}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
                                         </Grid>
                                     </StackPanel>
                                 </Grid>
@@ -395,7 +391,7 @@
                                     <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding PayCommand}" MinHeight="80" CornerRadius="12" HorizontalAlignment="Stretch">
                                         <StackPanel Orientation="Horizontal" Spacing="16">
                                             <material:MaterialIcon Kind="CashMultiple" Width="36" Height="36"/>
-                                            <TextBlock Text="{Binding TotalAmount, StringFormat='${0:F2}'}" FontSize="28" FontWeight="Black"/>
+                                            <TextBlock Text="{Binding TotalAmount, StringFormat='{}{0:F2}'}" FontSize="28" FontWeight="Black"/>
                                         </StackPanel>
                                     </Button>
                                 </Grid>

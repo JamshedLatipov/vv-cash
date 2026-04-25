@@ -73,6 +73,8 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private bool _isShiftModalVisible = false;
     [ObservableProperty] private bool _isLoadingShift = false;
     [ObservableProperty] private string? _currentShiftId;
+    [ObservableProperty] private int _orderNumber = 1;
+    [ObservableProperty] private string _orderDateTime = string.Empty;
     [ObservableProperty] private bool _isAlertModalVisible = false;
     [ObservableProperty] private string _alertMessage = string.Empty;
 
@@ -348,6 +350,15 @@ public partial class PosViewModel : ViewModelBase
     {
         CartItems = new ObservableCollection<CartItem>(_cartService.Items);
         AppliedCoupons = new ObservableCollection<Coupon>(_cartService.AppliedCoupons);
+        if (CartItems.Count == 1)
+        {
+            OrderNumber++;
+            OrderDateTime = DateTime.Now.ToString("dd MMM, yyyy • HH:mm");
+        }
+        else if (!CartItems.Any())
+        {
+            OrderDateTime = string.Empty;
+        }
         Subtotal = _cartService.Subtotal;
         Tax = _cartService.Tax;
         TotalDiscount = _cartService.TotalDiscount;
