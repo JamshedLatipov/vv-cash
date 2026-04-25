@@ -121,80 +121,94 @@
 
                             <ScrollViewer Grid.Row="1">
                                 <StackPanel Spacing="0">
-                                <ItemsControl ItemsSource="{Binding CurrentDisplayedCategories}" IsVisible="{Binding IsViewingCategories}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="models:Category">
-                                            <Border Width="220" Height="100" Margin="0,0,16,16" Cursor="Hand" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Background="White" CornerRadius="8">
-                                                <Button Classes="Transparent"
-                                                        Command="{Binding DataContext.SelectCategoryCommand, ElementName=RootWindow}"
-                                                        CommandParameter="{Binding}"
-                                                        Padding="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-                                                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-                                                        <Panel Width="36" Height="36">
-                                                            <material:MaterialIcon Kind="FolderOutline" Width="36" Height="36" Foreground="{StaticResource Slate500Brush}"
-                                                                IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
-                                                            <Image Source="{Binding ImageBitmap}" Width="36" Height="36" Stretch="Uniform"
-                                                                IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
-                                                        </Panel>
-                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}" TextAlignment="Center" TextWrapping="Wrap"/>
-                                                    </StackPanel>
-                                                </Button>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
 
-                                <ItemsControl ItemsSource="{Binding Products}" IsVisible="{Binding !IsViewingCategories}">
-                                    <ItemsControl.ItemsPanel>
-                                        <ItemsPanelTemplate>
-                                            <WrapPanel/>
-                                        </ItemsPanelTemplate>
-                                    </ItemsControl.ItemsPanel>
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="models:Product">
-                                            <Border Classes="ProductCard" Width="220" Margin="0,0,16,16" Cursor="Hand" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1" Background="White">
-                                                <Button Classes="Transparent"
-                                                        Command="{Binding DataContext.AddToCartCommand, ElementName=RootWindow}"
-                                                        CommandParameter="{Binding}"
-                                                        Padding="0">
-                                                    <Grid RowDefinitions="160,*">
-                                                        <!-- Image placeholder -->
-                                                        <Panel Grid.Row="0" Background="{StaticResource Slate50Brush}">
-                                                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                                                <material:MaterialIcon Kind="ImageOutline" Width="48" Height="48" Foreground="{StaticResource Slate300Brush}"/>
-                                                            </StackPanel>
-                                                            <!-- Discount badge -->
-                                                            <Border IsVisible="{Binding DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                                                    Background="{StaticResource Red100Brush}" CornerRadius="4" Padding="6,2"
-                                                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
-                                                                <TextBlock Text="{Binding DiscountPercent, StringFormat='-{0}%'}" Foreground="{StaticResource Red600Brush}" FontSize="11" FontWeight="Black"/>
-                                                            </Border>
-                                                        </Panel>
+                                <!-- Subcategories section -->
+                                <StackPanel IsVisible="{Binding HasSubcategories}" Spacing="8" Margin="0,0,0,16">
+                                    <TextBlock Text="Подкатегории" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource Slate500Brush}" LetterSpacing="1"
+                                               IsVisible="{Binding !IsViewingCategories}"/>
+                                    <ItemsControl ItemsSource="{Binding CurrentDisplayedCategories}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="models:Category">
+                                                <Border Width="220" Height="100" Margin="0,0,16,16" Cursor="Hand" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" Background="White" CornerRadius="8">
+                                                    <Button Classes="Transparent"
+                                                            Command="{Binding DataContext.SelectCategoryCommand, ElementName=RootWindow}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+                                                            <Panel Width="36" Height="36">
+                                                                <material:MaterialIcon Kind="FolderOutline" Width="36" Height="36" Foreground="{StaticResource Slate500Brush}"
+                                                                    IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                                                <Image Source="{Binding ImageBitmap}" Width="36" Height="36" Stretch="Uniform"
+                                                                    IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                                                            </Panel>
+                                                            <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}" TextAlignment="Center" TextWrapping="Wrap"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
 
-                                                        <!-- Product details -->
-                                                        <Border Grid.Row="1" Padding="12">
-                                                            <StackPanel Spacing="4">
-                                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Slate900Brush}" TextTrimming="CharacterEllipsis"/>
-                                                                <TextBlock Text="{Binding Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
-                                                                <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
-                                                                    <TextBlock Text="{Binding Price, StringFormat='${0:F2}'}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
-                                                                    <TextBlock Text="{Binding OriginalPrice, StringFormat='${0:F2}'}"
-                                                                               IsVisible="{Binding OriginalPrice, Converter={x:Static ObjectConverters.IsNotNull}}"
-                                                                               Foreground="{StaticResource Slate400Brush}" FontSize="12" TextDecorations="Strikethrough" VerticalAlignment="Bottom" Margin="0,0,0,1"/>
+                                <!-- Products section -->
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Товары" FontSize="13" FontWeight="SemiBold"
+                                               Foreground="{StaticResource Slate500Brush}" LetterSpacing="1"
+                                               IsVisible="{Binding HasSubcategories}"/>
+                                    <ItemsControl ItemsSource="{Binding Products}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="models:Product">
+                                                <Border Classes="ProductCard" Width="220" Margin="0,0,16,16" Cursor="Hand" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1" Background="White">
+                                                    <Button Classes="Transparent"
+                                                            Command="{Binding DataContext.AddToCartCommand, ElementName=RootWindow}"
+                                                            CommandParameter="{Binding}"
+                                                            Padding="0">
+                                                        <Grid RowDefinitions="160,*">
+                                                            <!-- Image placeholder -->
+                                                            <Panel Grid.Row="0" Background="{StaticResource Slate50Brush}">
+                                                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                                    <material:MaterialIcon Kind="ImageOutline" Width="48" Height="48" Foreground="{StaticResource Slate300Brush}"/>
                                                                 </StackPanel>
-                                                            </StackPanel>
-                                                        </Border>
-                                                    </Grid>
-                                                </Button>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                                                <!-- Discount badge -->
+                                                                <Border IsVisible="{Binding DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                                        Background="{StaticResource Red100Brush}" CornerRadius="4" Padding="6,2"
+                                                                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8">
+                                                                    <TextBlock Text="{Binding DiscountPercent, StringFormat='-{0}%'}" Foreground="{StaticResource Red600Brush}" FontSize="11" FontWeight="Black"/>
+                                                                </Border>
+                                                            </Panel>
+
+                                                            <!-- Product details -->
+                                                            <Border Grid.Row="1" Padding="12">
+                                                                <StackPanel Spacing="4">
+                                                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="14" Foreground="{StaticResource Slate900Brush}" TextTrimming="CharacterEllipsis"/>
+                                                                    <TextBlock Text="{Binding Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                                                                        <TextBlock Text="{Binding Price, StringFormat='${0:F2}'}" FontWeight="Bold" FontSize="16" Foreground="{StaticResource Slate900Brush}"/>
+                                                                        <TextBlock Text="{Binding OriginalPrice, StringFormat='${0:F2}'}"
+                                                                                   IsVisible="{Binding OriginalPrice, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                                                   Foreground="{StaticResource Slate400Brush}" FontSize="12" TextDecorations="Strikethrough" VerticalAlignment="Bottom" Margin="0,0,0,1"/>
+                                                                    </StackPanel>
+                                                                </StackPanel>
+                                                            </Border>
+                                                        </Grid>
+                                                    </Button>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+
                                 </StackPanel>
                             </ScrollViewer>
                         </Grid>

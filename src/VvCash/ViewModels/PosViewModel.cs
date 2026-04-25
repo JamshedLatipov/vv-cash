@@ -50,12 +50,9 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SelectedCategoryName))]
     private Category? _selectedCategory;
-    public string SelectedCategoryName => IsViewingCategories
-        ? (CurrentParentCategory?.Name ?? "All Categories")
-        : (SelectedCategory?.Name ?? "All Categories");
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SelectedCategoryName))]
-    private bool _isViewingCategories = true;
+    [ObservableProperty] private bool _hasSubcategories;
+    public string SelectedCategoryName => CurrentParentCategory?.Name ?? SelectedCategory?.Name ?? "All Categories";
+    [ObservableProperty] private bool _isViewingCategories = true;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUnsyncedDocuments))]
@@ -156,7 +153,10 @@ public partial class PosViewModel : ViewModelBase
         QuickCategories = new ObservableCollection<Category>(quickCats);
         _categoryNavStack.Clear();
         CurrentParentCategory = null;
-        CurrentDisplayedCategories = new ObservableCollection<Category>(allCats.Where(c => c.Parent?.Id == null));
+        var rootCats = allCats.Where(c => c.Parent?.Id == null).ToList();
+        CurrentDisplayedCategories = new ObservableCollection<Category>(rootCats);
+        HasSubcategories = rootCats.Count > 0;
+        IsViewingCategories = true;
         OnPropertyChanged(nameof(CanNavigateUp));
         _ = Task.WhenAll(allCats.Concat(quickCats).Where(c => !string.IsNullOrEmpty(c.ImageUrl)).Select(LoadCategoryImageAsync));
     }
@@ -264,7 +264,9 @@ public partial class PosViewModel : ViewModelBase
         var quickCats = (await _categoryService.GetQuickAccessCategoriesAsync()).ToList();
         AllCategories = new ObservableCollection<Category>(allCats);
         QuickCategories = new ObservableCollection<Category>(quickCats);
-        CurrentDisplayedCategories = new ObservableCollection<Category>(allCats.Where(c => c.Parent?.Id == null));
+        var rootCats = allCats.Where(c => c.Parent?.Id == null).ToList();
+        CurrentDisplayedCategories = new ObservableCollection<Category>(rootCats);
+        HasSubcategories = rootCats.Count > 0;
         _ = Task.WhenAll(allCats.Concat(quickCats).Where(c => !string.IsNullOrEmpty(c.ImageUrl)).Select(LoadCategoryImageAsync));
         IsViewingCategories = true;
 
@@ -367,7 +369,9 @@ public partial class PosViewModel : ViewModelBase
         {
             _categoryNavStack.Clear();
             CurrentParentCategory = null;
-            CurrentDisplayedCategories = new ObservableCollection<Category>(AllCategories.Where(c => c.Parent?.Id == null));
+            var rootCats = AllCategories.Where(c => c.Parent?.Id == null).ToList();
+            CurrentDisplayedCategories = new ObservableCollection<Category>(rootCats);
+            HasSubcategories = rootCats.Count > 0;
             SelectedCategory = null;
             IsViewingCategories = true;
             Products.Clear();
@@ -376,26 +380,18 @@ public partial class PosViewModel : ViewModelBase
         }
 
         var children = AllCategories.Where(c => c.Parent?.Id == category.Id).ToList();
-        if (children.Any())
-        {
-            _categoryNavStack.Push(CurrentParentCategory);
-            CurrentParentCategory = category;
-            CurrentDisplayedCategories = new ObservableCollection<Category>(children);
-            SelectedCategory = category;
-            IsViewingCategories = true;
-            Products.Clear();
-            OnPropertyChanged(nameof(CanNavigateUp));
-        }
-        else
-        {
-            SelectedCategory = category;
-            IsViewingCategories = false;
-            await LoadProductsAsync(category.Id);
-        }
+        _categoryNavStack.Push(CurrentParentCategory);
+        CurrentParentCategory = category;
+        CurrentDisplayedCategories = new ObservableCollection<Category>(children);
+        HasSubcategories = children.Count > 0;
+        SelectedCategory = category;
+        IsViewingCategories = false;
+        OnPropertyChanged(nameof(CanNavigateUp));
+        await LoadProductsAsync(category.Id);
     }
 
     [RelayCommand]
-    private void NavigateCategoryUp()
+    private async Task NavigateCategoryUp()
     {
         if (_categoryNavStack.Count == 0) return;
         var parent = _categoryNavStack.Pop();
@@ -403,11 +399,16 @@ public partial class PosViewModel : ViewModelBase
         var cats = parent == null
             ? AllCategories.Where(c => c.Parent?.Id == null)
             : AllCategories.Where(c => c.Parent?.Id == parent.Id);
-        CurrentDisplayedCategories = new ObservableCollection<Category>(cats);
+        var catsList = cats.ToList();
+        CurrentDisplayedCategories = new ObservableCollection<Category>(catsList);
+        HasSubcategories = catsList.Count > 0;
         SelectedCategory = parent;
-        IsViewingCategories = true;
-        Products.Clear();
+        IsViewingCategories = parent == null;
         OnPropertyChanged(nameof(CanNavigateUp));
+        if (parent != null)
+            await LoadProductsAsync(parent.Id);
+        else
+            Products.Clear();
     }
 
     [RelayCommand]
