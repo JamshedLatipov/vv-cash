@@ -108,16 +108,20 @@
                 <SplitView.Pane>
                     <Border Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,1,0" Padding="0,0,24,0">
                         <Grid RowDefinitions="Auto, *">
-                            <Grid Grid.Row="0" ColumnDefinitions="*, Auto" Margin="0,0,0,16">
-                                <TextBlock Grid.Column="0" Text="{Binding SelectedCategoryName, StringFormat='{}{0}'}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
-                                <Button Grid.Column="1" Classes="IconButton" Command="{Binding CloseCatalogCommand}" VerticalAlignment="Center">
+                            <Grid Grid.Row="0" ColumnDefinitions="Auto, *, Auto" Margin="0,0,0,16">
+                                <Button Grid.Column="0" Classes="IconButton" Command="{Binding NavigateCategoryUpCommand}"
+                                        IsVisible="{Binding CanNavigateUp}" VerticalAlignment="Center" Margin="0,0,8,0">
+                                    <material:MaterialIcon Kind="ArrowLeft" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                                </Button>
+                                <TextBlock Grid.Column="1" Text="{Binding SelectedCategoryName}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                                <Button Grid.Column="2" Classes="IconButton" Command="{Binding CloseCatalogCommand}" VerticalAlignment="Center">
                                     <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
                                 </Button>
                             </Grid>
 
                             <ScrollViewer Grid.Row="1">
                                 <StackPanel Spacing="0">
-                                <ItemsControl ItemsSource="{Binding AllCategories}" IsVisible="{Binding IsViewingCategories}">
+                                <ItemsControl ItemsSource="{Binding CurrentDisplayedCategories}" IsVisible="{Binding IsViewingCategories}">
                                     <ItemsControl.ItemsPanel>
                                         <ItemsPanelTemplate>
                                             <WrapPanel/>

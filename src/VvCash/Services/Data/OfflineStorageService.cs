@@ -45,7 +45,8 @@ public class OfflineStorageService : IOfflineStorageService
                 Id TEXT PRIMARY KEY,
                 Name TEXT NOT NULL,
                 IsQuickAccess INTEGER NOT NULL DEFAULT 0,
-                ImageUrl TEXT
+                ImageUrl TEXT,
+                ParentId TEXT
             );
 
             CREATE TABLE IF NOT EXISTS Products (
@@ -75,6 +76,14 @@ public class OfflineStorageService : IOfflineStorageService
         try
         {
             command.CommandText = "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;";
+            await command.ExecuteNonQueryAsync();
+        }
+        catch { /* column already exists */ }
+
+        // Migration: add ParentId to Categories if upgrading from older DB
+        try
+        {
+            command.CommandText = "ALTER TABLE Categories ADD COLUMN ParentId TEXT;";
             await command.ExecuteNonQueryAsync();
         }
         catch { /* column already exists */ }
@@ -216,24 +225,27 @@ public class OfflineStorageService : IOfflineStorageService
         // Note: we don't delete existing categories of this type, we just upsert.
         // If categories can be deleted on backend, a full sync would need a DELETE first.
         command.CommandText = @"
-            INSERT INTO Categories (Id, Name, IsQuickAccess, ImageUrl)
-            VALUES ($Id, $Name, $IsQuickAccess, $ImageUrl)
+            INSERT INTO Categories (Id, Name, IsQuickAccess, ImageUrl, ParentId)
+            VALUES ($Id, $Name, $IsQuickAccess, $ImageUrl, $ParentId)
             ON CONFLICT(Id) DO UPDATE SET
                 Name=excluded.Name,
                 IsQuickAccess=excluded.IsQuickAccess,
-                ImageUrl=excluded.ImageUrl;
+                ImageUrl=excluded.ImageUrl,
+                ParentId=excluded.ParentId;
         ";
 
         var idParam = command.Parameters.Add("$Id", SqliteType.Text);
         var nameParam = command.Parameters.Add("$Name", SqliteType.Text);
         command.Parameters.AddWithValue("$IsQuickAccess", isQuickAccess);
         var imageUrlParam = command.Parameters.Add("$ImageUrl", SqliteType.Text);
+        var parentIdParam = command.Parameters.Add("$ParentId", SqliteType.Text);
 
         foreach (var c in categories)
         {
             idParam.Value = c.Id ?? string.Empty;
             nameParam.Value = c.Name ?? string.Empty;
             imageUrlParam.Value = (object?)c.ImageUrl ?? DBNull.Value;
+            parentIdParam.Value = (object?)c.Parent?.Id ?? DBNull.Value;
             await command.ExecuteNonQueryAsync();
         }
 
@@ -259,12 +271,12 @@ public class OfflineStorageService : IOfflineStorageService
         using var command = connection.CreateCommand();
         if (isQuickAccess == 1)
         {
-            command.CommandText = "SELECT Id, Name, ImageUrl FROM Categories WHERE IsQuickAccess = 1";
+            command.CommandText = "SELECT Id, Name, ImageUrl, ParentId FROM Categories WHERE IsQuickAccess = 1";
         }
         else
         {
             // For all categories (isQuickAccess == 0), don't filter out the ones that happen to be quick access
-            command.CommandText = "SELECT Id, Name, ImageUrl FROM Categories";
+            command.CommandText = "SELECT Id, Name, ImageUrl, ParentId FROM Categories";
         }
 
         using var reader = await command.ExecuteReaderAsync();
@@ -274,7 +286,8 @@ public class OfflineStorageService : IOfflineStorageService
             {
                 Id = reader.GetString(0),
                 Name = reader.GetString(1),
-                ImageUrl = reader.IsDBNull(2) ? null : reader.GetString(2)
+                ImageUrl = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Parent = reader.IsDBNull(3) ? null : new CategoryRef { Id = reader.GetString(3) }
             });
         }
 
