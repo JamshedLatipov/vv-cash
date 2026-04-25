@@ -42,14 +42,14 @@
                     <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="12" Padding="24" Margin="0,0,16,0" BoxShadow="0 1 2 0 #10000000">
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [Общаясумма], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Medium" Foreground="{StaticResource Slate500Brush}"/>
-                            <TextBlock Text="{Binding TotalAmount, StringFormat='{}{0:N0} ₽'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
+                            <TextBlock Text="{Binding TotalAmount, StringFormat='{}{0:N0}'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
                         </StackPanel>
                     </Border>
 
                     <Border Grid.Column="1" Background="{StaticResource PrimaryLightBrush}" BorderBrush="{StaticResource PrimaryDarkBrush}" BorderThickness="1" CornerRadius="12" Padding="24" BoxShadow="0 1 2 0 #10000000">
                         <StackPanel Spacing="4">
                             <TextBlock Text="{Binding [Остатоккоплате], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Medium" Foreground="{StaticResource PrimaryBrush}"/>
-                            <TextBlock Text="{Binding RemainingAmount, StringFormat='{}{0:N0} ₽'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource PrimaryBrush}" LetterSpacing="-1"/>
+                            <TextBlock Text="{Binding RemainingAmount, StringFormat='{}{0:N0}'}" FontSize="30" FontWeight="Black" Foreground="{StaticResource PrimaryBrush}" LetterSpacing="-1"/>
                         </StackPanel>
                     </Border>
                 </Grid>
@@ -77,7 +77,6 @@
                                 <TextBlock Text="{Binding [Введеноосновнойвалют], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                             </StackPanel>
                             <TextBox Grid.Column="2" Name="CashTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CashAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="{Binding [0], Source={x:Static services:I18nService.Instance}}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                         </Grid>
                     </Border>
 
@@ -100,7 +99,6 @@
                                 <TextBlock Text="{Binding [Черезтерминалэквайри], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                             </StackPanel>
                             <TextBox Grid.Column="2" Name="CardTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding CardAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="{Binding [0], Source={x:Static services:I18nService.Instance}}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                         </Grid>
                     </Border>
 
@@ -123,7 +121,6 @@
                                 <TextBlock Text="{Binding [Баланс5000], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
                             </StackPanel>
                             <TextBox Grid.Column="2" Name="GiftTextBox" IsReadOnly="True" IsHitTestVisible="False" Text="{Binding GiftAmount, StringFormat='{}{0:0.##}'}" Width="192" VerticalAlignment="Center" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" CornerRadius="8" Padding="16,12" FontSize="18" FontWeight="Bold" TextAlignment="Right" Watermark="{Binding [0], Source={x:Static services:I18nService.Instance}}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0"/>
                         </Grid>
                     </Border>
                 </StackPanel>
@@ -152,7 +149,6 @@
                         <TextBlock Text="{Binding [БЫСТРЫЙВВОД], Source={x:Static services:I18nService.Instance}}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Slate400Brush}" LetterSpacing="2" HorizontalAlignment="Center" Margin="0,0,0,4"/>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="4">
                             <TextBlock Text="{Binding QuickInputText}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" LetterSpacing="-1"/>
-                            <TextBlock Text="{Binding [Key_591353], Source={x:Static services:I18nService.Instance}}" FontSize="20" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Bottom" Margin="0,0,0,4"/>
                         </StackPanel>
                     </StackPanel>
 
