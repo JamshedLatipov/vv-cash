@@ -24,5 +24,7 @@
         </DataTemplate>
     </Window.DataTemplates>
 
-    <TransitioningContentControl Content="{Binding CurrentViewModel}" />
+    <TransitioningContentControl Content="{Binding CurrentViewModel}"
+                                  HorizontalContentAlignment="Stretch"
+                                  VerticalContentAlignment="Stretch" />
 </Window>
