@@ -287,7 +287,34 @@ public partial class PosViewModel : ViewModelBase
         var products = string.IsNullOrWhiteSpace(SearchQuery)
             ? await _productService.GetProductsByCategoryAsync(categoryId ?? "All")
             : await _productService.SearchProductsAsync(SearchQuery);
+        System.Diagnostics.Debug.WriteLine($"[PosViewModel] LoadProductsAsync: {products.Count()} products for category '{categoryId}'");
+        foreach (var p in products)
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel]   Product '{p.Name}' ImagePath='{p.ImagePath}' Category='{p.Category}'");
         Products = new ObservableCollection<Product>(products);
+        _ = Task.WhenAll(products.Where(p => !string.IsNullOrEmpty(p.ImagePath)).Select(LoadProductImageAsync));
+    }
+
+    private async Task LoadProductImageAsync(Product product)
+    {
+        if (string.IsNullOrEmpty(product.ImagePath)) return;
+        try
+        {
+            var backendUrl = _settingsService.BackendUrl;
+            if (string.IsNullOrEmpty(backendUrl)) return;
+            var uri = new Uri(backendUrl);
+            var origin = $"{uri.Scheme}://{uri.Authority}";
+            var url = $"{origin}/{product.ImagePath.TrimStart('/')}";
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Loading product image '{product.Name}': {url}");
+            var bytes = await _httpClient.GetByteArrayAsync(url);
+            using var ms = new MemoryStream(bytes);
+            var bitmap = new Bitmap(ms);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => product.ImageBitmap = bitmap);
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Loaded product image '{product.Name}' OK");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Failed product image '{product.Name}': {ex.Message}");
+        }
     }
 
     private async Task LoadCategoryImageAsync(Category category)

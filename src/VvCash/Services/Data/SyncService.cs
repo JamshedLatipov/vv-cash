@@ -125,12 +125,14 @@ public class SyncService : ISyncService
                                                 {
                                                     try
                                                     {
+                                                        Debug.WriteLine($"[SyncService] RAW item: {item.GetRawText()}");
                                                         string productId = Guid.NewGuid().ToString();
                                                         string productName = string.Empty;
                                                         string productSku = string.Empty;
                                                         string productCategory = string.Empty;
                                                         decimal productPrice = 0m;
                                                         string barcode = string.Empty;
+                                                        string imagePath = string.Empty;
 
                                                         if (item.TryGetProperty("id", out var idElem))
                                                             productId = idElem.GetString() ?? productId;
@@ -142,7 +144,17 @@ public class SyncService : ISyncService
                                                             productSku = articleElem.GetString() ?? string.Empty;
 
                                                         if (item.TryGetProperty("category", out var catElem))
-                                                            productCategory = catElem.GetString() ?? string.Empty;
+                                                        {
+                                                            if (catElem.ValueKind == JsonValueKind.Object)
+                                                            {
+                                                                if (catElem.TryGetProperty("id", out var catIdElem))
+                                                                    productCategory = catIdElem.GetString() ?? string.Empty;
+                                                            }
+                                                            else if (catElem.ValueKind == JsonValueKind.String)
+                                                            {
+                                                                productCategory = catElem.GetString() ?? string.Empty;
+                                                            }
+                                                        }
 
                                                         if (item.TryGetProperty("barcode", out var barcodeElem))
                                                             barcode = barcodeElem.GetString() ?? string.Empty;
@@ -150,6 +162,22 @@ public class SyncService : ISyncService
                                                         if (item.TryGetProperty("sell_price", out var priceElem))
                                                             productPrice = priceElem.ValueKind == JsonValueKind.Number ? priceElem.GetDecimal() : 0m;
 
+                                                        if (item.TryGetProperty("images", out var imagesElem) && imagesElem.ValueKind == JsonValueKind.Array)
+                                                        {
+                                                            foreach (var img in imagesElem.EnumerateArray())
+                                                            {
+                                                                if (img.TryGetProperty("path", out var pathElem))
+                                                                {
+                                                                    imagePath = pathElem.GetString() ?? string.Empty;
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+
+                                                        if (string.IsNullOrEmpty(imagePath) && item.TryGetProperty("thumb", out var thumbElem) && thumbElem.ValueKind == JsonValueKind.String)
+                                                            imagePath = thumbElem.GetString() ?? string.Empty;
+
+                                                        Debug.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
                                                         updatedProducts.Add(new Product
                                                         {
                                                             Id = productId,
@@ -157,7 +185,8 @@ public class SyncService : ISyncService
                                                             Sku = productSku,
                                                             Category = productCategory,
                                                             Price = productPrice,
-                                                            Barcode = barcode
+                                                            Barcode = barcode,
+                                                            ImagePath = imagePath
                                                         });
                                                     }
                                                     catch (Exception ex)

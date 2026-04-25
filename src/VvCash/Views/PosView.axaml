@@ -177,9 +177,11 @@
                                                         <Grid RowDefinitions="160,*">
                                                             <!-- Image placeholder -->
                                                             <Panel Grid.Row="0" Background="{StaticResource Slate50Brush}">
-                                                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                                                    <material:MaterialIcon Kind="ImageOutline" Width="48" Height="48" Foreground="{StaticResource Slate300Brush}"/>
-                                                                </StackPanel>
+                                                                <material:MaterialIcon Kind="ImageOutline" Width="48" Height="48" Foreground="{StaticResource Slate300Brush}"
+                                                                    VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                    IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                                                <Image Source="{Binding ImageBitmap}" Stretch="UniformToFill"
+                                                                    IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
                                                                 <!-- Discount badge -->
                                                                 <Border IsVisible="{Binding DiscountPercent, Converter={x:Static ObjectConverters.IsNotNull}}"
                                                                         Background="{StaticResource Red100Brush}" CornerRadius="4" Padding="6,2"
@@ -250,8 +252,10 @@
                                                 <!-- Image -->
                                                 <Border Grid.Column="0" Background="{StaticResource Slate50Brush}" CornerRadius="8" Width="96" Height="96" HorizontalAlignment="Left" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1" ClipToBounds="True">
                                                     <Panel>
-                                                        <material:MaterialIcon Kind="ImageOutline" Width="32" Height="32" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                                                        <!-- If ImagePath is valid, we would bind an Image here -->
+                                                        <material:MaterialIcon Kind="ImageOutline" Width="32" Height="32" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                            IsVisible="{Binding Product.ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                                        <Image Source="{Binding Product.ImageBitmap}" Stretch="UniformToFill"
+                                                            IsVisible="{Binding Product.ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
                                                     </Panel>
                                                 </Border>
 

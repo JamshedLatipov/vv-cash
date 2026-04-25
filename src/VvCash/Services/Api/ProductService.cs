@@ -90,11 +90,10 @@ public class ProductService : IProductService
                         string productSku = string.Empty;
                         string productCategory = string.Empty;
                         decimal productPrice = 0m;
+                        string imagePath = string.Empty;
 
                         if (bodyElement.TryGetProperty("sell_price", out var priceElem))
-                        {
                             productPrice = priceElem.ValueKind == JsonValueKind.Number ? priceElem.GetDecimal() : 0m;
-                        }
 
                         if (bodyElement.TryGetProperty("product", out var productElem) && productElem.ValueKind == JsonValueKind.Object)
                         {
@@ -109,10 +108,22 @@ public class ProductService : IProductService
 
                             if (productElem.TryGetProperty("category", out var catElem) && catElem.ValueKind == JsonValueKind.Object)
                             {
-                                if (catElem.TryGetProperty("name", out var catNameElem))
-                                    productCategory = catNameElem.GetString() ?? string.Empty;
-                                else if (catElem.TryGetProperty("id", out var catIdElem))
+                                if (catElem.TryGetProperty("id", out var catIdElem))
                                     productCategory = catIdElem.GetString() ?? string.Empty;
+                                else if (catElem.TryGetProperty("name", out var catNameElem))
+                                    productCategory = catNameElem.GetString() ?? string.Empty;
+                            }
+
+                            if (productElem.TryGetProperty("images", out var imagesElem) && imagesElem.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var img in imagesElem.EnumerateArray())
+                                {
+                                    if (img.TryGetProperty("path", out var pathElem))
+                                    {
+                                        imagePath = pathElem.GetString() ?? string.Empty;
+                                        break;
+                                    }
+                                }
                             }
                         }
 
@@ -123,7 +134,8 @@ public class ProductService : IProductService
                             Name = productName,
                             Sku = productSku,
                             Category = productCategory,
-                            Price = productPrice
+                            Price = productPrice,
+                            ImagePath = imagePath
                         };
 
                         await _storageService.SaveProductsAsync(new[] { product });
