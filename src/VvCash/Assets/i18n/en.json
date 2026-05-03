@@ -105,5 +105,15 @@
   "Программалояльности": "Loyalty Program",
   "Начислениебонусовспе": "Accrual of bonuses from the first purchase",
   "НОМЕРТЕЛЕФОНА": "PHONE NUMBER",
-  "ЗАРЕГИСТРИРОВАТЬКЛИЕ": "REGISTER CLIENT"
+  "ЗАРЕГИСТРИРОВАТЬКЛИЕ": "REGISTER CLIENT",
+  "Orders": "Orders",
+  "Inventory": "Inventory",
+  "Customers": "Customers",
+  "AddCustomer": "Add Customer",
+  "Subcategories": "Subcategories",
+  "Products": "Products",
+  "StartShiftAction": "START SHIFT",
+  "ExitApplication": "EXIT APPLICATION",
+  "OK": "OK",
+  "SyncData": "Sync Data"
 }

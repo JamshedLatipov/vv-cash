@@ -84,5 +84,15 @@
   "SaveConfiguration": "Сохранить настройки",
   "Мужской": "Мужской",
   "Женский": "Женский",
-  "Apply": "Применить"
+  "Apply": "Применить",
+  "Orders": "Заказы",
+  "Inventory": "Склад",
+  "Customers": "Клиенты",
+  "AddCustomer": "Добавить клиента",
+  "Subcategories": "Подкатегории",
+  "Products": "Товары",
+  "StartShiftAction": "НАЧАТЬ СМЕНУ",
+  "ExitApplication": "ВЫЙТИ ИЗ ПРИЛОЖЕНИЯ",
+  "OK": "ОК",
+  "SyncData": "Синхронизация"
 }

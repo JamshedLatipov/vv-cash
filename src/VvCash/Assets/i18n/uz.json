@@ -105,5 +105,15 @@
   "Программалояльности": "Sodiqlik dasturi",
   "Начислениебонусовспе": "Birinchi xariddan bonuslar",
   "НОМЕРТЕЛЕФОНА": "TELEFON RAQAMI",
-  "ЗАРЕГИСТРИРОВАТЬКЛИЕ": "MIJOZNI RO'YXATDAN O'TKAZISH"
+  "ЗАРЕГИСТРИРОВАТЬКЛИЕ": "MIJOZNI RO'YXATDAN O'TKAZISH",
+  "Orders": "Buyurtmalar",
+  "Inventory": "Ombor",
+  "Customers": "Mijozlar",
+  "AddCustomer": "Mijoz qo'shish",
+  "Subcategories": "Turkumchalar",
+  "Products": "Mahsulotlar",
+  "StartShiftAction": "SMENANI BOSHLASH",
+  "ExitApplication": "DASTURDAN CHIQISH",
+  "OK": "OK",
+  "SyncData": "Sinxronizatsiya"
 }

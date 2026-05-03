@@ -36,11 +36,11 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                    <Button Classes="NavButton" Content="Orders" Margin="0,0,16,0" FontSize="14"/>
-                    <Button Classes="NavButton" Content="Inventory" Margin="0,0,16,0" FontSize="14"/>
-                    <Button Classes="NavButton" Content="Клиенты" Command="{Binding OpenCustomerSearchCommand}" Margin="0,0,16,0" FontSize="14"/>
-                    <Button Classes="NavButton" Content="Создать клиента" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>
-                    <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding FullReinitializeCommand}" ToolTip.Tip="Sync Data"><material:MaterialIcon Kind="Sync" Width="24" Height="24" Foreground="{StaticResource Slate600Brush}"/></Button>
+                    <Button Classes="NavButton" Content="{Binding [Orders], Source={x:Static services:I18nService.Instance}}" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="{Binding [Inventory], Source={x:Static services:I18nService.Instance}}" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="{Binding [Customers], Source={x:Static services:I18nService.Instance}}" Command="{Binding OpenCustomerSearchCommand}" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="NavButton" Content="{Binding [AddCustomer], Source={x:Static services:I18nService.Instance}}" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>
+                    <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding FullReinitializeCommand}" ToolTip.Tip="{Binding [SyncData], Source={x:Static services:I18nService.Instance}}"><material:MaterialIcon Kind="Sync" Width="24" Height="24" Foreground="{StaticResource Slate600Brush}"/></Button>
 
 <Button Classes="IconButton" Margin="0,0,8,0" Command="{Binding CloseShiftCommand}" ToolTip.Tip="Close Shift">
                         <Button.IsEnabled>
@@ -137,7 +137,7 @@
 
                                 <!-- Subcategories section -->
                                 <StackPanel IsVisible="{Binding HasSubcategories}" Spacing="8" Margin="0,0,0,16">
-                                    <TextBlock Text="Подкатегории" FontSize="13" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding [Subcategories], Source={x:Static services:I18nService.Instance}}" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{StaticResource Slate500Brush}" LetterSpacing="1"
                                                IsVisible="{Binding !IsViewingCategories}"/>
                                     <ItemsControl ItemsSource="{Binding CurrentDisplayedCategories}">
@@ -171,7 +171,7 @@
 
                                 <!-- Products section -->
                                 <StackPanel Spacing="8">
-                                    <TextBlock Text="Товары" FontSize="13" FontWeight="SemiBold"
+                                    <TextBlock Text="{Binding [Products], Source={x:Static services:I18nService.Instance}}" FontSize="13" FontWeight="SemiBold"
                                                Foreground="{StaticResource Slate500Brush}" LetterSpacing="1"
                                                IsVisible="{Binding HasSubcategories}"/>
                                     <ItemsControl ItemsSource="{Binding Products}">
@@ -461,7 +461,7 @@
                              TextAlignment="Center"/>
 
                     <Button Classes="PrimaryButton"
-                            Content="ОК"
+                            Content="{Binding [OK], Source={x:Static services:I18nService.Instance}}"
                             Command="{Binding CloseAlertModalCommand}"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
@@ -501,7 +501,7 @@
                              TextAlignment="Center"/>
 
                     <Button Classes="PrimaryButton"
-                            Content="START SHIFT"
+                            Content="{Binding [StartShiftAction], Source={x:Static services:I18nService.Instance}}"
                             Command="{Binding OpenShiftCommand}"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
@@ -516,7 +516,7 @@
                     </Button>
 
                     <Button Classes="OutlineButton"
-                            Content="EXIT APPLICATION"
+                            Content="{Binding [ExitApplication], Source={x:Static services:I18nService.Instance}}"
                             Command="{Binding CloseApplicationCommand}"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
