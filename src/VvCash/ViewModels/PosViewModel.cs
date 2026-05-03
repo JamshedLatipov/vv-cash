@@ -363,6 +363,24 @@ public partial class PosViewModel : ViewModelBase
         {
             IsCatalogOpen = true;
         }
+
+        if (AllCategories != null)
+        {
+            var currentLevelCats = CurrentParentCategory == null
+                ? AllCategories.Where(c => c.Parent?.Id == null)
+                : AllCategories.Where(c => c.Parent?.Id == CurrentParentCategory.Id);
+
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                var lowerVal = value.ToLowerInvariant();
+                currentLevelCats = currentLevelCats.Where(c => c.Name != null && c.Name.ToLowerInvariant().Contains(lowerVal));
+            }
+
+            var catsList = currentLevelCats.ToList();
+            CurrentDisplayedCategories = new ObservableCollection<Category>(catsList);
+            HasSubcategories = catsList.Count > 0;
+        }
+
         _ = LoadProductsAsync(SelectedCategory?.Id);
     }
 

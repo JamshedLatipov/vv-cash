@@ -30,7 +30,7 @@
                     <Border Background="{StaticResource Slate100Brush}" CornerRadius="8" Padding="12,8" Width="300">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <material:MaterialIcon Kind="Magnify" Width="20" Height="20" Foreground="{StaticResource Slate500Brush}"/>
-                            <TextBox Text="{Binding SearchQuery}" Watermark="{Binding [Searchproductsorscan], Source={x:Static services:I18nService.Instance}}" Classes="SearchBox" Padding="0" VerticalAlignment="Center" Width="250" FontSize="14" Foreground="{StaticResource Slate900Brush}" KeyDown="OnSearchBoxKeyDown"/>
+                            <TextBox Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" Watermark="{Binding [Searchproductsorscan], Source={x:Static services:I18nService.Instance}}" Classes="SearchBox" Padding="0" VerticalAlignment="Center" Width="250" FontSize="14" Foreground="{StaticResource Slate900Brush}" KeyDown="OnSearchBoxKeyDown"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

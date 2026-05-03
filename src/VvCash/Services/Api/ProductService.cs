@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -40,9 +41,18 @@ public class ProductService : IProductService
         return await _storageService.GetProductsByCategoryAsync(category);
     }
 
-    public Task<IEnumerable<Product>> SearchProductsAsync(string query)
+    public async Task<IEnumerable<Product>> SearchProductsAsync(string query)
     {
-        return Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
+        if (string.IsNullOrWhiteSpace(query))
+            return Array.Empty<Product>();
+
+        var allProducts = await _storageService.GetAllProductsAsync();
+        var lowerQuery = query.ToLowerInvariant();
+        
+        return allProducts.Where(p => 
+            (p.Name != null && p.Name.ToLowerInvariant().Contains(lowerQuery)) ||
+            (p.Sku != null && p.Sku.ToLowerInvariant().Contains(lowerQuery)) ||
+            (p.Barcode != null && p.Barcode.ToLowerInvariant().Contains(lowerQuery)));
     }
 
     public async Task<Product?> GetProductByBarcodeAsync(string barcode)
