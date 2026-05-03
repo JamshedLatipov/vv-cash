@@ -204,6 +204,7 @@
         <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="FontSize" Value="24"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Height" Value="64"/>
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="VerticalAlignment" Value="Stretch"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
@@ -222,6 +223,7 @@
         <Setter Property="Background" Value="#f1f5f9"/>
         <Setter Property="Foreground" Value="#334155"/>
         <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Height" Value="64"/>
         <Setter Property="HorizontalAlignment" Value="Stretch"/>
         <Setter Property="VerticalAlignment" Value="Stretch"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
@@ -249,6 +251,44 @@
         <Setter Property="BorderBrush" Value="#11b4d4"/>
         <Setter Property="BorderThickness" Value="2"/>
         <Setter Property="Background" Value="#f8fafc"/>
+    </Style>
+
+    <!-- Segmented Radio Button -->
+    <Style Selector="RadioButton.Segmented">
+        <Setter Property="Background" Value="#f1f5f9"/>
+        <Setter Property="Foreground" Value="#475569"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Height" Value="48"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <ControlTemplate>
+                <Border Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}">
+                    <ContentPresenter Name="PART_ContentPresenter"
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                      RecognizesAccessKey="True"
+                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                </Border>
+            </ControlTemplate>
+        </Setter>
+    </Style>
+    <Style Selector="RadioButton.Segmented:pointerover">
+        <Setter Property="Background" Value="#e2e8f0"/>
+    </Style>
+    <Style Selector="RadioButton.Segmented:checked">
+        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="RadioButton.Segmented:checked:pointerover">
+        <Setter Property="Background" Value="#0d8fa6"/>
     </Style>
 
     <!-- Primary ToggleSwitch -->

@@ -11,9 +11,11 @@ public class CartService : ICartService
     private readonly ObservableCollection<CartItem> _items = new();
     private readonly ObservableCollection<Coupon> _appliedCoupons = new();
 
-
     public IReadOnlyList<CartItem> Items => _items;
     public IReadOnlyList<Coupon> AppliedCoupons => _appliedCoupons;
+
+    public decimal ManualDiscountPercent { get; private set; }
+    public decimal ManualDiscountAmount { get; private set; }
 
     public decimal Subtotal => _items.Sum(i => i.LineTotal);
 
@@ -22,14 +24,20 @@ public class CartService : ICartService
         get
         {
             var subtotal = Subtotal;
-            var percentDiscount = _appliedCoupons.Sum(c => c.DiscountPercent) / 100m * subtotal;
-            var flatDiscount = _appliedCoupons.Sum(c => c.DiscountAmount);
-            return percentDiscount + flatDiscount;
+            // Coupon discounts
+            var couponPercent = _appliedCoupons.Sum(c => c.DiscountPercent) / 100m * subtotal;
+            var couponFlat = _appliedCoupons.Sum(c => c.DiscountAmount);
+            // Manual discount
+            var manualPercent = ManualDiscountPercent / 100m * subtotal;
+            var manualFlat = ManualDiscountAmount;
+
+            var total = couponPercent + couponFlat + manualPercent + manualFlat;
+            // Clamp: discount cannot exceed subtotal
+            return Math.Min(total, subtotal);
         }
     }
 
     public decimal TotalAmount => Subtotal - TotalDiscount;
-
 
     public event EventHandler? CartChanged;
 
@@ -76,6 +84,7 @@ public class CartService : ICartService
     {
         _items.Clear();
         _appliedCoupons.Clear();
+        ClearManualDiscount();
         RaiseCartChanged();
     }
 
@@ -96,6 +105,20 @@ public class CartService : ICartService
             _appliedCoupons.Remove(coupon);
             RaiseCartChanged();
         }
+    }
+
+    public void SetManualDiscount(decimal percent, decimal amount)
+    {
+        ManualDiscountPercent = percent;
+        ManualDiscountAmount = amount;
+        RaiseCartChanged();
+    }
+
+    public void ClearManualDiscount()
+    {
+        ManualDiscountPercent = 0;
+        ManualDiscountAmount = 0;
+        RaiseCartChanged();
     }
 
     private void RaiseCartChanged() => CartChanged?.Invoke(this, EventArgs.Empty);

@@ -115,5 +115,12 @@
   "StartShiftAction": "АУЫСЫМДЫ БАСТАУ",
   "ExitApplication": "ҚОЛДАНБАДАН ШЫҒУ",
   "OK": "ОК",
-  "SyncData": "Синхрондау"
+  "SyncData": "Синхрондау",
+  "Discount": "Жеңілдік",
+  "ManualDiscountTitle": "Тапсырысқа жеңілдік",
+  "ByPercent": "Пайызбен (%)",
+  "ByAmount": "Сомамен",
+  "Clear": "Тазарту",
+  "DiscountValuePlaceholder": "Жеңілдік мөлшерін енгізіңіз",
+  "ManualDiscount": "Қолмен енгізілген жеңілдік"
 }

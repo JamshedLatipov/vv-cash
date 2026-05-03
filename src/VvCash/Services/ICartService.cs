@@ -9,8 +9,15 @@ public interface ICartService
     IReadOnlyList<CartItem> Items { get; }
     decimal Subtotal { get; }
 
+    // Coupon discounts
     decimal TotalDiscount { get; }
     decimal TotalAmount { get; }
+    IReadOnlyList<Coupon> AppliedCoupons { get; }
+
+    // Manual discount set by cashier
+    decimal ManualDiscountPercent { get; }
+    decimal ManualDiscountAmount { get; }
+
     void AddProduct(Product product);
     void RemoveItem(CartItem item);
     void IncreaseQuantity(CartItem item);
@@ -18,6 +25,8 @@ public interface ICartService
     void ClearCart();
     void ApplyCoupon(Coupon coupon);
     void RemoveCoupon(string code);
-    IReadOnlyList<Coupon> AppliedCoupons { get; }
+    void SetManualDiscount(decimal percent, decimal amount);
+    void ClearManualDiscount();
     event EventHandler? CartChanged;
 }
+

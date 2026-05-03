@@ -115,5 +115,12 @@
   "StartShiftAction": "ОҒОЗИ СМЕНА",
   "ExitApplication": "БАРОМАДАН АЗ БАРНОМА",
   "OK": "Хуб",
-  "SyncData": "Ҳамоҳангсозӣ"
+  "SyncData": "Ҳамоҳангсозӣ",
+  "Discount": "Тахфиф",
+  "ManualDiscountTitle": "Тахфиф ба фармоиш",
+  "ByPercent": "Бо фоиз (%)",
+  "ByAmount": "Бо маблағ",
+  "Clear": "Тоза кардан",
+  "DiscountValuePlaceholder": "Маблағи тахфифро ворид кунед",
+  "ManualDiscount": "Тахфифи дастӣ"
 }

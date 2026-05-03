@@ -115,5 +115,12 @@
   "StartShiftAction": "START SHIFT",
   "ExitApplication": "EXIT APPLICATION",
   "OK": "OK",
-  "SyncData": "Sync Data"
+  "SyncData": "Sync Data",
+  "Discount": "Discount",
+  "ManualDiscountTitle": "Order Discount",
+  "ByPercent": "By Percent (%)",
+  "ByAmount": "By Amount",
+  "Clear": "Clear",
+  "DiscountValuePlaceholder": "Enter discount value",
+  "ManualDiscount": "Manual Discount"
 }

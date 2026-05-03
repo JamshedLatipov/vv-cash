@@ -247,12 +247,20 @@
                                 </StackPanel>
                             </StackPanel>
 
-                            <Button Grid.Column="1" Classes="SecondaryButton" Command="{Binding ClearCartCommand}" VerticalAlignment="Bottom">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <material:MaterialIcon Kind="Delete" Width="18" Height="18" Foreground="{StaticResource Slate700Brush}"/>
-                                    <TextBlock Text="{Binding [ClearCart], Source={x:Static services:I18nService.Instance}}" FontSize="14"/>
-                                </StackPanel>
-                            </Button>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Bottom">
+                                <Button Classes="SecondaryButton" Command="{Binding OpenDiscountModalCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="TagOutline" Width="18" Height="18" Foreground="{StaticResource Slate700Brush}"/>
+                                        <TextBlock Text="{Binding [Discount], Source={x:Static services:I18nService.Instance}}" FontSize="14"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Classes="SecondaryButton" Command="{Binding ClearCartCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="Delete" Width="18" Height="18" Foreground="{StaticResource Slate700Brush}"/>
+                                        <TextBlock Text="{Binding [ClearCart], Source={x:Static services:I18nService.Instance}}" FontSize="14"/>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
                         </Grid>
 
                         <!-- Cart Items List -->
@@ -353,10 +361,10 @@
                                                         <StackPanel Orientation="Horizontal" Spacing="8">
                                                             <material:MaterialIcon Kind="TicketConfirmation" Width="18" Height="18" Foreground="{StaticResource PrimaryBrush}"/>
                                                             <TextBlock Text="{Binding Code}" FontSize="14" Foreground="{StaticResource PrimaryBrush}" FontWeight="Bold"/>
-                                                            <Button Classes="Transparent" Padding="4" Margin="4,0,0,0"
+                                                            <Button Classes="Transparent" Width="36" Height="36" Margin="4,0,-8,0"
                                                                     Command="{Binding DataContext.RemoveCouponCommand, ElementName=RootWindow}"
                                                                     CommandParameter="{Binding Code}">
-                                                                <material:MaterialIcon Kind="Close" Width="18" Height="18" Foreground="{StaticResource PrimaryBrush}"/>
+                                                                <material:MaterialIcon Kind="CloseCircle" Width="20" Height="20" Foreground="{StaticResource PrimaryBrush}"/>
                                                             </Button>
                                                         </StackPanel>
                                                     </Border>
@@ -370,6 +378,19 @@
                                         <Grid ColumnDefinitions="*, Auto">
                                             <TextBlock Grid.Column="0" Text="{Binding [Subtotal], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
                                             <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='{}{0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
+                                        </Grid>
+
+                                        <Grid ColumnDefinitions="*, Auto" IsVisible="{Binding HasManualDiscount}">
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                                <material:MaterialIcon Kind="TagOutline" Width="16" Height="16" Foreground="{StaticResource Slate600Brush}"/>
+                                                <TextBlock Text="{Binding [ManualDiscount], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate600Brush}" FontSize="16" FontWeight="Medium"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding ManualDiscountAmount, StringFormat='-{0:F2}'}" Foreground="{StaticResource Slate600Brush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                <Button Classes="Transparent" Width="48" Height="48" Command="{Binding ClearManualDiscountCommand}" ToolTip.Tip="{Binding [Clear], Source={x:Static services:I18nService.Instance}}">
+                                                    <material:MaterialIcon Kind="CloseCircle" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}"/>
+                                                </Button>
+                                            </StackPanel>
                                         </Grid>
 
                                         <Grid ColumnDefinitions="*, Auto">
@@ -433,6 +454,90 @@
                 <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{StaticResource Slate400Brush}" FontSize="10" Margin="0,0,24,0" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="2" Text="{Binding [V240TERMINALIDLXP099], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
             </Grid>
+        </Border>
+
+        <!-- Manual Discount Modal -->
+        <Border Grid.RowSpan="3" Background="#990f172a"
+                IsVisible="{Binding IsDiscountModalVisible}"
+                ZIndex="2000">
+            <Border Background="White"
+                    CornerRadius="24"
+                    Padding="32"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="480"
+                    BoxShadow="0 20 40 0 #40000000">
+                <StackPanel Spacing="24">
+                    <!-- Header -->
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="16" HorizontalAlignment="Center">
+                            <Border Background="{StaticResource Slate100Brush}" CornerRadius="12" Padding="12">
+                                <material:MaterialIcon Kind="TagOutline" Width="32" Height="32" Foreground="{StaticResource Slate800Brush}"/>
+                            </Border>
+                            <TextBlock Text="{Binding [ManualDiscountTitle], Source={x:Static services:I18nService.Instance}}" 
+                                       FontSize="24" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" 
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                        
+                        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Classes="IconButton" Command="{Binding CloseDiscountModalCommand}">
+                            <material:MaterialIcon Kind="Close" Width="28" Height="28" Foreground="{StaticResource Slate600Brush}"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- Type Selector -->
+                    <Grid ColumnDefinitions="*, *" Margin="0,8">
+                        <RadioButton Grid.Column="0" Content="{Binding [ByPercent], Source={x:Static services:I18nService.Instance}}" 
+                                     IsChecked="{Binding IsDiscountPercentMode}" 
+                                     Classes="Segmented" Margin="0,0,4,0"/>
+                        <RadioButton Grid.Column="1" Content="{Binding [ByAmount], Source={x:Static services:I18nService.Instance}}" 
+                                     IsChecked="{Binding IsDiscountAmountMode}"
+                                     Classes="Segmented" Margin="4,0,0,0"/>
+                    </Grid>
+
+                    <!-- Input Display -->
+                    <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="20">
+                        <Grid ColumnDefinitions="*, Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding DiscountInputValue}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="0" Text="{Binding [DiscountValuePlaceholder], Source={x:Static services:I18nService.Instance}}" FontSize="20" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" IsVisible="{Binding DiscountInputValue, Converter={x:Static StringConverters.IsNullOrEmpty}}"/>
+                            <TextBlock Grid.Column="1" Text="%" FontSize="28" FontWeight="Bold" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" IsVisible="{Binding IsDiscountPercentMode}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Numpad -->
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*,*" Margin="0,8" ShowGridLines="False">
+                        <!-- Row 1 -->
+                        <Button Grid.Row="0" Grid.Column="0" Classes="NumpadButton" Content="1" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="1"/>
+                        <Button Grid.Row="0" Grid.Column="1" Classes="NumpadButton" Content="2" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="2"/>
+                        <Button Grid.Row="0" Grid.Column="2" Classes="NumpadButton" Content="3" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="3"/>
+                        <!-- Row 2 -->
+                        <Button Grid.Row="1" Grid.Column="0" Classes="NumpadButton" Content="4" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="4"/>
+                        <Button Grid.Row="1" Grid.Column="1" Classes="NumpadButton" Content="5" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="5"/>
+                        <Button Grid.Row="1" Grid.Column="2" Classes="NumpadButton" Content="6" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="6"/>
+                        <!-- Row 3 -->
+                        <Button Grid.Row="2" Grid.Column="0" Classes="NumpadButton" Content="7" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="7"/>
+                        <Button Grid.Row="2" Grid.Column="1" Classes="NumpadButton" Content="8" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="8"/>
+                        <Button Grid.Row="2" Grid.Column="2" Classes="NumpadButton" Content="9" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="9"/>
+                        <!-- Row 4 -->
+                        <Button Grid.Row="3" Grid.Column="0" Classes="NumpadButton" Content="C" Margin="4" Foreground="{StaticResource Red500Brush}" Command="{Binding AppendDiscountInputCommand}" CommandParameter="CLEAR"/>
+                        <Button Grid.Row="3" Grid.Column="1" Classes="NumpadButton" Content="0" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="0"/>
+                        <Button Grid.Row="3" Grid.Column="2" Classes="NumpadActionButton" Margin="4" Command="{Binding AppendDiscountInputCommand}" CommandParameter="BACKSPACE">
+                            <material:MaterialIcon Kind="BackspaceOutline" Width="28" Height="28"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- Actions -->
+                    <Grid ColumnDefinitions="*, *" Margin="0,8,0,0">
+                        <Button Grid.Column="0" Classes="SecondaryButton" 
+                                Content="{Binding [Clear], Source={x:Static services:I18nService.Instance}}" 
+                                Command="{Binding ClearManualDiscountCommand}" 
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="56" FontSize="18" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Classes="PrimaryButton" 
+                                Content="{Binding [Apply], Source={x:Static services:I18nService.Instance}}" 
+                                Command="{Binding ApplyManualDiscountCommand}" 
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="56" FontSize="18" Margin="8,0,0,0"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
         </Border>
 
         <!-- Product Not Found Alert Modal -->

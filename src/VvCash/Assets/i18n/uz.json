@@ -115,5 +115,12 @@
   "StartShiftAction": "SMENANI BOSHLASH",
   "ExitApplication": "DASTURDAN CHIQISH",
   "OK": "OK",
-  "SyncData": "Sinxronizatsiya"
+  "SyncData": "Sinxronizatsiya",
+  "Discount": "Chegirma",
+  "ManualDiscountTitle": "Buyurtmaga chegirma",
+  "ByPercent": "Foizda (%)",
+  "ByAmount": "Summada",
+  "Clear": "Tozalash",
+  "DiscountValuePlaceholder": "Chegirma miqdorini kiriting",
+  "ManualDiscount": "Qo'lda kiritilgan chegirma"
 }

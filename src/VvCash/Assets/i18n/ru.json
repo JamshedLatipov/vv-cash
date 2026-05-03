@@ -94,5 +94,12 @@
   "StartShiftAction": "НАЧАТЬ СМЕНУ",
   "ExitApplication": "ВЫЙТИ ИЗ ПРИЛОЖЕНИЯ",
   "OK": "ОК",
-  "SyncData": "Синхронизация"
+  "SyncData": "Синхронизация",
+  "Discount": "Скидка",
+  "ManualDiscountTitle": "Скидка на заказ",
+  "ByPercent": "В процентах (%)",
+  "ByAmount": "Суммой",
+  "Clear": "Сбросить",
+  "DiscountValuePlaceholder": "Введите значение скидки",
+  "ManualDiscount": "Ручная скидка"
 }

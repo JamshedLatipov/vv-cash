@@ -63,6 +63,26 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
 
+    // Manual Discount Properties
+    [ObservableProperty] private bool _isDiscountModalVisible = false;
+    [ObservableProperty] private string _discountInputValue = string.Empty;
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(IsDiscountAmountMode))]
+    private bool _isDiscountPercentMode = true;
+
+    public bool IsDiscountAmountMode
+    {
+        get => !IsDiscountPercentMode;
+        set => IsDiscountPercentMode = !value;
+    }
+
+    [ObservableProperty] 
+    [NotifyPropertyChangedFor(nameof(HasManualDiscount))]
+    private decimal _manualDiscountAmount;
+
+    public bool HasManualDiscount => ManualDiscountAmount > 0;
+
+
     [ObservableProperty] private decimal _totalDiscount;
     [ObservableProperty] private decimal _totalAmount;
     [ObservableProperty] private string _printerStatusText = "Printer Ready";
@@ -361,6 +381,10 @@ public partial class PosViewModel : ViewModelBase
         }
         Subtotal = _cartService.Subtotal;
 
+        ManualDiscountAmount = _cartService.ManualDiscountPercent > 0 
+            ? (_cartService.ManualDiscountPercent / 100m * Subtotal) 
+            : _cartService.ManualDiscountAmount;
+
         TotalDiscount = _cartService.TotalDiscount;
         TotalAmount = _cartService.TotalAmount;
 
@@ -509,6 +533,63 @@ public partial class PosViewModel : ViewModelBase
     private void RemoveCoupon(string code)
     {
         _cartService.RemoveCoupon(code);
+    }
+
+    [RelayCommand]
+    private void OpenDiscountModal()
+    {
+        DiscountInputValue = string.Empty;
+        IsDiscountModalVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseDiscountModal()
+    {
+        IsDiscountModalVisible = false;
+    }
+
+    [RelayCommand]
+    private void AppendDiscountInput(string value)
+    {
+        if (value == "BACKSPACE")
+        {
+            if (!string.IsNullOrEmpty(DiscountInputValue))
+            {
+                DiscountInputValue = DiscountInputValue.Substring(0, DiscountInputValue.Length - 1);
+            }
+        }
+        else if (value == "CLEAR")
+        {
+            DiscountInputValue = string.Empty;
+        }
+        else
+        {
+            DiscountInputValue += value;
+        }
+    }
+
+    [RelayCommand]
+    private void ApplyManualDiscount()
+    {
+        if (decimal.TryParse(DiscountInputValue, out var value))
+        {
+            if (IsDiscountPercentMode)
+            {
+                _cartService.SetManualDiscount(value, 0);
+            }
+            else
+            {
+                _cartService.SetManualDiscount(0, value);
+            }
+        }
+        CloseDiscountModal();
+    }
+
+    [RelayCommand]
+    private void ClearManualDiscount()
+    {
+        _cartService.ClearManualDiscount();
+        CloseDiscountModal();
     }
 
     [RelayCommand]
