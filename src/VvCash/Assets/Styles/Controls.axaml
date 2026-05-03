@@ -43,10 +43,10 @@
     <Style Selector="Button.CartIconButton">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="#94a3b8"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="8"/>
-        <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="40"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="10"/>
+        <Setter Property="Width" Value="52"/>
+        <Setter Property="Height" Value="52"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
@@ -58,18 +58,22 @@
     <Style Selector="Button.CategoryButton">
         <Setter Property="Background" Value="White"/>
         <Setter Property="Foreground" Value="#64748b"/>
-        <Setter Property="BorderBrush" Value="#f1f5f9"/>
+        <Setter Property="BorderBrush" Value="#e2e8f0"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="12"/>
-        <Setter Property="Padding" Value="12"/>
-        <Setter Property="Width" Value="80"/>
-        <Setter Property="Height" Value="80"/>
+        <Setter Property="CornerRadius" Value="16"/>
+        <Setter Property="Padding" Value="10"/>
+        <Setter Property="Width" Value="96"/>
+        <Setter Property="Height" Value="88"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     <Style Selector="Button.CategoryButton:pointerover /template/ ContentPresenter">
-        <Setter Property="BorderBrush" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#f0fbfd"/>
         <Setter Property="TextElement.Foreground" Value="#11b4d4"/>
+    </Style>
+    <Style Selector="Button.CategoryButton:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="#d0f0f8"/>
+        <Setter Property="TextElement.Foreground" Value="#0d8fa6"/>
     </Style>
     <Style Selector="Button.CategoryButton.Active">
         <Setter Property="Background" Value="#11b4d4"/>
@@ -77,17 +81,21 @@
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
     <Style Selector="Button.CategoryButton.Active:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0ea6c5"/>
+        <Setter Property="TextElement.Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.CategoryButton.Active:pressed /template/ ContentPresenter">
+        <Setter Property="Background" Value="#0d8fa6"/>
         <Setter Property="TextElement.Foreground" Value="White"/>
     </Style>
 
     <Style Selector="Button.IconButton">
         <Setter Property="Background" Value="#f1f5f9"/>
         <Setter Property="Foreground" Value="#334155"/>
-        <Setter Property="Padding" Value="8"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Width" Value="40"/>
-        <Setter Property="Height" Value="40"/>
+        <Setter Property="Padding" Value="10"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Width" Value="48"/>
+        <Setter Property="Height" Value="48"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
@@ -101,13 +109,14 @@
         <Setter Property="Foreground" Value="#0f172a"/>
         <Setter Property="BorderBrush" Value="#e2e8f0"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Width" Value="32"/>
-        <Setter Property="Height" Value="32"/>
+        <Setter Property="Width" Value="48"/>
+        <Setter Property="Height" Value="48"/>
         <Setter Property="Padding" Value="0"/>
-        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="CornerRadius" Value="10"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="FontSize" Value="20"/>
     </Style>
     <Style Selector="Button.QtyButton:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="#11b4d4"/>
