@@ -8,8 +8,7 @@ public interface ICartService
 {
     IReadOnlyList<CartItem> Items { get; }
     decimal Subtotal { get; }
-    decimal TaxRate { get; }
-    decimal Tax { get; }
+
     decimal TotalDiscount { get; }
     decimal TotalAmount { get; }
     void AddProduct(Product product);

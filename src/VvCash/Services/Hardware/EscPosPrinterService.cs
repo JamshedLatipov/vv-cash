@@ -35,7 +35,7 @@ public class EscPosPrinterService : IPrinterService
         _connectionString = connectionString;
     }
 
-    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal tax, decimal discount, decimal total, IEnumerable<Coupon> coupons)
+    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons)
     {
         try
         {
@@ -57,7 +57,7 @@ public class EscPosPrinterService : IPrinterService
             WriteLine(ms, PadLine("Subtotal:", $"${subtotal:F2}", 32));
             if (discount > 0)
                 WriteLine(ms, PadLine("Discount:", $"-${discount:F2}", 32));
-            WriteLine(ms, PadLine("Tax:", $"${tax:F2}", 32));
+
             Write(ms, CmdBoldOn);
             WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
             Write(ms, CmdBoldOff);

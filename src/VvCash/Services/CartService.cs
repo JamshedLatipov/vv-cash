@@ -11,7 +11,6 @@ public class CartService : ICartService
     private readonly ObservableCollection<CartItem> _items = new();
     private readonly ObservableCollection<Coupon> _appliedCoupons = new();
 
-    public decimal TaxRate => 0.085m;
 
     public IReadOnlyList<CartItem> Items => _items;
     public IReadOnlyList<Coupon> AppliedCoupons => _appliedCoupons;
@@ -29,8 +28,8 @@ public class CartService : ICartService
         }
     }
 
-    public decimal Tax => (Subtotal - TotalDiscount) * TaxRate;
-    public decimal TotalAmount => Subtotal - TotalDiscount + Tax;
+    public decimal TotalAmount => Subtotal - TotalDiscount;
+
 
     public event EventHandler? CartChanged;
 

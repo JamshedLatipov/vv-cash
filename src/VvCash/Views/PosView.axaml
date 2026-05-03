@@ -358,10 +358,7 @@
                                             <TextBlock Grid.Column="0" Text="{Binding [Subtotal], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
                                             <TextBlock Grid.Column="1" Text="{Binding Subtotal, StringFormat='{}{0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
                                         </Grid>
-                                        <Grid ColumnDefinitions="*, Auto">
-                                            <TextBlock Grid.Column="0" Text="{Binding [Tax85], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate600Brush}" FontSize="16"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Tax, StringFormat='{}{0:F2}'}" Foreground="{StaticResource Slate900Brush}" FontSize="16" FontWeight="SemiBold"/>
-                                        </Grid>
+
                                         <Grid ColumnDefinitions="*, Auto">
                                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
                                                 <material:MaterialIcon Kind="Tag" Width="16" Height="16" Foreground="{StaticResource Red500Brush}"/>

@@ -62,7 +62,7 @@ public partial class PosViewModel : ViewModelBase
     [ObservableProperty] private string _couponCode = string.Empty;
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
-    [ObservableProperty] private decimal _tax;
+
     [ObservableProperty] private decimal _totalDiscount;
     [ObservableProperty] private decimal _totalAmount;
     [ObservableProperty] private string _printerStatusText = "Printer Ready";
@@ -360,7 +360,7 @@ public partial class PosViewModel : ViewModelBase
             OrderDateTime = string.Empty;
         }
         Subtotal = _cartService.Subtotal;
-        Tax = _cartService.Tax;
+
         TotalDiscount = _cartService.TotalDiscount;
         TotalAmount = _cartService.TotalAmount;
 
@@ -517,7 +517,7 @@ public partial class PosViewModel : ViewModelBase
         if (!CartItems.Any()) return;
         var success = await _printerService.PrintReceiptAsync(
             _cartService.Items,
-            Subtotal, Tax, TotalDiscount, TotalAmount,
+            Subtotal, TotalDiscount, TotalAmount,
             _cartService.AppliedCoupons);
         StatusMessage = success ? "Receipt printed." : "Print failed.";
     }
@@ -605,7 +605,7 @@ public partial class PosViewModel : ViewModelBase
                     {
                         await _printerService.PrintReceiptAsync(
                             _cartService.Items,
-                            Subtotal, Tax, TotalDiscount, TotalAmount,
+                            Subtotal, TotalDiscount, TotalAmount,
                             _cartService.AppliedCoupons);
                         _cartService.ClearCart();
                         StatusMessage = "Payment processed. Thank you!";
