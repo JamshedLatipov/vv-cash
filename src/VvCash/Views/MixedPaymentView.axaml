@@ -152,7 +152,7 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <Grid Grid.Row="1" RowDefinitions="*, *, *, *" ColumnDefinitions="*, *, *" Margin="0,0,0,16">
+                    <Grid Grid.Row="1" RowDefinitions="*, *, *, *" ColumnDefinitions="*, *, *" Margin="0,0,0,16" VerticalAlignment="Stretch">
                         <Grid.Styles>
                             <Style Selector="Button.NumpadBtn">
                                 <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
@@ -160,6 +160,8 @@
                                 <Setter Property="CornerRadius" Value="12"/>
                                 <Setter Property="FontSize" Value="24"/>
                                 <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                <Setter Property="VerticalAlignment" Value="Stretch"/>
                                 <Setter Property="HorizontalContentAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                                 <Setter Property="Margin" Value="6"/>
@@ -171,6 +173,8 @@
                                 <Setter Property="Background" Value="{StaticResource Slate100Brush}"/>
                                 <Setter Property="Foreground" Value="{StaticResource Red500Brush}"/>
                                 <Setter Property="CornerRadius" Value="12"/>
+                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                <Setter Property="VerticalAlignment" Value="Stretch"/>
                                 <Setter Property="HorizontalContentAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                                 <Setter Property="Margin" Value="6"/>
@@ -199,7 +203,7 @@
                         </Button>
                     </Grid>
 
-                    <Grid Grid.Row="2" ColumnDefinitions="*, *" Height="60">
+                    <Grid Grid.Row="2" ColumnDefinitions="*, *" Height="72">
                          <Grid.Styles>
                             <Style Selector="Button.ResetBtn">
                                 <Setter Property="Background" Value="Transparent"/>
@@ -209,16 +213,18 @@
                                 <Setter Property="CornerRadius" Value="12"/>
                                 <Setter Property="FontSize" Value="16"/>
                                 <Setter Property="FontWeight" Value="Bold"/>
+                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                <Setter Property="VerticalAlignment" Value="Stretch"/>
                                 <Setter Property="HorizontalContentAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
-                                <Setter Property="Margin" Value="0,0,6,0"/>
+                                <Setter Property="Margin" Value="6,0,6,0"/>
                             </Style>
                             <Style Selector="Button.ResetBtn:pointerover /template/ ContentPresenter">
                                 <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
                             </Style>
                         </Grid.Styles>
                         <Button Grid.Column="0" Classes="ResetBtn" Content="Сброс" Command="{Binding ResetCommand}"/>
-                        <Button Grid.Column="1" Classes="PrimaryButton" Content="Всё сразу" Command="{Binding AllAtOnceCommand}" Margin="6,0,0,0"/>
+                        <Button Grid.Column="1" Classes="PrimaryButton" Content="Всё сразу" Command="{Binding AllAtOnceCommand}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="6,0,6,0"/>
                     </Grid>
                 </Grid>
             </Border>
