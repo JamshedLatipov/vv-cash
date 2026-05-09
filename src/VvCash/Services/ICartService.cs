@@ -18,6 +18,9 @@ public interface ICartService
     decimal ManualDiscountPercent { get; }
     decimal ManualDiscountAmount { get; }
 
+    // Customer loyalty card discount
+    decimal CustomerDiscountPercent { get; }
+
     void AddProduct(Product product);
     void RemoveItem(CartItem item);
     void IncreaseQuantity(CartItem item);
@@ -27,6 +30,8 @@ public interface ICartService
     void RemoveCoupon(string code);
     void SetManualDiscount(decimal percent, decimal amount);
     void ClearManualDiscount();
+    void SetCustomerDiscount(decimal percent);
+    void ClearCustomerDiscount();
     event EventHandler? CartChanged;
 }
 

@@ -76,12 +76,31 @@ public partial class PosViewModel : ViewModelBase
         set => IsDiscountPercentMode = !value;
     }
 
-    [ObservableProperty] 
-    [NotifyPropertyChangedFor(nameof(HasManualDiscount))]
-    private decimal _manualDiscountAmount;
+    [ObservableProperty] private decimal _manualDiscountAmount;
 
     public bool HasManualDiscount => ManualDiscountAmount > 0;
 
+    // Selected customer
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedCustomer))]
+    [NotifyPropertyChangedFor(nameof(SelectedCustomerName))]
+    [NotifyPropertyChangedFor(nameof(SelectedCustomerDiscount))]
+    [NotifyPropertyChangedFor(nameof(HasCustomerDiscount))]
+    [NotifyPropertyChangedFor(nameof(CustomerDiscountAmount))]
+    private VvCash.Models.Api.CounterpartyResponse? _selectedCustomer;
+
+    public bool HasSelectedCustomer => SelectedCustomer != null;
+    public string SelectedCustomerName => SelectedCustomer?.FullName ?? string.Empty;
+    public decimal SelectedCustomerDiscount => SelectedCustomer?.DiscountCard?.Discount ?? 0m;
+    public bool HasCustomerDiscount => SelectedCustomer?.DiscountCard != null && SelectedCustomer.DiscountCard.Discount > 0;
+    public decimal CustomerDiscountAmount => SelectedCustomerDiscount / 100m * Subtotal;
+
+    [RelayCommand]
+    private void ClearSelectedCustomer()
+    {
+        SelectedCustomer = null;
+        _cartService.ClearCustomerDiscount();
+    }
 
     [ObservableProperty] private decimal _totalDiscount;
     [ObservableProperty] private decimal _totalAmount;
@@ -398,6 +417,7 @@ public partial class PosViewModel : ViewModelBase
             OrderDateTime = string.Empty;
         }
         Subtotal = _cartService.Subtotal;
+        OnPropertyChanged(nameof(CustomerDiscountAmount));
 
         ManualDiscountAmount = _cartService.ManualDiscountPercent > 0 
             ? (_cartService.ManualDiscountPercent / 100m * Subtotal) 
@@ -527,6 +547,8 @@ public partial class PosViewModel : ViewModelBase
     private void ClearCart()
     {
         _cartService.ClearCart();
+        _cartService.ClearCustomerDiscount();
+        SelectedCustomer = null;
         _ = _customerDisplayService.ClearAsync();
     }
 
@@ -631,10 +653,20 @@ public partial class PosViewModel : ViewModelBase
             {
                 var dialog = new VvCash.Views.CustomerSearchWindow();
                 dialog.DataContext = new CustomerSearchViewModel(dialog, _counterpartyService);
-                var result = (CounterpartyResponse?) await dialog.ShowDialog<object>(mainWindow);
+                var result = (VvCash.Models.Api.CounterpartyResponse?) await dialog.ShowDialog<object>(mainWindow);
                 if (result != null)
                 {
-                    StatusMessage = $"Выбран клиент: {result.FullName}";
+                    SelectedCustomer = result;
+                    if (result.DiscountCard != null && result.DiscountCard.Discount > 0)
+                    {
+                        _cartService.SetCustomerDiscount(result.DiscountCard.Discount);
+                        StatusMessage = $"Клиент: {result.FullName} • Скидка по карте: {result.DiscountCard.Discount}%";
+                    }
+                    else
+                    {
+                        _cartService.ClearCustomerDiscount();
+                        StatusMessage = $"Выбран клиент: {result.FullName}";
+                    }
                 }
             }
         }

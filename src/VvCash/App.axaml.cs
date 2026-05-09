@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Sockets;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -90,6 +92,25 @@ public partial class App : Application
         services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
 
         services.AddTransient<AuthHeaderHandler>();
+
+        // Force IPv4 on all HttpClients to avoid macOS SocketException
+        // ('Can't assign requested address' caused by SocketsHttpHandler preferring IPv6)
+        services.ConfigureHttpClientDefaults(b =>
+            b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                ConnectCallback = async (ctx, ct) =>
+                {
+                    var addresses = await Dns.GetHostAddressesAsync(
+                        ctx.DnsEndPoint.Host, AddressFamily.InterNetwork, ct);
+                    var socket = new Socket(SocketType.Stream, ProtocolType.Tcp)
+                    {
+                        NoDelay = true
+                    };
+                    await socket.ConnectAsync(addresses[0], ctx.DnsEndPoint.Port, ct);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+            }));
+
         services.AddHttpClient("DefaultClient").AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("DefaultClient"));
 

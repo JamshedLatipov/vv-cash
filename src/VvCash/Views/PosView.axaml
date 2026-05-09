@@ -245,6 +245,17 @@
                                     <TextBlock Text="{Binding OrderDateTime}" Foreground="{StaticResource Slate500Brush}" FontSize="14"
                                                IsVisible="{Binding OrderDateTime, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                                 </StackPanel>
+
+                                <!-- Selected customer badge -->
+                                <Border IsVisible="{Binding HasSelectedCustomer}" Background="{StaticResource PrimaryLightBrush}" CornerRadius="8" Padding="10,5" Margin="0,4,0,0" HorizontalAlignment="Left">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="AccountCircle" Width="16" Height="16" Foreground="{StaticResource PrimaryBrush}"/>
+                                        <TextBlock Text="{Binding SelectedCustomerName}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
+                                        <Border IsVisible="{Binding HasCustomerDiscount}" Background="{StaticResource PrimaryBrush}" CornerRadius="4" Padding="6,2">
+                                            <TextBlock Text="{Binding SelectedCustomerDiscount, StringFormat='-{0}%'}" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
 
                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Bottom">
@@ -388,6 +399,23 @@
                                             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                                                 <TextBlock Text="{Binding ManualDiscountAmount, StringFormat='-{0:F2}'}" Foreground="{StaticResource Slate600Brush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
                                                 <Button Classes="Transparent" Width="48" Height="48" Command="{Binding ClearManualDiscountCommand}" ToolTip.Tip="{Binding [Clear], Source={x:Static services:I18nService.Instance}}">
+                                                    <material:MaterialIcon Kind="CloseCircle" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <!-- Customer loyalty card discount row -->
+                                        <Grid ColumnDefinitions="*, Auto" IsVisible="{Binding HasCustomerDiscount}">
+                                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4">
+                                                <material:MaterialIcon Kind="AccountCardOutline" Width="16" Height="16" Foreground="{StaticResource PrimaryBrush}"/>
+                                                <TextBlock Text="Скидка клиента" Foreground="{StaticResource PrimaryBrush}" FontSize="16" FontWeight="Medium"/>
+                                                <Border Background="{StaticResource PrimaryBrush}" CornerRadius="4" Padding="5,1" Margin="4,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding SelectedCustomerDiscount, StringFormat='{}{0}%'}" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Text="{Binding CustomerDiscountAmount, StringFormat='-{0:F2}'}" Foreground="{StaticResource PrimaryBrush}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                <Button Classes="Transparent" Width="48" Height="48" Command="{Binding ClearSelectedCustomerCommand}" ToolTip.Tip="Сбросить скидку клиента">
                                                     <material:MaterialIcon Kind="CloseCircle" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}"/>
                                                 </Button>
                                             </StackPanel>

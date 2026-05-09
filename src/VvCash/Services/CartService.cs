@@ -16,6 +16,7 @@ public class CartService : ICartService
 
     public decimal ManualDiscountPercent { get; private set; }
     public decimal ManualDiscountAmount { get; private set; }
+    public decimal CustomerDiscountPercent { get; private set; }
 
     public decimal Subtotal => _items.Sum(i => i.LineTotal);
 
@@ -30,8 +31,10 @@ public class CartService : ICartService
             // Manual discount
             var manualPercent = ManualDiscountPercent / 100m * subtotal;
             var manualFlat = ManualDiscountAmount;
+            // Customer loyalty card discount
+            var customerPercent = CustomerDiscountPercent / 100m * subtotal;
 
-            var total = couponPercent + couponFlat + manualPercent + manualFlat;
+            var total = couponPercent + couponFlat + manualPercent + manualFlat + customerPercent;
             // Clamp: discount cannot exceed subtotal
             return Math.Min(total, subtotal);
         }
@@ -111,6 +114,18 @@ public class CartService : ICartService
     {
         ManualDiscountPercent = percent;
         ManualDiscountAmount = amount;
+        RaiseCartChanged();
+    }
+
+    public void SetCustomerDiscount(decimal percent)
+    {
+        CustomerDiscountPercent = percent;
+        RaiseCartChanged();
+    }
+
+    public void ClearCustomerDiscount()
+    {
+        CustomerDiscountPercent = 0;
         RaiseCartChanged();
     }
 

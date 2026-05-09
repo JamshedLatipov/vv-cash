@@ -60,4 +60,7 @@ public class CounterpartyResponse
 
     [JsonPropertyName("credit_limit")]
     public decimal? CreditLimit { get; set; }
+
+    [JsonPropertyName("discount_card")]
+    public DiscountCardResponse? DiscountCard { get; set; }
 }
