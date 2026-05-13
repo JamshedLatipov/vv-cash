@@ -384,4 +384,34 @@ public class OfflineStorageService : IOfflineStorageService
 
         await command.ExecuteNonQueryAsync();
     }
+
+    public async Task ClearCategoriesAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Categories";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task ClearProductsAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Products";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task ClearUnsyncedDocumentsAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM UnsyncedDocuments";
+        await command.ExecuteNonQueryAsync();
+    }
 }

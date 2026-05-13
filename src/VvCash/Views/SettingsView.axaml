@@ -45,6 +45,20 @@
             <Setter Property="Background" Value="{StaticResource Slate300Brush}"/>
         </Style>
 
+        <Style Selector="Button.DangerButton">
+            <Setter Property="Background" Value="#FEF2F2"/>
+            <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.DangerButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#FEE2E2"/>
+        </Style>
+
         <Style Selector="TextBox.SettingsInput">
             <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource Slate300Brush}"/>
@@ -185,7 +199,7 @@
                                                 <ComboBox ItemsSource="{Binding AvailableConnections}" SelectedItem="{Binding ConnectionString, Mode=TwoWay}" Classes="PrinterCombo" IsVisible="{Binding IsUsbOrCom}"/>
                                             </Panel>
                                             <CheckBox Grid.Row="1" Grid.Column="3" IsChecked="{Binding IsEnabled, Mode=TwoWay}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <Button Grid.Row="1" Grid.Column="4" Background="Transparent" Foreground="{StaticResource ErrorBrush}" VerticalAlignment="Center"
+                                            <Button Grid.Row="1" Grid.Column="4" Background="Transparent" Foreground="{StaticResource DangerBrush}" VerticalAlignment="Center"
                                                     Command="{Binding $parent[UserControl].DataContext.RemovePrinterCommand}"
                                                     CommandParameter="{Binding}">
                                                 <material:MaterialIcon Kind="TrashCan" Width="20" Height="20"/>
@@ -199,9 +213,70 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Local Data Management Card -->
+                <Border Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="32" BoxShadow="0 4 6 0 #0D000000, 0 2 4 0 #0A000000">
+                    <StackPanel Spacing="16">
+                        <!-- Section Header -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+                            <material:MaterialIcon Kind="DatabaseRemove" Width="24" Height="24" Foreground="{StaticResource DangerBrush}"/>
+                            <StackPanel>
+                                <TextBlock Text="{Binding [LocalDataManagement], Source={x:Static services:I18nService.Instance}}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}"/>
+                                <TextBlock Text="{Binding [LocalDataManagementDesc], Source={x:Static services:I18nService.Instance}}" FontSize="13" Foreground="{StaticResource Slate500Brush}"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Clear Categories -->
+                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="10" Padding="16,12">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="{Binding [ClearCategories], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Slate800Brush}"/>
+                                    <TextBlock Text="{Binding [ClearCategoriesDesc], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Classes="DangerButton" Command="{Binding ClearCategoriesCommand}" HorizontalAlignment="Right">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="TrashCan" Width="18" Height="18"/>
+                                        <TextBlock Text="{Binding [ClearCategories], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <!-- Clear Products -->
+                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="10" Padding="16,12">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="{Binding [ClearProducts], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Slate800Brush}"/>
+                                    <TextBlock Text="{Binding [ClearProductsDesc], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Classes="DangerButton" Command="{Binding ClearProductsCommand}" HorizontalAlignment="Right">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="TrashCan" Width="18" Height="18"/>
+                                        <TextBlock Text="{Binding [ClearProducts], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <!-- Clear Unsynced Documents (unsold products) -->
+                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="10" Padding="16,12">
+                            <Grid ColumnDefinitions="*, Auto">
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Text="{Binding [ClearUnsyncedDocs], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Slate800Brush}"/>
+                                    <TextBlock Text="{Binding [ClearUnsyncedDocsDesc], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Classes="DangerButton" Command="{Binding ClearUnsyncedDocumentsCommand}" HorizontalAlignment="Right">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="TrashCan" Width="18" Height="18"/>
+                                        <TextBlock Text="{Binding [ClearUnsyncedDocs], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
                 <!-- Save Button -->
-                <Button Classes="SaveButton" Command="{Binding SaveCommand}">
-                    <Button.ContentTemplate>
+                <Button Classes="SaveButton" Command="{Binding SaveCommand}">                    <Button.ContentTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
                                 <material:MaterialIcon Kind="ContentSave" Width="24" Height="24"/>

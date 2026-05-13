@@ -46,7 +46,8 @@ public partial class App : Application
             {
 
                 var settingsService = Services.GetRequiredService<ISettingsService>();
-                var settingsVm = new SettingsViewModel(loginVm, settingsService);
+                var offlineStorage = Services.GetRequiredService<IOfflineStorageService>();
+                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage);
                 settingsVm.NavigationRequest = mainVm.NavigateTo;
                 mainVm.NavigateTo(settingsVm);
             };

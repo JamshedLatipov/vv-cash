@@ -122,5 +122,13 @@
   "ByAmount": "Сомамен",
   "Clear": "Тазарту",
   "DiscountValuePlaceholder": "Жеңілдік мөлшерін енгізіңіз",
-  "ManualDiscount": "Қолмен енгізілген жеңілдік"
+  "ManualDiscount": "Қолмен енгізілген жеңілдік",
+  "LocalDataManagement": "Жергілікті деректерді басқару",
+  "LocalDataManagementDesc": "Жергілікті дереққорда кэштелген деректерді тазалау",
+  "ClearCategories": "Санаттарды тазалау",
+  "ClearCategoriesDesc": "Жергілікті дереққордан барлық санаттарды жою",
+  "ClearProducts": "Тауарларды тазалау",
+  "ClearProductsDesc": "Жергілікті дереққордан барлық тауарларды жою",
+  "ClearUnsyncedDocs": "Сатылмаған тауарларды тазалау",
+  "ClearUnsyncedDocsDesc": "Синхрондалмаған сату құжаттарын жою"
 }

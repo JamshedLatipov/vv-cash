@@ -1,10 +1,12 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
 using VvCash.Services;
+using VvCash.Services.Data;
 using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
@@ -74,6 +76,7 @@ public partial class PrinterConfigViewModel : ObservableObject
 public partial class SettingsViewModel : ViewModelBase
 {
     private readonly ISettingsService _settingsService;
+    private readonly IOfflineStorageService _offlineStorageService;
 
     [ObservableProperty]
     private string _backendUrl = string.Empty;
@@ -96,10 +99,11 @@ public partial class SettingsViewModel : ViewModelBase
     public Action<ViewModelBase>? NavigationRequest { get; set; }
     private ViewModelBase _previousViewModel;
 
-    public SettingsViewModel(ViewModelBase previousViewModel, ISettingsService settingsService)
+    public SettingsViewModel(ViewModelBase previousViewModel, ISettingsService settingsService, IOfflineStorageService offlineStorageService)
     {
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
+        _offlineStorageService = offlineStorageService;
 
         // Load existing settings
         BackendUrl = _settingsService.BackendUrl;
@@ -145,8 +149,25 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void GoBack()
+    private async Task ClearCategories()
     {
+        await _offlineStorageService.ClearCategoriesAsync();
+    }
+
+    [RelayCommand]
+    private async Task ClearProducts()
+    {
+        await _offlineStorageService.ClearProductsAsync();
+    }
+
+    [RelayCommand]
+    private async Task ClearUnsyncedDocuments()
+    {
+        await _offlineStorageService.ClearUnsyncedDocumentsAsync();
+    }
+
+    [RelayCommand]
+    private void GoBack()    {
         NavigationRequest?.Invoke(_previousViewModel);
     }
 

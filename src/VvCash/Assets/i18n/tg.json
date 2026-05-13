@@ -122,5 +122,13 @@
   "ByAmount": "Бо маблағ",
   "Clear": "Тоза кардан",
   "DiscountValuePlaceholder": "Маблағи тахфифро ворид кунед",
-  "ManualDiscount": "Тахфифи дастӣ"
+  "ManualDiscount": "Тахфифи дастӣ",
+  "LocalDataManagement": "Идоракунии маълумоти маҳаллӣ",
+  "LocalDataManagementDesc": "Тозакунии маълумоти кэшшуда аз пойгоҳи маҳаллӣ",
+  "ClearCategories": "Тозакунии категорияҳо",
+  "ClearCategoriesDesc": "Нест кардани ҳамаи категорияҳо аз пойгоҳи маҳаллӣ",
+  "ClearProducts": "Тозакунии молҳо",
+  "ClearProductsDesc": "Нест кардани ҳамаи молҳо аз пойгоҳи маҳаллӣ",
+  "ClearUnsyncedDocs": "Тозакунии молҳои нафурӯхта",
+  "ClearUnsyncedDocsDesc": "Нест кардани ҳуҷҷатҳои синхронизатсиянашуда"
 }

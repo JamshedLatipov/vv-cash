@@ -122,5 +122,13 @@
   "ByAmount": "Summada",
   "Clear": "Tozalash",
   "DiscountValuePlaceholder": "Chegirma miqdorini kiriting",
-  "ManualDiscount": "Qo'lda kiritilgan chegirma"
+  "ManualDiscount": "Qo'lda kiritilgan chegirma",
+  "LocalDataManagement": "Mahalliy ma'lumotlarni boshqarish",
+  "LocalDataManagementDesc": "Mahalliy ma'lumotlar bazasidagi keshni tozalash",
+  "ClearCategories": "Kategoriyalarni tozalash",
+  "ClearCategoriesDesc": "Mahalliy ma'lumotlar bazasidan barcha kategoriyalarni o'chirish",
+  "ClearProducts": "Mahsulotlarni tozalash",
+  "ClearProductsDesc": "Mahalliy ma'lumotlar bazasidan barcha mahsulotlarni o'chirish",
+  "ClearUnsyncedDocs": "Sotilmagan mahsulotlarni tozalash",
+  "ClearUnsyncedDocsDesc": "Sinxronlanmagan savdo hujjatlarini o'chirish"
 }

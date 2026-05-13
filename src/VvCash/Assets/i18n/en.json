@@ -122,5 +122,13 @@
   "ByAmount": "By Amount",
   "Clear": "Clear",
   "DiscountValuePlaceholder": "Enter discount value",
-  "ManualDiscount": "Manual Discount"
+  "ManualDiscount": "Manual discount",
+  "LocalDataManagement": "Local Data Management",
+  "LocalDataManagementDesc": "Clear cached data from the local database",
+  "ClearCategories": "Clear categories",
+  "ClearCategoriesDesc": "Remove all categories from local DB",
+  "ClearProducts": "Clear products",
+  "ClearProductsDesc": "Remove all products from local DB",
+  "ClearUnsyncedDocs": "Clear unsold products",
+  "ClearUnsyncedDocsDesc": "Delete unsynced sales documents"
 }

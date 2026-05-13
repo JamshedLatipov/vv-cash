@@ -23,5 +23,9 @@ public interface IOfflineStorageService
     Task DeleteUnsyncedDocumentAsync(string hash);
     Task<int> GetLastSyncVersionAsync();
 
+    Task ClearCategoriesAsync();
+    Task ClearProductsAsync();
+    Task ClearUnsyncedDocumentsAsync();
+
     Task InitializeAsync();
 }
