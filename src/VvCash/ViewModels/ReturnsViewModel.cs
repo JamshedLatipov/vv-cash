@@ -95,16 +95,19 @@ public partial class ReturnsViewModel : ViewModelBase
         try
         {
             var body = await _returnService.GetReturnableLinesAsync(expenseId);
+            if (SelectedSale?.Id != expenseId) return; // selection changed during load; ignore stale result
             SetLines(body.Details.Select(d => new ReturnLineVm(d)));
         }
         catch (Exception)
         {
+            if (SelectedSale?.Id != expenseId) return; // stale failure for a no-longer-selected sale
             ErrorMessage = I18nService.Instance["ReturnFailed"];
             SetLines(Array.Empty<ReturnLineVm>());
         }
         finally
         {
-            IsLoadingLines = false;
+            if (SelectedSale?.Id == expenseId)
+                IsLoadingLines = false;
         }
     }
 
