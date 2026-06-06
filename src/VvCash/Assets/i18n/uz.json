@@ -139,5 +139,20 @@
   "ClearProducts": "Mahsulotlarni tozalash",
   "ClearProductsDesc": "Mahalliy ma'lumotlar bazasidan barcha mahsulotlarni o'chirish",
   "ClearUnsyncedDocs": "Sotilmagan mahsulotlarni tozalash",
-  "ClearUnsyncedDocsDesc": "Sinxronlanmagan savdo hujjatlarini o'chirish"
+  "ClearUnsyncedDocsDesc": "Sinxronlanmagan savdo hujjatlarini o'chirish",
+  "Returns": "Qaytarishlar",
+  "ReturnAction": "Qaytarish",
+  "Returnable": "Qaytarish mumkin",
+  "AlreadyReturned": "Qaytarilgan",
+  "SoldQty": "Sotilgan",
+  "RefundTotal": "Qaytarish summasi",
+  "NoSales": "Sotuvlar yo'q",
+  "ReturnSuccess": "Qaytarish bajarildi",
+  "ReturnFailed": "Qaytarishda xatolik",
+  "NoConnection": "Aloqa yo'q",
+  "SelectSaleToReturn": "Qaytarish uchun sotuvni tanlang",
+  "Prev": "Oldingi",
+  "Next": "Keyingi",
+  "ReturnOpenDrawerSetting": "Qaytarishda kassa qutisini ochish",
+  "ReturnPrintReceiptSetting": "Qaytarish chekini chop etish"
 }

@@ -139,5 +139,20 @@
   "ClearProducts": "Тауарларды тазалау",
   "ClearProductsDesc": "Жергілікті дереққордан барлық тауарларды жою",
   "ClearUnsyncedDocs": "Сатылмаған тауарларды тазалау",
-  "ClearUnsyncedDocsDesc": "Синхрондалмаған сату құжаттарын жою"
+  "ClearUnsyncedDocsDesc": "Синхрондалмаған сату құжаттарын жою",
+  "Returns": "Қайтарулар",
+  "ReturnAction": "Қайтару",
+  "Returnable": "Қайтаруға болады",
+  "AlreadyReturned": "Қайтарылған",
+  "SoldQty": "Сатылған",
+  "RefundTotal": "Қайтару сомасы",
+  "NoSales": "Сатылымдар жоқ",
+  "ReturnSuccess": "Қайтару орындалды",
+  "ReturnFailed": "Қайтару қатесі",
+  "NoConnection": "Байланыс жоқ",
+  "SelectSaleToReturn": "Қайтару үшін сатылымды таңдаңыз",
+  "Prev": "Алдыңғы",
+  "Next": "Келесі",
+  "ReturnOpenDrawerSetting": "Қайтару кезінде кассаны ашу",
+  "ReturnPrintReceiptSetting": "Қайтару чегін басу"
 }

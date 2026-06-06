@@ -139,5 +139,20 @@
   "ClearProducts": "Clear products",
   "ClearProductsDesc": "Remove all products from local DB",
   "ClearUnsyncedDocs": "Clear unsold products",
-  "ClearUnsyncedDocsDesc": "Delete unsynced sales documents"
+  "ClearUnsyncedDocsDesc": "Delete unsynced sales documents",
+  "Returns": "Returns",
+  "ReturnAction": "Return",
+  "Returnable": "Returnable",
+  "AlreadyReturned": "Returned",
+  "SoldQty": "Sold",
+  "RefundTotal": "Refund total",
+  "NoSales": "No sales",
+  "ReturnSuccess": "Return completed",
+  "ReturnFailed": "Return failed",
+  "NoConnection": "No connection",
+  "SelectSaleToReturn": "Select a sale to return items",
+  "Prev": "Prev",
+  "Next": "Next",
+  "ReturnOpenDrawerSetting": "Open cash drawer on return",
+  "ReturnPrintReceiptSetting": "Print return receipt"
 }

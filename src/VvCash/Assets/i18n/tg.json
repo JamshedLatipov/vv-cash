@@ -139,5 +139,20 @@
   "ClearProducts": "Тозакунии молҳо",
   "ClearProductsDesc": "Нест кардани ҳамаи молҳо аз пойгоҳи маҳаллӣ",
   "ClearUnsyncedDocs": "Тозакунии молҳои нафурӯхта",
-  "ClearUnsyncedDocsDesc": "Нест кардани ҳуҷҷатҳои синхронизатсиянашуда"
+  "ClearUnsyncedDocsDesc": "Нест кардани ҳуҷҷатҳои синхронизатсиянашуда",
+  "Returns": "Бозгашт",
+  "ReturnAction": "Бозгардондан",
+  "Returnable": "Имкони бозгашт",
+  "AlreadyReturned": "Баргардонида",
+  "SoldQty": "Фурӯхта",
+  "RefundTotal": "Маблағи бозгашт",
+  "NoSales": "Фурӯш нест",
+  "ReturnSuccess": "Бозгашт анҷом шуд",
+  "ReturnFailed": "Хатои бозгашт",
+  "NoConnection": "Пайваст нест",
+  "SelectSaleToReturn": "Барои бозгашт фурӯшро интихоб кунед",
+  "Prev": "Қаблӣ",
+  "Next": "Баъдӣ",
+  "ReturnOpenDrawerSetting": "Кушодани қуттии пул ҳангоми бозгашт",
+  "ReturnPrintReceiptSetting": "Чопи чеки бозгашт"
 }
