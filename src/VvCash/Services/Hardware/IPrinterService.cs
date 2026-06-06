@@ -11,4 +11,8 @@ public interface IPrinterService
     event EventHandler<PrinterStatus>? StatusChanged;
     Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons);
     Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total);
+    System.Threading.Tasks.Task<bool> OpenCashDrawerAsync();
+    System.Threading.Tasks.Task<bool> PrintReturnReceiptAsync(
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
+        decimal totalRefund, string documentNumber);
 }

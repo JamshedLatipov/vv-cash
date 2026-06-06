@@ -28,6 +28,7 @@ public class EscPosPrinterService : IPrinterService
     private static readonly byte[] CmdDoubleSizeOff = { 0x1B, 0x21, 0x00 };
     private static readonly byte[] CmdCut = { 0x1D, 0x56, 0x42, 0x00 };
     private static readonly byte[] CmdLineFeed = { 0x0A };
+    public static readonly byte[] CmdDrawerKick = { 0x1B, 0x70, 0x00, 0x19, 0xFA };
 
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString)
     {
@@ -164,5 +165,60 @@ public class EscPosPrinterService : IPrinterService
     {
         _status = status;
         StatusChanged?.Invoke(this, status);
+    }
+
+    public static byte[] BuildReturnReceipt(
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
+        decimal totalRefund, string documentNumber)
+    {
+        using var ms = new MemoryStream();
+        Write(ms, CmdInit);
+        Write(ms, CmdAlignCenter);
+        Write(ms, CmdDoubleSizeOn);
+        WriteLine(ms, "RETURN / VOZVRAT");
+        Write(ms, CmdDoubleSizeOff);
+        WriteLine(ms, $"Doc #{documentNumber}");
+        WriteLine(ms, "----------------------------");
+        Write(ms, CmdAlignLeft);
+        foreach (var l in lines)
+            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", $"{l.LineRefund:F2}", 32));
+        WriteLine(ms, "----------------------------");
+        Write(ms, CmdBoldOn);
+        WriteLine(ms, PadLine("REFUND:", $"{totalRefund:F2}", 32));
+        Write(ms, CmdBoldOff);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
+    public async Task<bool> PrintReturnReceiptAsync(
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
+        decimal totalRefund, string documentNumber)
+    {
+        try
+        {
+            await SendAsync(BuildReturnReceipt(lines, totalRefund, documentNumber));
+            return true;
+        }
+        catch
+        {
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
+    }
+
+    public async Task<bool> OpenCashDrawerAsync()
+    {
+        try
+        {
+            await SendAsync(CmdDrawerKick);
+            return true;
+        }
+        catch
+        {
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
     }
 }

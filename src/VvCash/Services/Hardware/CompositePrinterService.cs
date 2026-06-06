@@ -119,4 +119,22 @@ public class CompositePrinterService : IPrinterService
 
         return tasks.Any(t => t.Result);
     }
+
+    public async Task<bool> OpenCashDrawerAsync()
+    {
+        if (!_printers.Any()) return false;
+        var tasks = _printers.Select(p => p.OpenCashDrawerAsync()).ToList();
+        await Task.WhenAll(tasks);
+        return tasks.Any(t => t.Result);
+    }
+
+    public async Task<bool> PrintReturnReceiptAsync(
+        IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber)
+    {
+        if (!_printers.Any()) return false;
+        var list = lines.ToList();
+        var tasks = _printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber)).ToList();
+        await Task.WhenAll(tasks);
+        return tasks.Any(t => t.Result);
+    }
 }

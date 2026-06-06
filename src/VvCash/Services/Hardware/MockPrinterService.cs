@@ -31,4 +31,21 @@ public class MockPrinterService : IPrinterService
         Console.WriteLine($"TOTAL: ${total:F2}");
         return Task.FromResult(true);
     }
+
+    public Task<bool> OpenCashDrawerAsync()
+    {
+        Console.WriteLine("[MockPrinter] Cash drawer kick");
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> PrintReturnReceiptAsync(
+        IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber)
+    {
+        Console.WriteLine($"=== RETURN #{documentNumber} ===");
+        foreach (var l in lines)
+            Console.WriteLine($"  {l.Name} x{l.Quantity}  {l.LineRefund:F2}");
+        Console.WriteLine($"REFUND: {totalRefund:F2}");
+        Console.WriteLine("===============");
+        return Task.FromResult(true);
+    }
 }
