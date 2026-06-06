@@ -18,7 +18,7 @@ using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
 
-public partial class PosViewModel : ViewModelBase
+public partial class PosViewModel : ViewModelBase, IDisposable
 {
     private readonly IProductService _productService;
     private readonly ICategoryService _categoryService;
@@ -324,40 +324,14 @@ public partial class PosViewModel : ViewModelBase
     {
         await _offlineStorageService.InitializeAsync();
 
-        _expenseDocumentService.UnsyncedDocumentsCountChanged += (s, count) =>
-        {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                UnsyncedDocumentsCount = count;
-            });
-        };
+        _expenseDocumentService.UnsyncedDocumentsCountChanged += OnUnsyncedDocumentsCountChanged;
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
 
-        _parkedSaleService.CountChanged += (s, count) =>
-        {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                ParkedSalesCount = count;
-            });
-        };
+        _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
 
-        _syncService.SyncStatusChanged += (s, isOnline) =>
-        {
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                IsSystemOnline = isOnline;
-            });
-        };
-
-        _syncService.ProductsSynced += async (s, _) =>
-        {
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
-            {
-                await LoadCategoriesAsync();
-                await LoadProductsAsync(SelectedCategory?.Id);
-            });
-        };
+        _syncService.SyncStatusChanged += OnSyncStatusChanged;
+        _syncService.ProductsSynced += OnProductsSynced;
 
         StartBackgroundSync();
 
@@ -510,6 +484,47 @@ public partial class PosViewModel : ViewModelBase
                 _ => "Unknown"
             };
         });
+    }
+
+    private void OnUnsyncedDocumentsCountChanged(object? sender, int count)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => UnsyncedDocumentsCount = count);
+    }
+
+    private void OnParkedSaleCountChanged(object? sender, int count)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
+    }
+
+    private void OnSyncStatusChanged(object? sender, bool isOnline)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = isOnline);
+    }
+
+    private async void OnProductsSynced(object? sender, EventArgs e)
+    {
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            await LoadCategoriesAsync();
+            await LoadProductsAsync(SelectedCategory?.Id);
+        });
+    }
+
+    public void Dispose()
+    {
+        // PosViewModel is transient but subscribes to singleton services; without this,
+        // every NavigateToPos (e.g. logout->login) leaks the prior instance, which keeps
+        // reacting to events and pinging the server via the background sync loop.
+        _cartService.CartChanged -= OnCartChanged;
+        _printerService.StatusChanged -= OnPrinterStatusChanged;
+        _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
+        _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
+        _syncService.SyncStatusChanged -= OnSyncStatusChanged;
+        _syncService.ProductsSynced -= OnProductsSynced;
+
+        _syncCancellationTokenSource?.Cancel();
+        _syncCancellationTokenSource?.Dispose();
+        _syncCancellationTokenSource = null;
     }
 
     [RelayCommand]

@@ -40,9 +40,18 @@ public partial class App : Application
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
 
+            // PosViewModel is transient and subscribes to singleton service events;
+            // dispose the prior instance before building a new one so a logout->login
+            // cycle doesn't leave a dead VM reacting to events. (Not done in
+            // MainViewModel.NavigateTo because the payment flow navigates away and back
+            // to the *same* PosViewModel, which must survive that round-trip.)
+            PosViewModel? activePosVm = null;
             void NavigateToPos()
             {
+                activePosVm?.Dispose();
+
                 var posVm = Services.GetRequiredService<PosViewModel>();
+                activePosVm = posVm;
                 posVm.NavigationRequest = mainVm.NavigateTo;
 
                 var screens = desktop.MainWindow?.Screens.All;
