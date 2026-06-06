@@ -44,6 +44,8 @@
                             </Border>
                         </StackPanel>
                     </Button>
+                    <Button Classes="NavButton" Command="{Binding OpenReturnsCommand}" Margin="0,0,16,0" FontSize="14"
+                            Content="{Binding [Returns], Source={x:Static services:I18nService.Instance}}"/>
                     <Button Classes="NavButton" Content="{Binding [Inventory], Source={x:Static services:I18nService.Instance}}" Margin="0,0,16,0" FontSize="14"/>
                     <Button Classes="NavButton" Content="{Binding [Customers], Source={x:Static services:I18nService.Instance}}" Command="{Binding OpenCustomerSearchCommand}" Margin="0,0,16,0" FontSize="14"/>
                     <Button Classes="NavButton" Content="{Binding [AddCustomer], Source={x:Static services:I18nService.Instance}}" Command="{Binding OpenCustomerRegistrationCommand}" Margin="0,0,16,0" FontSize="14"/>

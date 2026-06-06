@@ -33,6 +33,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IExpenseDocumentService _expenseDocumentService;
     private readonly ICounterpartyService _counterpartyService;
     private readonly IParkedSaleService _parkedSaleService;
+    private readonly IReturnService _returnService;
     private readonly HttpClient _httpClient;
     private CancellationTokenSource? _syncCancellationTokenSource;
 
@@ -256,6 +257,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IExpenseDocumentService expenseDocumentService,
         ICounterpartyService counterpartyService,
         IParkedSaleService parkedSaleService,
+        IReturnService returnService,
         HttpClient httpClient)
     {
         _productService = productService;
@@ -271,6 +273,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _expenseDocumentService = expenseDocumentService;
         _counterpartyService = counterpartyService;
         _parkedSaleService = parkedSaleService;
+        _returnService = returnService;
         _httpClient = httpClient;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
@@ -819,6 +822,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 {
                     await ResumeParkedSale(id);
                 }
+            }
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenReturns()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.ReturnsWindow();
+                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService);
+                await dialog.ShowDialog(mainWindow);
             }
         }
     }
