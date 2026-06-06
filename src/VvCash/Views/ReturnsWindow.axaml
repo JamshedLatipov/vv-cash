@@ -1,0 +1,117 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="clr-namespace:VvCash.Services"
+        xmlns:vm="using:VvCash.ViewModels"
+        xmlns:models="using:VvCash.Models.Api"
+        xmlns:material="using:Material.Icons.Avalonia"
+        x:Class="VvCash.Views.ReturnsWindow"
+        x:DataType="vm:ReturnsViewModel"
+        Title="Returns"
+        Width="980" Height="640"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BackgroundBrush}"
+        CornerRadius="12"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1">
+
+  <Border Background="White" CornerRadius="12" ClipToBounds="True" BoxShadow="0 20 25 -5 #40000000">
+    <Grid RowDefinitions="Auto,*,Auto">
+
+      <!-- Header -->
+      <Border Grid.Row="0" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="0,0,0,1" Padding="32,24">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
+            <material:MaterialIcon Kind="KeyboardReturn" Width="36" Height="36" Foreground="{StaticResource PrimaryBrush}"/>
+            <TextBlock Text="{Binding [Returns], Source={x:Static services:I18nService.Instance}}" FontSize="28" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+          </StackPanel>
+          <Button Grid.Column="1" Classes="Transparent" Command="{Binding CloseCommand}" Padding="8" CornerRadius="99" Background="Transparent">
+            <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate500Brush}"/>
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- Body: sales list | return lines -->
+      <Grid Grid.Row="1" ColumnDefinitions="380,*">
+
+        <!-- Left: sales -->
+        <Grid Grid.Column="0" RowDefinitions="*,Auto" Margin="24,16">
+          <ListBox Grid.Row="0" ItemsSource="{Binding Sales}" SelectedItem="{Binding SelectedSale}" Background="Transparent">
+            <ListBox.ItemTemplate>
+              <DataTemplate DataType="models:ExpenseListItem">
+                <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0">
+                      <TextBlock FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}">
+                        <Run Text="#"/><Run Text="{Binding DocumentNumber}"/>
+                      </TextBlock>
+                      <TextBlock Text="{Binding Creator}" FontSize="12" Foreground="{StaticResource Slate600Brush}"/>
+                      <TextBlock Text="{Binding SelectedDate}" FontSize="11" Foreground="{StaticResource Slate500Brush}"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="{Binding ToPay, StringFormat='{}{0:N2}'}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Grid.Row="0" Text="{Binding [NoSales], Source={x:Static services:I18nService.Instance}}" IsVisible="{Binding !Sales.Count}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="15" Foreground="{StaticResource Slate400Brush}"/>
+          <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="12" Margin="0,12,0,0">
+            <Button Classes="OutlinedButton" Command="{Binding PrevPageCommand}" Content="{Binding [Prev], Source={x:Static services:I18nService.Instance}}"/>
+            <TextBlock VerticalAlignment="Center" Foreground="{StaticResource Slate600Brush}">
+              <Run Text="{Binding CurrentPage}"/><Run Text=" / "/><Run Text="{Binding PageCount}"/>
+            </TextBlock>
+            <Button Classes="OutlinedButton" Command="{Binding NextPageCommand}" Content="{Binding [Next], Source={x:Static services:I18nService.Instance}}"/>
+          </StackPanel>
+        </Grid>
+
+        <!-- Right: returnable lines -->
+        <Border Grid.Column="1" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1,0,0,0" Padding="24,16">
+          <Grid>
+            <TextBlock Text="{Binding [SelectSaleToReturn], Source={x:Static services:I18nService.Instance}}" IsVisible="{Binding !HasSelectedSale}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" Foreground="{StaticResource Slate400Brush}"/>
+            <ItemsControl ItemsSource="{Binding Lines}" IsVisible="{Binding HasSelectedSale}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="vm:ReturnLineVm">
+                  <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4" IsEnabled="{Binding IsReturnable}">
+                    <Grid ColumnDefinitions="*,Auto,Auto">
+                      <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                        <TextBlock FontSize="12" Foreground="{StaticResource Slate500Brush}">
+                          <Run Text="{Binding [SoldQty], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding SoldQty}"/>
+                          <Run Text="  •  "/>
+                          <Run Text="{Binding [AlreadyReturned], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding AlreadyReturned}"/>
+                        </TextBlock>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <Button Classes="OutlinedButton" Command="{Binding DecrementCommand}" Padding="8,2"><TextBlock Text="−"/></Button>
+                        <TextBlock Text="{Binding ReturnQty}" FontSize="16" FontWeight="Bold" MinWidth="28" TextAlignment="Center" VerticalAlignment="Center"/>
+                        <Button Classes="OutlinedButton" Command="{Binding IncrementCommand}" Padding="8,2"><TextBlock Text="+"/></Button>
+                      </StackPanel>
+                      <TextBlock Grid.Column="2" Text="{Binding LineRefund, StringFormat='{}{0:N2}'}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" MinWidth="70" TextAlignment="Right"/>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Grid>
+        </Border>
+      </Grid>
+
+      <!-- Footer -->
+      <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="0,1,0,0" Padding="32,20">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Grid.Column="0" VerticalAlignment="Center">
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+            <TextBlock Text="{Binding SuccessMessage}" Foreground="{StaticResource PrimaryBrush}" IsVisible="{Binding SuccessMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="{Binding [RefundTotal], Source={x:Static services:I18nService.Instance}}" FontSize="14" Foreground="{StaticResource Slate600Brush}" VerticalAlignment="Center"/>
+              <TextBlock Text="{Binding TotalRefund, StringFormat='{}{0:N2}'}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+            </StackPanel>
+          </StackPanel>
+          <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding SubmitReturnCommand}" IsEnabled="{Binding CanSubmit}" MinWidth="180" HorizontalContentAlignment="Center">
+            <TextBlock Text="{Binding [ReturnAction], Source={x:Static services:I18nService.Instance}}"/>
+          </Button>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</Window>
