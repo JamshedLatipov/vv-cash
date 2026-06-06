@@ -94,6 +94,12 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _selectedLanguage = "ru";
 
+    [ObservableProperty]
+    private bool _returnOpenCashDrawer = true;
+
+    [ObservableProperty]
+    private bool _returnPrintReceipt = true;
+
     public Array ConnectionTypes => Enum.GetValues(typeof(PrinterConnectionType));
 
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -110,6 +116,8 @@ public partial class SettingsViewModel : ViewModelBase
         CashRegisterToken = _settingsService.CashRegisterToken;
         SyncIntervalText = _settingsService.SyncIntervalMinutes.ToString();
         SelectedLanguage = string.IsNullOrEmpty(_settingsService.Language) ? "ru" : _settingsService.Language;
+        ReturnOpenCashDrawer = _settingsService.ReturnOpenCashDrawer;
+        ReturnPrintReceipt = _settingsService.ReturnPrintReceipt;
 
         foreach (var printer in _settingsService.Printers)
         {
@@ -189,6 +197,9 @@ public partial class SettingsViewModel : ViewModelBase
 
         _settingsService.Language = SelectedLanguage;
         I18nService.Instance.Initialize(SelectedLanguage);
+
+        _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
+        _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;
 
         _settingsService.Printers = Printers.Select(p => new PrinterConfig
         {

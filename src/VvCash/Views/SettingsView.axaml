@@ -167,6 +167,14 @@
                         <TextBlock Text="{Binding [SyncIntervalMinutes], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
                         <TextBox Classes="SettingsInput" Text="{Binding SyncIntervalText, Mode=TwoWay}" Watermark="{Binding [eg10], Source={x:Static services:I18nService.Instance}}" Margin="0,8,0,32"/>
 
+                        <!-- Return Post-Action Toggles -->
+                        <StackPanel Spacing="12" Margin="0,0,0,32">
+                            <CheckBox IsChecked="{Binding ReturnOpenCashDrawer}"
+                                      Content="{Binding [ReturnOpenDrawerSetting], Source={x:Static services:I18nService.Instance}}"/>
+                            <CheckBox IsChecked="{Binding ReturnPrintReceipt}"
+                                      Content="{Binding [ReturnPrintReceiptSetting], Source={x:Static services:I18nService.Instance}}"/>
+                        </StackPanel>
+
                         <!-- Printers Section Header -->
                         <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,16">
                             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
