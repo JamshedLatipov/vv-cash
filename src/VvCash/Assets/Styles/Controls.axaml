@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Style Selector="Button.PrimaryButton">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="Padding" Value="16,8"/>
@@ -11,7 +11,7 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     <Style Selector="Button.PrimaryButton:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#0d8fa6"/>
+        <Setter Property="Background" Value="#005fc4"/>
     </Style>
 
     <Style Selector="Button.SecondaryButton">
@@ -69,14 +69,14 @@
     </Style>
     <Style Selector="Button.CategoryButton:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="#f0fbfd"/>
-        <Setter Property="TextElement.Foreground" Value="#11b4d4"/>
+        <Setter Property="TextElement.Foreground" Value="#0075e2"/>
     </Style>
     <Style Selector="Button.CategoryButton:pressed /template/ ContentPresenter">
         <Setter Property="Background" Value="#d0f0f8"/>
-        <Setter Property="TextElement.Foreground" Value="#0d8fa6"/>
+        <Setter Property="TextElement.Foreground" Value="#005fc4"/>
     </Style>
     <Style Selector="Button.CategoryButton.Active">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
     </Style>
@@ -85,7 +85,7 @@
         <Setter Property="TextElement.Foreground" Value="White"/>
     </Style>
     <Style Selector="Button.CategoryButton.Active:pressed /template/ ContentPresenter">
-        <Setter Property="Background" Value="#0d8fa6"/>
+        <Setter Property="Background" Value="#005fc4"/>
         <Setter Property="TextElement.Foreground" Value="White"/>
     </Style>
 
@@ -100,8 +100,8 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     <Style Selector="Button.IconButton:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#e7f7fa"/>
-        <Setter Property="TextElement.Foreground" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#e6f1fc"/>
+        <Setter Property="TextElement.Foreground" Value="#0075e2"/>
     </Style>
 
     <Style Selector="Button.QtyButton">
@@ -119,8 +119,8 @@
         <Setter Property="FontSize" Value="20"/>
     </Style>
     <Style Selector="Button.QtyButton:pointerover /template/ ContentPresenter">
-        <Setter Property="Background" Value="#11b4d4"/>
-        <Setter Property="BorderBrush" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
+        <Setter Property="BorderBrush" Value="#0075e2"/>
         <Setter Property="TextElement.Foreground" Value="White"/>
     </Style>
 
@@ -154,7 +154,7 @@
         <Setter Property="Padding" Value="12,8"/>
     </Style>
     <Style Selector="TextBox.CouponBox:focus /template/ Border#PART_BorderElement">
-        <Setter Property="BorderBrush" Value="#11b4d4"/>
+        <Setter Property="BorderBrush" Value="#0075e2"/>
         <Setter Property="Background" Value="#f8fafc"/>
     </Style>
 
@@ -174,7 +174,7 @@
     </Style>
     <Style Selector="Button.NavButton:pointerover /template/ ContentPresenter">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="TextElement.Foreground" Value="#11b4d4"/>
+        <Setter Property="TextElement.Foreground" Value="#0075e2"/>
     </Style>
 
     <!-- Outlined Button -->
@@ -214,7 +214,7 @@
         <Setter Property="Background" Value="#f8fafc"/>
     </Style>
     <Style Selector="Button.NumpadButton:pressed /template/ ContentPresenter">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
         <Setter Property="TextElement.Foreground" Value="White"/>
     </Style>
 
@@ -233,7 +233,7 @@
         <Setter Property="Background" Value="#e2e8f0"/>
     </Style>
     <Style Selector="Button.NumpadActionButton:pressed /template/ ContentPresenter">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
         <Setter Property="TextElement.Foreground" Value="White"/>
     </Style>
 
@@ -248,7 +248,7 @@
         <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
     <Style Selector="TextBox.IconTextBox:focus /template/ Border#PART_BorderElement">
-        <Setter Property="BorderBrush" Value="#11b4d4"/>
+        <Setter Property="BorderBrush" Value="#0075e2"/>
         <Setter Property="BorderThickness" Value="2"/>
         <Setter Property="Background" Value="#f8fafc"/>
     </Style>
@@ -284,11 +284,11 @@
         <Setter Property="Background" Value="#e2e8f0"/>
     </Style>
     <Style Selector="RadioButton.Segmented:checked">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
         <Setter Property="Foreground" Value="White"/>
     </Style>
     <Style Selector="RadioButton.Segmented:checked:pointerover">
-        <Setter Property="Background" Value="#0d8fa6"/>
+        <Setter Property="Background" Value="#005fc4"/>
     </Style>
 
     <!-- Primary ToggleSwitch -->
@@ -296,7 +296,7 @@
         <Setter Property="Background" Value="#e2e8f0"/>
     </Style>
     <Style Selector="ToggleSwitch.PrimarySwitch:checked /template/ Border#SwitchKnobBounds">
-        <Setter Property="Background" Value="#11b4d4"/>
+        <Setter Property="Background" Value="#0075e2"/>
     </Style>
 
     <!-- Uppercase style via converter or font isn't natively supported by just TextTransform in this Avalonia version,

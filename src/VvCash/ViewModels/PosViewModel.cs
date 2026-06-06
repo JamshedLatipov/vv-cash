@@ -299,6 +299,15 @@ public partial class PosViewModel : ViewModelBase
             });
         };
 
+        _syncService.ProductsSynced += async (s, _) =>
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                await LoadCategoriesAsync();
+                await LoadProductsAsync(SelectedCategory?.Id);
+            });
+        };
+
         StartBackgroundSync();
 
         var allCats = (await _categoryService.GetCategoriesAsync()).ToList();

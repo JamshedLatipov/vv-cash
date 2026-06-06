@@ -23,7 +23,7 @@
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="24" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="12">
-                        <material:MaterialIcon Kind="PackageVariant" Width="28" Height="28" Foreground="{StaticResource PrimaryBrush}" />
+                        <Image Source="avares://VvCash/Assets/logo.png" Width="28" Height="28" Stretch="Uniform" />
                         <TextBlock Text="{Binding [LuxeThreadsPOS], Source={x:Static services:I18nService.Instance}}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                     </StackPanel>
                     <Border Width="1" Background="{StaticResource Slate200Brush}" Margin="8,0" Height="24"/>

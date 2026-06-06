@@ -152,12 +152,14 @@ public partial class SettingsViewModel : ViewModelBase
     private async Task ClearCategories()
     {
         await _offlineStorageService.ClearCategoriesAsync();
+        await _offlineStorageService.SetLastSyncVersionAsync(0);
     }
 
     [RelayCommand]
     private async Task ClearProducts()
     {
         await _offlineStorageService.ClearProductsAsync();
+        await _offlineStorageService.SetLastSyncVersionAsync(0);
     }
 
     [RelayCommand]

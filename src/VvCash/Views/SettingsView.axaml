@@ -30,7 +30,7 @@
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
         </Style>
         <Style Selector="Button.SaveButton:pointerover /template/ ContentPresenter">
-            <Setter Property="Background" Value="#0d8fa6"/>
+            <Setter Property="Background" Value="#005fc4"/>
         </Style>
 
         <Style Selector="Button.AddButton">

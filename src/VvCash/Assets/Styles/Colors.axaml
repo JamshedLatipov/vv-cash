@@ -1,8 +1,8 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Color x:Key="PrimaryColor">#11b4d4</Color>
-    <Color x:Key="PrimaryDarkColor">#0e9db9</Color>
-    <Color x:Key="PrimaryLightColor">#e7f7fa</Color>
+    <Color x:Key="PrimaryColor">#0075e2</Color>
+    <Color x:Key="PrimaryDarkColor">#0063c7</Color>
+    <Color x:Key="PrimaryLightColor">#e6f1fc</Color>
     <Color x:Key="BackgroundColor">#f6f8f8</Color>
     <Color x:Key="CardBackground">White</Color>
     <Color x:Key="TextPrimary">#0f172a</Color>

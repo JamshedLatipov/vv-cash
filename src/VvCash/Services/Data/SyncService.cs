@@ -12,6 +12,7 @@ namespace VvCash.Services.Data;
 public interface ISyncService
 {
     event EventHandler<bool>? SyncStatusChanged;
+    event EventHandler? ProductsSynced;
     Task SyncProductsAsync();
     Task FullReinitializeAsync();
     Task<bool> CheckSystemOnlineAsync();
@@ -20,6 +21,7 @@ public interface ISyncService
 public class SyncService : ISyncService
 {
     public event EventHandler<bool>? SyncStatusChanged;
+    public event EventHandler? ProductsSynced;
 
     private readonly HttpClient _httpClient;
     private readonly ISettingsService _settingsService;
@@ -68,12 +70,14 @@ public class SyncService : ISyncService
     {
         try
         {
+            Console.WriteLine("[SyncService] FullReinitializeAsync: resetting version to 0");
             await _storageService.SetLastSyncVersionAsync(0);
             await SyncProductsAsync();
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
+            Console.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
+            Console.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
         }
     }
 
@@ -88,11 +92,14 @@ public class SyncService : ISyncService
             int lastVersion = await _storageService.GetLastSyncVersionAsync();
 
             var versionsUrl = $"{baseUrl}cashes/product/versions/";
+            Console.WriteLine($"[SyncService] GET {versionsUrl}  (lastVersion={lastVersion})");
             var versionsResponse = await _httpClient.GetAsync(versionsUrl);
+            var versionsContent = await versionsResponse.Content.ReadAsStringAsync();
+            Console.WriteLine($"[SyncService] GET {versionsUrl} -> {(int)versionsResponse.StatusCode} {versionsResponse.StatusCode}");
+            Console.WriteLine($"[SyncService] versions body: {versionsContent}");
 
             if (versionsResponse.IsSuccessStatusCode)
             {
-                var versionsContent = await versionsResponse.Content.ReadAsStringAsync();
                 using var jsonDoc = JsonDocument.Parse(versionsContent);
                 var root = jsonDoc.RootElement;
 
@@ -109,11 +116,14 @@ public class SyncService : ISyncService
                                 {
                                     var updatedProducts = new List<Product>();
                                     var updateUrl = $"{baseUrl}cashes/product/update/{version}/";
+                                    Console.WriteLine($"[SyncService] GET {updateUrl}");
                                     var updateResponse = await _httpClient.GetAsync(updateUrl);
+                                    var updateContent = await updateResponse.Content.ReadAsStringAsync();
+                                    Console.WriteLine($"[SyncService] GET {updateUrl} -> {(int)updateResponse.StatusCode} {updateResponse.StatusCode}");
+                                    Console.WriteLine($"[SyncService] update/{version} body: {updateContent}");
 
                                     if (updateResponse.IsSuccessStatusCode)
                                     {
-                                        var updateContent = await updateResponse.Content.ReadAsStringAsync();
                                         using var updateDoc = JsonDocument.Parse(updateContent);
                                         var updateRoot = updateDoc.RootElement;
 
@@ -125,7 +135,7 @@ public class SyncService : ISyncService
                                                 {
                                                     try
                                                     {
-                                                        Debug.WriteLine($"[SyncService] RAW item: {item.GetRawText()}");
+                                                        Console.WriteLine($"[SyncService] RAW item: {item.GetRawText()}");
                                                         string productId = Guid.NewGuid().ToString();
                                                         string productName = string.Empty;
                                                         string productSku = string.Empty;
@@ -177,7 +187,7 @@ public class SyncService : ISyncService
                                                         if (string.IsNullOrEmpty(imagePath) && item.TryGetProperty("thumb", out var thumbElem) && thumbElem.ValueKind == JsonValueKind.String)
                                                             imagePath = thumbElem.GetString() ?? string.Empty;
 
-                                                        Debug.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
+                                                        Console.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
                                                         updatedProducts.Add(new Product
                                                         {
                                                             Id = productId,
@@ -191,7 +201,7 @@ public class SyncService : ISyncService
                                                     }
                                                     catch (Exception ex)
                                                     {
-                                                        Debug.WriteLine($"[SyncService] Error parsing product: {ex.Message}");
+                                                        Console.WriteLine($"[SyncService] Error parsing product: {ex.Message}");
                                                     }
                                                 }
                                             }
@@ -199,35 +209,52 @@ public class SyncService : ISyncService
                                             // Processed successfully, commit changes
                                             if (updatedProducts.Count > 0)
                                             {
+                                                Console.WriteLine($"[SyncService] Saving {updatedProducts.Count} products for version {version}");
                                                 await _storageService.SaveProductsAsync(updatedProducts);
                                             }
 
                                             // Only advance the version after successful processing
                                             lastVersion = version;
                                             await _storageService.SetLastSyncVersionAsync(lastVersion);
+                                            Console.WriteLine($"[SyncService] Version advanced to {lastVersion}");
                                         }
                                         else
                                         {
+                                            Console.WriteLine($"[SyncService] update/{version}: backend status != 0, stopping");
                                             // Failed response from backend update API, stop processing
                                             break;
                                         }
                                     }
                                     else
                                     {
+                                        Console.WriteLine($"[SyncService] update/{version}: HTTP error {(int)updateResponse.StatusCode}, stopping");
                                         // Network issue or HTTP error fetching this specific version, stop processing
                                         break;
                                     }
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[SyncService] Version {version} already at or below lastVersion={lastVersion}, skipping");
                                 }
                             }
                         }
                     }
                 }
+                else
+                {
+                    Console.WriteLine($"[SyncService] versions endpoint: unexpected status or missing body");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[SyncService] versions endpoint HTTP error {(int)versionsResponse.StatusCode}");
             }
             SyncStatusChanged?.Invoke(this, true);
+            ProductsSynced?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[SyncService] Sync error: {ex.Message}");
+            Console.WriteLine($"[SyncService] Sync error: {ex.Message}");
             SyncStatusChanged?.Invoke(this, false);
         }
     }
