@@ -32,6 +32,11 @@ public interface ICartService
     void ClearManualDiscount();
     void SetCustomerDiscount(decimal percent);
     void ClearCustomerDiscount();
+    void LoadSnapshot(
+        IEnumerable<CartItem> items,
+        decimal manualDiscountPercent, decimal manualDiscountAmount,
+        decimal customerDiscountPercent,
+        IEnumerable<Coupon> coupons);
     event EventHandler? CartChanged;
 }
 

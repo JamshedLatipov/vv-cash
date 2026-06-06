@@ -136,5 +136,23 @@ public class CartService : ICartService
         RaiseCartChanged();
     }
 
+    public void LoadSnapshot(
+        IEnumerable<CartItem> items,
+        decimal manualDiscountPercent, decimal manualDiscountAmount,
+        decimal customerDiscountPercent,
+        IEnumerable<Coupon> coupons)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        ArgumentNullException.ThrowIfNull(coupons);
+        _items.Clear();
+        _appliedCoupons.Clear();
+        foreach (var item in items) _items.Add(item);
+        foreach (var coupon in coupons) _appliedCoupons.Add(coupon);
+        ManualDiscountPercent = manualDiscountPercent;
+        ManualDiscountAmount = manualDiscountAmount;
+        CustomerDiscountPercent = customerDiscountPercent;
+        RaiseCartChanged();
+    }
+
     private void RaiseCartChanged() => CartChanged?.Invoke(this, EventArgs.Empty);
 }
