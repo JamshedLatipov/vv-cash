@@ -61,6 +61,16 @@ public class OfflineStorageService : IOfflineStorageService
                 Barcode TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS ParkedSales (
+                Id TEXT PRIMARY KEY,
+                Label TEXT,
+                CustomerName TEXT,
+                Total REAL NOT NULL,
+                ItemCount INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                Payload TEXT NOT NULL
+            );
+
             -- Create indices for performance
             CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);
             CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);
@@ -412,6 +422,96 @@ public class OfflineStorageService : IOfflineStorageService
 
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM UnsyncedDocuments";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task SaveParkedSaleAsync(ParkedSale sale)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO ParkedSales (Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload)
+            VALUES ($Id, $Label, $CustomerName, $Total, $ItemCount, $CreatedAt, $Payload)
+            ON CONFLICT(Id) DO UPDATE SET
+                Label=excluded.Label,
+                CustomerName=excluded.CustomerName,
+                Total=excluded.Total,
+                ItemCount=excluded.ItemCount,
+                CreatedAt=excluded.CreatedAt,
+                Payload=excluded.Payload;
+        ";
+        command.Parameters.AddWithValue("$Id", sale.Id);
+        command.Parameters.AddWithValue("$Label", (object?)sale.Label ?? DBNull.Value);
+        command.Parameters.AddWithValue("$CustomerName", (object?)sale.CustomerName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$Total", sale.Total);
+        command.Parameters.AddWithValue("$ItemCount", sale.ItemCount);
+        command.Parameters.AddWithValue("$CreatedAt", sale.CreatedAt.ToString("o"));
+        command.Parameters.AddWithValue("$Payload", sale.Payload);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private ParkedSale ReadParkedSale(SqliteDataReader reader)
+    {
+        return new ParkedSale
+        {
+            Id = reader.GetString(0),
+            Label = reader.IsDBNull(1) ? null : reader.GetString(1),
+            CustomerName = reader.IsDBNull(2) ? null : reader.GetString(2),
+            Total = reader.GetDecimal(3),
+            ItemCount = reader.GetInt32(4),
+            CreatedAt = DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
+            Payload = reader.GetString(6)
+        };
+    }
+
+    public async Task<IEnumerable<ParkedSale>> GetParkedSalesAsync()
+    {
+        var sales = new List<ParkedSale>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload FROM ParkedSales ORDER BY CreatedAt DESC";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            sales.Add(ReadParkedSale(reader));
+        }
+
+        return sales;
+    }
+
+    public async Task<ParkedSale?> GetParkedSaleAsync(string id)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload FROM ParkedSales WHERE Id = $Id LIMIT 1";
+        command.Parameters.AddWithValue("$Id", id);
+
+        using var reader = await command.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
+        {
+            return ReadParkedSale(reader);
+        }
+
+        return null;
+    }
+
+    public async Task DeleteParkedSaleAsync(string id)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM ParkedSales WHERE Id = $Id";
+        command.Parameters.AddWithValue("$Id", id);
+
         await command.ExecuteNonQueryAsync();
     }
 }
