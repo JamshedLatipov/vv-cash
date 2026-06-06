@@ -17,7 +17,9 @@ public partial class ParkedSalesViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(IsEmpty))]
     private ObservableCollection<ParkedSale> _sales = new();
 
-    [ObservableProperty] private bool _isLoading = false;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsEmpty))]
+    private bool _isLoading = false;
 
     public bool IsEmpty => !IsLoading && Sales.Count == 0;
 

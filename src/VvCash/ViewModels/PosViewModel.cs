@@ -159,7 +159,7 @@ public partial class PosViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void CloseShift()
+    private async Task CloseShift()
     {
         if (string.IsNullOrEmpty(CurrentShiftId)) return;
 
@@ -169,7 +169,7 @@ public partial class PosViewModel : ViewModelBase
             return;
         }
 
-        _ = DoCloseShiftAsync();
+        await DoCloseShiftAsync();
     }
 
     [RelayCommand]
@@ -826,13 +826,16 @@ public partial class PosViewModel : ViewModelBase
             .Select(i => new CartItem { Product = i.Product, Quantity = i.Quantity })
             .ToList();
 
+        // Set the customer before LoadSnapshot so the CartChanged cascade sees
+        // the restored customer (matches the normal customer-select flow).
+        SelectedCustomer = snapshot.Customer;
+
         _cartService.LoadSnapshot(
             items,
             snapshot.ManualDiscountPercent, snapshot.ManualDiscountAmount,
             snapshot.CustomerDiscountPercent,
             snapshot.AppliedCoupons);
 
-        SelectedCustomer = snapshot.Customer;
         StatusMessage = "Отложенный чек возвращён.";
     }
 
