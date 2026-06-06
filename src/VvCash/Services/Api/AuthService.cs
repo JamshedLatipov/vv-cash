@@ -18,7 +18,7 @@ public class AuthService : IAuthService
         _settingsService = settingsService;
     }
 
-    public async Task<bool> LoginAsync(string email, string password)
+    public async Task<bool> LoginAsync(string email, string password, bool rememberMe)
     {
         try
         {
@@ -71,6 +71,9 @@ public class AuthService : IAuthService
                         if (root.TryGetProperty("access_token", out var authTokenElement))
                         {
                             _settingsService.AuthToken = authTokenElement.GetString() ?? string.Empty;
+                            _settingsService.AuthTokenExpiresAt = rememberMe
+                                ? DateTime.UtcNow.AddHours(Constants.AuthConstants.RememberLoginHours)
+                                : null;
                             _settingsService.Save();
                         }
 

@@ -22,6 +22,9 @@ public partial class LoginViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isBusy = false;
 
+    [ObservableProperty]
+    private bool _rememberMe = false;
+
     public event EventHandler? LoginSuccessful;
     public event EventHandler? SettingsRequested;
 
@@ -51,7 +54,7 @@ public partial class LoginViewModel : ViewModelBase
 
         try
         {
-            bool success = await _authService.LoginAsync(Email, Password);
+            bool success = await _authService.LoginAsync(Email, Password, RememberMe);
 
             if (success)
             {

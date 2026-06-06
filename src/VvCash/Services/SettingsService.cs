@@ -11,6 +11,7 @@ public class SettingsData
     public string BackendUrl { get; set; } = string.Empty;
     public string CashRegisterToken { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
+    public DateTime? AuthTokenExpiresAt { get; set; }
     public int SyncIntervalMinutes { get; set; } = 10;
     public string Language { get; set; } = "ru";
     public List<PrinterConfig> Printers { get; set; } = new();
@@ -39,6 +40,12 @@ public class SettingsService : ISettingsService
     {
         get => _data.AuthToken;
         set => _data.AuthToken = value;
+    }
+
+    public DateTime? AuthTokenExpiresAt
+    {
+        get => _data.AuthTokenExpiresAt;
+        set => _data.AuthTokenExpiresAt = value;
     }
 
     public int SyncIntervalMinutes

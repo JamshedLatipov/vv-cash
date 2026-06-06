@@ -40,19 +40,7 @@ public partial class App : Application
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
 
-            mainVm.CurrentViewModel = loginVm;
-
-            loginVm.SettingsRequested += (s, e) =>
-            {
-
-                var settingsService = Services.GetRequiredService<ISettingsService>();
-                var offlineStorage = Services.GetRequiredService<IOfflineStorageService>();
-                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage);
-                settingsVm.NavigationRequest = mainVm.NavigateTo;
-                mainVm.NavigateTo(settingsVm);
-            };
-
-            loginVm.LoginSuccessful += (s, e) =>
+            void NavigateToPos()
             {
                 var posVm = Services.GetRequiredService<PosViewModel>();
                 posVm.NavigationRequest = mainVm.NavigateTo;
@@ -75,12 +63,40 @@ public partial class App : Application
                 }
 
                 mainVm.CurrentViewModel = posVm;
+            }
+
+            loginVm.SettingsRequested += (s, e) =>
+            {
+
+                var settingsService = Services.GetRequiredService<ISettingsService>();
+                var offlineStorage = Services.GetRequiredService<IOfflineStorageService>();
+                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage);
+                settingsVm.NavigationRequest = mainVm.NavigateTo;
+                mainVm.NavigateTo(settingsVm);
             };
+
+            loginVm.LoginSuccessful += (s, e) => NavigateToPos();
+
+            // Auto-login if a "Remember me" session is still valid.
+            bool rememberedSessionValid =
+                !string.IsNullOrWhiteSpace(initSettingsService.AuthToken)
+                && initSettingsService.AuthTokenExpiresAt.HasValue
+                && initSettingsService.AuthTokenExpiresAt.Value > DateTime.UtcNow;
 
             desktop.MainWindow = new MainWindow
             {
                 DataContext = mainVm
             };
+
+            if (rememberedSessionValid)
+            {
+                // Defer until the window is open so multi-monitor detection works.
+                desktop.MainWindow.Opened += (s, e) => NavigateToPos();
+            }
+            else
+            {
+                mainVm.CurrentViewModel = loginVm;
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

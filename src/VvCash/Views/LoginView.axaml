@@ -88,6 +88,11 @@
                     <TextBlock Text="{Binding [Password], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate700Brush}" Margin="0,0,0,4"/>
                     <TextBox Classes="LoginInput" Text="{Binding Password, Mode=TwoWay}" Watermark="{Binding [Enteryourpassword], Source={x:Static services:I18nService.Instance}}" PasswordChar="•" IsEnabled="{Binding !IsBusy}"/>
 
+                    <!-- Remember Me -->
+                    <CheckBox IsChecked="{Binding RememberMe, Mode=TwoWay}" IsEnabled="{Binding !IsBusy}"
+                              Content="{Binding [RememberMe], Source={x:Static services:I18nService.Instance}}"
+                              Foreground="{StaticResource Slate700Brush}" FontSize="14" Margin="0,0,0,8"/>
+
                     <!-- Login Button -->
                     <Button Classes="LoginButton" Command="{Binding LoginCommand}" IsEnabled="{Binding !IsBusy}">
                         <Panel>
