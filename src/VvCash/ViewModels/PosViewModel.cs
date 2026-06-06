@@ -907,6 +907,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             Subtotal, TotalDiscount, TotalAmount,
                             _cartService.AppliedCoupons);
                         _cartService.ClearCart();
+                        _cartService.ClearCustomerDiscount();
+                        SelectedCustomer = null;
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null)
