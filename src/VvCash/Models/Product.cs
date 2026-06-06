@@ -16,5 +16,6 @@ public partial class Product : ObservableObject
     public string Barcode { get; set; } = string.Empty;
 
     [ObservableProperty]
+    [property: System.Text.Json.Serialization.JsonIgnore]
     private Bitmap? _imageBitmap;
 }
