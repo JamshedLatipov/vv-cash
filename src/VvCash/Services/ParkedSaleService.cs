@@ -53,7 +53,7 @@ public class ParkedSaleService : IParkedSaleService
         {
             snapshot = JsonSerializer.Deserialize<ParkedSaleSnapshot>(sale.Payload);
         }
-        catch (JsonException)
+        catch (Exception)
         {
             // Битый payload — удаляем, чтобы не блокировать список.
             await _storage.DeleteParkedSaleAsync(id);
