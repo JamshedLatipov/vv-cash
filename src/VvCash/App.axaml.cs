@@ -126,6 +126,7 @@ public partial class App : Application
         // POS Services
         services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<ICartService, CartService>();
+        services.AddSingleton<IParkedSaleService, ParkedSaleService>();
         services.AddSingleton<IDiscountService, DiscountService>();
 
         // Hardware Services
