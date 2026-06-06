@@ -52,6 +52,9 @@ public class ReturnService : IReturnService
         if (!response.IsSuccessStatusCode)
             return false;
         using var doc = JsonDocument.Parse(content);
-        return doc.RootElement.TryGetProperty("status", out var s) && s.GetInt32() == 0;
+        return doc.RootElement.TryGetProperty("status", out var s)
+            && s.ValueKind == System.Text.Json.JsonValueKind.Number
+            && s.TryGetInt32(out var statusValue)
+            && statusValue == 0;
     }
 }
