@@ -13,6 +13,8 @@ public interface ISettingsService
     int SyncIntervalMinutes { get; set; }
     string Language { get; set; }
     List<PrinterConfig> Printers { get; set; }
+    bool ReturnOpenCashDrawer { get; set; }
+    bool ReturnPrintReceipt { get; set; }
 
     event EventHandler? SettingsChanged;
 

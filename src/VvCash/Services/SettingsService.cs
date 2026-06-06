@@ -15,6 +15,8 @@ public class SettingsData
     public int SyncIntervalMinutes { get; set; } = 10;
     public string Language { get; set; } = "ru";
     public List<PrinterConfig> Printers { get; set; } = new();
+    public bool ReturnOpenCashDrawer { get; set; } = true;
+    public bool ReturnPrintReceipt { get; set; } = true;
 }
 
 public class SettingsService : ISettingsService
@@ -64,6 +66,18 @@ public class SettingsService : ISettingsService
     {
         get => _data.Printers;
         set => _data.Printers = value ?? new List<PrinterConfig>();
+    }
+
+    public bool ReturnOpenCashDrawer
+    {
+        get => _data.ReturnOpenCashDrawer;
+        set => _data.ReturnOpenCashDrawer = value;
+    }
+
+    public bool ReturnPrintReceipt
+    {
+        get => _data.ReturnPrintReceipt;
+        set => _data.ReturnPrintReceipt = value;
     }
 
     public SettingsService()
