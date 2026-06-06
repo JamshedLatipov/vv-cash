@@ -30,7 +30,9 @@ public partial class ReturnsViewModel : ViewModelBase
 
     [ObservableProperty] private bool _isLoadingSales;
     [ObservableProperty] private bool _isLoadingLines;
-    [ObservableProperty] private bool _isSubmitting;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSubmit))]
+    private bool _isSubmitting;
     [ObservableProperty] private string? _errorMessage;
     [ObservableProperty] private string? _successMessage;
 
