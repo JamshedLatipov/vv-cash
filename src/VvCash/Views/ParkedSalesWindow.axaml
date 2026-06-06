@@ -1,0 +1,79 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="clr-namespace:VvCash.Services"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:VvCash.ViewModels"
+        xmlns:models="using:VvCash.Models"
+        xmlns:material="using:Material.Icons.Avalonia"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
+        x:Class="VvCash.Views.ParkedSalesWindow"
+        x:DataType="vm:ParkedSalesViewModel"
+        Title="Parked Sales"
+        Width="800" Height="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BackgroundBrush}"
+        CornerRadius="12"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1">
+
+    <Border Background="White" CornerRadius="12" ClipToBounds="True" BoxShadow="0 20 25 -5 #40000000">
+        <Grid RowDefinitions="Auto,*,Auto">
+            <Border Grid.Row="0" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="0,0,0,1" Padding="32,24">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12">
+                        <material:MaterialIcon Kind="PauseCircleOutline" Width="36" Height="36" Foreground="{StaticResource PrimaryBrush}" />
+                        <TextBlock Text="{Binding [ParkedSales], Source={x:Static services:I18nService.Instance}}" FontSize="28" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="Transparent" Command="{Binding CancelCommand}" Padding="8" CornerRadius="99" Background="Transparent">
+                        <material:MaterialIcon Kind="Close" Width="24" Height="24" Foreground="{StaticResource Slate500Brush}"/>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="1" Padding="32,24">
+                <Grid>
+                    <TextBlock Text="{Binding [ParkedSalesEmpty], Source={x:Static services:I18nService.Instance}}"
+                               IsVisible="{Binding IsEmpty}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               FontSize="18" Foreground="{StaticResource Slate400Brush}"/>
+                    <ListBox ItemsSource="{Binding Sales}" Background="Transparent">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="models:ParkedSale">
+                                <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,4">
+                                    <Grid ColumnDefinitions="*, Auto, Auto">
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Label}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" IsVisible="{Binding Label, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                            <TextBlock Text="{Binding CustomerName}" FontSize="14" Foreground="{StaticResource Slate600Brush}" IsVisible="{Binding CustomerName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                            <TextBlock FontSize="13" Foreground="{StaticResource Slate500Brush}" Margin="0,4,0,0">
+                                                <Run Text="{Binding ItemCount}"/><Run Text=" • "/><Run Text="{Binding CreatedAt, StringFormat='dd MMM HH:mm'}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding Total, StringFormat='{}{0:N2}'}" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <Button Classes="PrimaryButton"
+                                                    Command="{Binding $parent[ListBox].((vm:ParkedSalesViewModel)DataContext).ResumeCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <TextBlock Text="{Binding [Resume], Source={x:Static services:I18nService.Instance}}"/>
+                                            </Button>
+                                            <Button Classes="OutlinedButton"
+                                                    Command="{Binding $parent[ListBox].((vm:ParkedSalesViewModel)DataContext).DeleteCommand}"
+                                                    CommandParameter="{Binding}">
+                                                <material:MaterialIcon Kind="Delete" Width="18" Height="18" Foreground="{StaticResource Red500Brush}"/>
+                                            </Button>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="0,1,0,0" Padding="32">
+                <Button Content="{Binding [Skip], Source={x:Static services:I18nService.Instance}}" Classes="OutlinedButton" Command="{Binding CancelCommand}" HorizontalAlignment="Stretch"/>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
