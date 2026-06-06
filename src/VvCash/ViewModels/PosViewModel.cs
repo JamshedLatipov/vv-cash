@@ -32,6 +32,7 @@ public partial class PosViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private readonly IExpenseDocumentService _expenseDocumentService;
     private readonly ICounterpartyService _counterpartyService;
+    private readonly IParkedSaleService _parkedSaleService;
     private readonly HttpClient _httpClient;
     private CancellationTokenSource? _syncCancellationTokenSource;
 
@@ -59,6 +60,19 @@ public partial class PosViewModel : ViewModelBase
     private int _unsyncedDocumentsCount;
 
     public bool HasUnsyncedDocuments => UnsyncedDocumentsCount > 0;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasParkedSales))]
+    private int _parkedSalesCount;
+    public bool HasParkedSales => ParkedSalesCount > 0;
+
+    // Park label modal
+    [ObservableProperty] private bool _isParkLabelModalVisible = false;
+    [ObservableProperty] private string _parkLabelInput = string.Empty;
+
+    // Shift-close confirmation (when parked sales exist)
+    [ObservableProperty] private bool _isShiftCloseConfirmVisible = false;
+
     [ObservableProperty] private string _couponCode = string.Empty;
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
@@ -145,10 +159,36 @@ public partial class PosViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task CloseShiftAsync()
+    private void CloseShift()
     {
-        Console.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
-        System.Diagnostics.Debug.WriteLine("[PosViewModel] CloseShiftAsync command executed.");
+        if (string.IsNullOrEmpty(CurrentShiftId)) return;
+
+        if (ParkedSalesCount > 0)
+        {
+            IsShiftCloseConfirmVisible = true;
+            return;
+        }
+
+        _ = DoCloseShiftAsync();
+    }
+
+    [RelayCommand]
+    private async Task ConfirmCloseShift()
+    {
+        IsShiftCloseConfirmVisible = false;
+        await DoCloseShiftAsync();
+    }
+
+    [RelayCommand]
+    private void CancelCloseShift()
+    {
+        IsShiftCloseConfirmVisible = false;
+    }
+
+    private async Task DoCloseShiftAsync()
+    {
+        Console.WriteLine("[PosViewModel] DoCloseShiftAsync executed.");
+        System.Diagnostics.Debug.WriteLine("[PosViewModel] DoCloseShiftAsync executed.");
         if (string.IsNullOrEmpty(CurrentShiftId)) return;
 
         IsLoadingShift = true;
@@ -215,6 +255,7 @@ public partial class PosViewModel : ViewModelBase
         ISettingsService settingsService,
         IExpenseDocumentService expenseDocumentService,
         ICounterpartyService counterpartyService,
+        IParkedSaleService parkedSaleService,
         HttpClient httpClient)
     {
         _productService = productService;
@@ -229,6 +270,7 @@ public partial class PosViewModel : ViewModelBase
         _settingsService = settingsService;
         _expenseDocumentService = expenseDocumentService;
         _counterpartyService = counterpartyService;
+        _parkedSaleService = parkedSaleService;
         _httpClient = httpClient;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
@@ -290,6 +332,15 @@ public partial class PosViewModel : ViewModelBase
             });
         };
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
+
+        _parkedSaleService.CountChanged += (s, count) =>
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                ParkedSalesCount = count;
+            });
+        };
+        ParkedSalesCount = await _parkedSaleService.GetCountAsync();
 
         _syncService.SyncStatusChanged += (s, isOnline) =>
         {
@@ -693,6 +744,96 @@ public partial class PosViewModel : ViewModelBase
                 await dialog.ShowDialog(mainWindow);
             }
         }
+    }
+
+    private ParkedSaleSnapshot BuildSnapshot(string? label) => new()
+    {
+        Items = _cartService.Items
+            .Select(i => new ParkedCartItem { Product = i.Product, Quantity = i.Quantity })
+            .ToList(),
+        ManualDiscountPercent = _cartService.ManualDiscountPercent,
+        ManualDiscountAmount = _cartService.ManualDiscountAmount,
+        CustomerDiscountPercent = _cartService.CustomerDiscountPercent,
+        AppliedCoupons = _cartService.AppliedCoupons.ToList(),
+        Customer = SelectedCustomer,
+        Label = label
+    };
+
+    [RelayCommand]
+    private void OpenParkLabelModal()
+    {
+        if (!CartItems.Any()) return;
+        ParkLabelInput = string.Empty;
+        IsParkLabelModalVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseParkLabelModal()
+    {
+        IsParkLabelModalVisible = false;
+    }
+
+    [RelayCommand]
+    private async Task ConfirmParkSale()
+    {
+        if (!CartItems.Any()) { IsParkLabelModalVisible = false; return; }
+
+        await _parkedSaleService.ParkAsync(BuildSnapshot(ParkLabelInput), TotalAmount);
+
+        _cartService.ClearCart();
+        _cartService.ClearCustomerDiscount();
+        SelectedCustomer = null;
+        _ = _customerDisplayService.ClearAsync();
+
+        IsParkLabelModalVisible = false;
+        StatusMessage = "Чек отложен.";
+    }
+
+    [RelayCommand]
+    private async Task OpenParkedSales()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.ParkedSalesWindow();
+                dialog.DataContext = new ParkedSalesViewModel(dialog, _parkedSaleService);
+                var result = await dialog.ShowDialog<object?>(mainWindow);
+                if (result is string id)
+                {
+                    await ResumeParkedSale(id);
+                }
+            }
+        }
+    }
+
+    private async Task ResumeParkedSale(string id)
+    {
+        // Если в корзине уже есть товары — авто-отложить текущую продажу.
+        if (_cartService.Items.Any())
+        {
+            await _parkedSaleService.ParkAsync(BuildSnapshot(null), TotalAmount);
+            _cartService.ClearCart();
+            _cartService.ClearCustomerDiscount();
+            SelectedCustomer = null;
+        }
+
+        var snapshot = await _parkedSaleService.ResumeAsync(id);
+        if (snapshot == null) return;
+
+        var items = snapshot.Items
+            .Select(i => new CartItem { Product = i.Product, Quantity = i.Quantity })
+            .ToList();
+
+        _cartService.LoadSnapshot(
+            items,
+            snapshot.ManualDiscountPercent, snapshot.ManualDiscountAmount,
+            snapshot.CustomerDiscountPercent,
+            snapshot.AppliedCoupons);
+
+        SelectedCustomer = snapshot.Customer;
+        StatusMessage = "Отложенный чек возвращён.";
     }
 
     [RelayCommand]
