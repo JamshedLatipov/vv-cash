@@ -41,10 +41,17 @@ public class QuoteService : IQuoteService
             using var doc = JsonDocument.Parse(content);
             var root = doc.RootElement;
 
-            // Tolerant to {status, body, message} envelope.
-            var target = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("body", out var body)
+            // Tolerant to {status, body, message} envelope: unwrap only when
+            // body is an object; a null/array body falls through to root and a
+            // non-QuoteResult shape yields null rather than relying on a thrown
+            // exception being swallowed below.
+            var target = root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("body", out var body)
+                && body.ValueKind == JsonValueKind.Object
                 ? body
                 : root;
+
+            if (target.ValueKind != JsonValueKind.Object) return null;
 
             return JsonSerializer.Deserialize<QuoteResult>(target.GetRawText());
         }
