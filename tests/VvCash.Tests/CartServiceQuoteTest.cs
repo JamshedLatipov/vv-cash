@@ -37,6 +37,16 @@ public class CartServiceQuoteTest
     }
 
     [Fact]
+    public void TotalDiscount_StacksManualPercentOnTopOfQuote()
+    {
+        var c = CartWith(100m, 1);
+        c.ApplyQuote(new QuoteResult { QuoteId = "q1", DiscountTotal = 20m });
+        c.SetManualDiscount(5m, 0m); // +5% of 100 = 5 on top
+
+        Assert.Equal(25m, c.TotalDiscount);
+    }
+
+    [Fact]
     public void TotalDiscount_ClampedToSubtotal()
     {
         var c = CartWith(100m, 1);

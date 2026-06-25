@@ -173,6 +173,10 @@ public class CartService : ICartService
         ArgumentNullException.ThrowIfNull(coupons);
         _items.Clear();
         _appliedCoupons.Clear();
+        // Quote is intentionally not parked/restored: it is a server-priced
+        // snapshot that can go stale. PosViewModel re-fetches it on resume
+        // (online) or falls back to the flat customer % (offline).
+        Quote = null;
         foreach (var item in items) _items.Add(item);
         foreach (var coupon in coupons) _appliedCoupons.Add(coupon);
         ManualDiscountPercent = manualDiscountPercent;
