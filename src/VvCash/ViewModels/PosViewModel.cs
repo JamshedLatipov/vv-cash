@@ -486,7 +486,20 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             TriggerRequote();
     }
 
-    private void TriggerRequote() => _ = RequoteDebouncedAsync();
+    private void TriggerRequote() => _ = RequoteSafeAsync();
+
+    private async Task RequoteSafeAsync()
+    {
+        try
+        {
+            await RequoteDebouncedAsync();
+        }
+        catch (Exception ex)
+        {
+            // Detached task: a requote failure must not vanish silently nor crash.
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Requote failed: {ex}");
+        }
+    }
 
     private async Task RequoteDebouncedAsync()
     {
@@ -495,23 +508,28 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _quoteCts = cts;
         try { await Task.Delay(300, cts.Token); }
         catch (TaskCanceledException) { return; }
-        await RequoteAsync(cts.Token);
+        await RequoteAsync(cts);
     }
 
-    private async Task RequoteAsync(System.Threading.CancellationToken ct)
+    // Triggers all originate on the UI thread and the codebase never uses
+    // ConfigureAwait(false), so these continuations resume on the UI thread —
+    // required because applying a quote raises CartChanged, which rebuilds
+    // UI-bound collections.
+    private async Task RequoteAsync(System.Threading.CancellationTokenSource cts)
     {
+        var ct = cts.Token;
         var cardId = SelectedCustomer?.DiscountCard?.Identifier;
         var hasInput = !string.IsNullOrWhiteSpace(cardId) || !string.IsNullOrWhiteSpace(_activePromoCode);
 
         if (!IsSystemOnline || !hasInput || _cartService.Items.Count == 0 || string.IsNullOrWhiteSpace(_session.WarehouseId))
         {
-            ApplyQuoteGuarded(() => _cartService.ClearQuote());
+            if (IsCurrentQuote(cts)) ApplyQuoteGuarded(() => _cartService.ClearQuote());
             return;
         }
 
         var request = QuoteRequestBuilder.Build(_cartService.Items, _session.WarehouseId!, cardId, _activePromoCode);
         var result = await _quoteService.QuoteAsync(request, ct);
-        if (ct.IsCancellationRequested) return;
+        if (!IsCurrentQuote(cts)) return; // a newer requote superseded this one
 
         if (result == null)
         {
@@ -532,6 +550,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             StatusMessage = "Промокод применён";
         }
     }
+
+    // True only while cts is still the active request (not superseded by a newer
+    // trigger nor cancelled), so a stale in-flight quote can never apply after a newer one.
+    private bool IsCurrentQuote(System.Threading.CancellationTokenSource cts)
+        => ReferenceEquals(_quoteCts, cts) && !cts.IsCancellationRequested;
 
     // Guard against recursion: ApplyQuote/ClearQuote raise CartChanged ->
     // OnCartChanged must not start another requote.
@@ -597,6 +620,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _syncCancellationTokenSource?.Cancel();
         _syncCancellationTokenSource?.Dispose();
         _syncCancellationTokenSource = null;
+
+        // Cancel any in-flight debounced requote so it can't mutate a disposed VM.
+        _quoteCts?.Cancel();
+        _quoteCts?.Dispose();
+        _quoteCts = null;
     }
 
     [RelayCommand]
