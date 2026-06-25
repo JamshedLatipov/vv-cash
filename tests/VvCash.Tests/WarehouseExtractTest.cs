@@ -6,7 +6,12 @@ namespace VvCash.Tests;
 
 public class WarehouseExtractTest
 {
-    private static JsonElement Body(string json) => JsonDocument.Parse(json).RootElement;
+    // Clone so the element stays valid after the JsonDocument is disposed.
+    private static JsonElement Body(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
+    }
 
     [Fact]
     public void ExtractWarehouseId_FromFlatField()
@@ -20,6 +25,13 @@ public class WarehouseExtractTest
     {
         var id = ShiftService.ExtractWarehouseId(Body("""{"id":"s1","warehouse":{"id":"w-456","name":"Main"}}"""));
         Assert.Equal("w-456", id);
+    }
+
+    [Fact]
+    public void ExtractWarehouseId_FromFlatWarehouseString()
+    {
+        var id = ShiftService.ExtractWarehouseId(Body("""{"id":"s1","warehouse":"w-789"}"""));
+        Assert.Equal("w-789", id);
     }
 
     [Fact]
