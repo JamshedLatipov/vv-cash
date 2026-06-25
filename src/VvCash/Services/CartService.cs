@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using VvCash.Models;
+using VvCash.Models.Api;
 
 namespace VvCash.Services;
 
@@ -18,6 +19,9 @@ public class CartService : ICartService
     public decimal ManualDiscountAmount { get; private set; }
     public decimal CustomerDiscountPercent { get; private set; }
 
+    public QuoteResult? Quote { get; private set; }
+    public string? QuoteId => Quote?.QuoteId;
+
     public decimal Subtotal => _items.Sum(i => i.LineTotal);
 
     public decimal TotalDiscount
@@ -25,17 +29,27 @@ public class CartService : ICartService
         get
         {
             var subtotal = Subtotal;
-            // Coupon discounts
-            var couponPercent = _appliedCoupons.Sum(c => c.DiscountPercent) / 100m * subtotal;
-            var couponFlat = _appliedCoupons.Sum(c => c.DiscountAmount);
-            // Manual discount
+
+            decimal baseDiscount;
+            if (Quote != null)
+            {
+                // Server best-deal already includes loyalty/promo/tiers.
+                baseDiscount = Quote.DiscountTotal;
+            }
+            else
+            {
+                // Offline / no card: legacy flat path.
+                var couponPercent = _appliedCoupons.Sum(c => c.DiscountPercent) / 100m * subtotal;
+                var couponFlat = _appliedCoupons.Sum(c => c.DiscountAmount);
+                var customerPercent = CustomerDiscountPercent / 100m * subtotal;
+                baseDiscount = couponPercent + couponFlat + customerPercent;
+            }
+
+            // Cashier manual discount always on top.
             var manualPercent = ManualDiscountPercent / 100m * subtotal;
             var manualFlat = ManualDiscountAmount;
-            // Customer loyalty card discount
-            var customerPercent = CustomerDiscountPercent / 100m * subtotal;
 
-            var total = couponPercent + couponFlat + manualPercent + manualFlat + customerPercent;
-            // Clamp: discount cannot exceed subtotal
+            var total = baseDiscount + manualPercent + manualFlat;
             return Math.Min(total, subtotal);
         }
     }
@@ -87,6 +101,7 @@ public class CartService : ICartService
     {
         _items.Clear();
         _appliedCoupons.Clear();
+        Quote = null;
         ClearManualDiscount();
         RaiseCartChanged();
     }
@@ -120,6 +135,18 @@ public class CartService : ICartService
     public void SetCustomerDiscount(decimal percent)
     {
         CustomerDiscountPercent = percent;
+        RaiseCartChanged();
+    }
+
+    public void ApplyQuote(QuoteResult result)
+    {
+        Quote = result;
+        RaiseCartChanged();
+    }
+
+    public void ClearQuote()
+    {
+        Quote = null;
         RaiseCartChanged();
     }
 
