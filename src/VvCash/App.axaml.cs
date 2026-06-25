@@ -153,7 +153,6 @@ public partial class App : Application
         services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<ICartService, CartService>();
         services.AddSingleton<IParkedSaleService, ParkedSaleService>();
-        services.AddSingleton<IDiscountService, DiscountService>();
         services.AddHttpClient<IQuoteService, QuoteService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // Hardware Services

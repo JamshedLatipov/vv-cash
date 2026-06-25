@@ -23,7 +23,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IProductService _productService;
     private readonly ICategoryService _categoryService;
     private readonly ICartService _cartService;
-    private readonly IDiscountService _discountService;
     private readonly IPrinterService _printerService;
     private readonly ICustomerDisplayService _customerDisplayService;
     private readonly IShiftService _shiftService;
@@ -253,7 +252,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IProductService productService,
         ICategoryService categoryService,
         ICartService cartService,
-        IDiscountService discountService,
         IPrinterService printerService,
         ICustomerDisplayService customerDisplayService,
         IShiftService shiftService,
@@ -271,7 +269,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _productService = productService;
         _categoryService = categoryService;
         _cartService = cartService;
-        _discountService = discountService;
         _printerService = printerService;
         _customerDisplayService = customerDisplayService;
         _shiftService = shiftService;
@@ -453,7 +450,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private void OnCartChanged(object? sender, EventArgs e)
     {
         CartItems = new ObservableCollection<CartItem>(_cartService.Items);
-        AppliedCoupons = new ObservableCollection<Coupon>(_cartService.AppliedCoupons);
+        RefreshPromoChip();
         if (CartItems.Count == 1)
         {
             OrderNumber++;
@@ -543,7 +540,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         if (result.Rejected.Count > 0)
         {
             StatusMessage = $"Промокод отклонён: {result.Rejected[0].Reason}";
-            _activePromoCode = null;
+            ClearActivePromo();
         }
         else if (!string.IsNullOrWhiteSpace(_activePromoCode) && result.Applied.Count > 0)
         {
@@ -555,6 +552,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     // trigger nor cancelled), so a stale in-flight quote can never apply after a newer one.
     private bool IsCurrentQuote(System.Threading.CancellationTokenSource cts)
         => ReferenceEquals(_quoteCts, cts) && !cts.IsCancellationRequested;
+
+    // The promo path is now server-driven via _activePromoCode (not _cartService coupons),
+    // so the coupon-chip UI (bound to AppliedCoupons) mirrors the active promo code.
+    private void RefreshPromoChip()
+    {
+        AppliedCoupons = string.IsNullOrWhiteSpace(_activePromoCode)
+            ? new ObservableCollection<Coupon>()
+            : new ObservableCollection<Coupon> { new Coupon { Code = _activePromoCode } };
+    }
+
+    private void ClearActivePromo()
+    {
+        _activePromoCode = null;
+        RefreshPromoChip();
+    }
 
     // Guard against recursion: ApplyQuote/ClearQuote raise CartChanged ->
     // OnCartChanged must not start another requote.
@@ -724,7 +736,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCart();
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
-        _activePromoCode = null;
+        ClearActivePromo();
         _ = _customerDisplayService.ClearAsync();
     }
 
@@ -733,6 +745,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrWhiteSpace(CouponCode)) return Task.CompletedTask;
         _activePromoCode = CouponCode.Trim();
+        RefreshPromoChip(); // show the entered code immediately (removed if server rejects)
         StatusMessage = $"Проверка кода: {_activePromoCode}…";
         CouponCode = string.Empty;
         TriggerRequote();
@@ -742,7 +755,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void RemoveCoupon(string code)
     {
-        _activePromoCode = null;
+        ClearActivePromo();
         _cartService.RemoveCoupon(code);
         TriggerRequote();
     }
@@ -896,7 +909,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCart();
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
-        _activePromoCode = null;
+        ClearActivePromo();
         _ = _customerDisplayService.ClearAsync();
 
         IsParkLabelModalVisible = false;
@@ -946,7 +959,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             _cartService.ClearCart();
             _cartService.ClearCustomerDiscount();
             SelectedCustomer = null;
-            _activePromoCode = null;
+            ClearActivePromo();
         }
 
         var snapshot = await _parkedSaleService.ResumeAsync(id);
@@ -1030,7 +1043,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;
-                        _activePromoCode = null;
+                        ClearActivePromo();
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null)
