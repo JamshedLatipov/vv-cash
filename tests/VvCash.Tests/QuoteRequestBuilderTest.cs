@@ -25,6 +25,9 @@ public class QuoteRequestBuilderTest
         Assert.Equal("p1", req.Lines[0].ProductId);
         Assert.Equal(2m, req.Lines[0].Quantity);
         Assert.Equal(10m, req.Lines[0].UnitPrice);
+        Assert.Equal("p2", req.Lines[1].ProductId);
+        Assert.Equal(1m, req.Lines[1].Quantity);
+        Assert.Equal(5m, req.Lines[1].UnitPrice);
     }
 
     [Fact]
