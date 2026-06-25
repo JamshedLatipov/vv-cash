@@ -12,14 +12,15 @@ public class QuoteLineResolverTest
     {
         var quote = new QuoteResult
         {
-            Lines = { new QuoteLineResult { ProductId = "p1", DiscountPercent = 15m, UnitPrice = 100m } }
+            Lines = { new QuoteLineResult { ProductId = "p1", DiscountPercent = 15m, UnitPrice = 85m } }
         };
+        // Product.Price differs from the quote's UnitPrice to prove the quote line wins.
         var item = new CartItem { Product = new Product { Id = "p1", Price = 100m }, Quantity = 1 };
 
         var (pct, before) = QuoteLineResolver.Resolve(quote, item);
 
         Assert.Equal(15m, pct);
-        Assert.Equal(100m, before);
+        Assert.Equal(85m, before);
     }
 
     [Fact]
