@@ -116,6 +116,7 @@ public partial class App : Application
         // Core Services
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
+        services.AddSingleton<ISessionContext, SessionContext>();
 
         services.AddTransient<AuthHeaderHandler>();
 
@@ -154,6 +155,7 @@ public partial class App : Application
         services.AddSingleton<ICartService, CartService>();
         services.AddSingleton<IParkedSaleService, ParkedSaleService>();
         services.AddSingleton<IDiscountService, DiscountService>();
+        services.AddHttpClient<IQuoteService, QuoteService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // Hardware Services
         services.AddSingleton<IPrinterService, CompositePrinterService>();
