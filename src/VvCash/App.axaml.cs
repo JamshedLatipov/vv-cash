@@ -11,7 +11,6 @@ using System.Net.Http;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Hardware;
-using VvCash.Services.Api;
 using VvCash.ViewModels;
 using VvCash.Views;
 
