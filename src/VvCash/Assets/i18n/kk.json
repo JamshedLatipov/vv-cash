@@ -154,5 +154,20 @@
   "Prev": "Алдыңғы",
   "Next": "Келесі",
   "ReturnOpenDrawerSetting": "Қайтару кезінде кассаны ашу",
-  "ReturnPrintReceiptSetting": "Қайтару чегін басу"
+  "ReturnPrintReceiptSetting": "Қайтару чегін басу",
+  "Categories": "Санаттар",
+  "Pay": "Төлеу",
+  "Coupon": "Купон",
+  "Search": "Іздеу",
+  "NoProductsFound": "Сұранысыңыз бойынша ештеңе табылмады",
+  "QUICKAMOUNT": "ЖЫЛДАМ СОМА",
+  "Exact": "Дәл",
+  "TOTALDUE": "ТӨЛЕУГЕ",
+  "REMAINING": "ҚАЛДЫ",
+  "CHANGEDUE": "ҚАЙТАРЫМ",
+  "FULLYPAID": "ТОЛЫҚ ТӨЛЕНДІ",
+  "WelcomeSignIn": "Қош келдіңіз! Ауысымды ашып, сатуды бастау үшін кіріңіз.",
+  "FeatureTwoTaps": "Екі түртумен сату",
+  "FeatureScan": "Жылдам іздеу және штрихкод сканерлеу",
+  "FeatureOffline": "Офлайн жұмыс істейді, кейін синхрондалады"
 }

@@ -27,7 +27,7 @@
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="FontSize" Value="20"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="CornerRadius" Value="12"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="VerticalAlignment" Value="Stretch"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
@@ -58,12 +58,48 @@
     <Grid ColumnDefinitions="*, *" Background="{StaticResource Slate50Brush}">
         <!-- Left Side: Branding/Info -->
 
-        <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="48">
-            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="24">
-                <Image Source="avares://VvCash/Assets/logo.png" Width="120" Height="120" Stretch="Uniform" />
-                <TextBlock Text="{Binding [LuxeThreadsPOS], Source={x:Static services:I18nService.Instance}}" FontSize="48" FontWeight="Black" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
-                <TextBlock Text="{Binding [WelcomebackPleaseent], Source={x:Static services:I18nService.Instance}}" FontSize="20" Foreground="{StaticResource Slate100Brush}" TextAlignment="Center" TextWrapping="Wrap" Opacity="0.9"/>
-            </StackPanel>
+        <Border Grid.Column="0" Background="{StaticResource PrimaryBrush}" CornerRadius="0,24,24,0" Padding="56" ClipToBounds="True">
+            <Panel>
+                <!-- soft top highlight -->
+                <Border IsHitTestVisible="False" Margin="-56">
+                    <Border.Background>
+                        <RadialGradientBrush Center="50%,-10%" GradientOrigin="50%,-10%" RadiusX="120%" RadiusY="80%">
+                            <GradientStop Color="#2EFFFFFF" Offset="0"/>
+                            <GradientStop Color="#00FFFFFF" Offset="0.6"/>
+                        </RadialGradientBrush>
+                    </Border.Background>
+                </Border>
+
+                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="22">
+                    <Border Width="104" Height="104" CornerRadius="24" ClipToBounds="True" HorizontalAlignment="Center">
+                        <Image Source="avares://VvCash/Assets/logo.png" Width="104" Height="104" Stretch="Uniform"/>
+                    </Border>
+                    <TextBlock Text="{Binding [LuxeThreadsPOS], Source={x:Static services:I18nService.Instance}}" FontSize="46" FontWeight="Black" LetterSpacing="-0.5" Foreground="White" TextAlignment="Center" TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding [WelcomeSignIn], Source={x:Static services:I18nService.Instance}}" FontSize="18" Foreground="{StaticResource PrimaryLightBrush}" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360" LineHeight="27"/>
+
+                    <!-- feature highlights -->
+                    <StackPanel Spacing="12" Margin="0,12,0,0" HorizontalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Border Width="34" Height="34" CornerRadius="99" Background="#2EFFFFFF">
+                                <material:MaterialIcon Kind="LightningBolt" Width="18" Height="18" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="{Binding [FeatureTwoTaps], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Border Width="34" Height="34" CornerRadius="99" Background="#2EFFFFFF">
+                                <material:MaterialIcon Kind="BarcodeScan" Width="18" Height="18" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="{Binding [FeatureScan], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Border Width="34" Height="34" CornerRadius="99" Background="#2EFFFFFF">
+                                <material:MaterialIcon Kind="WifiOff" Width="18" Height="18" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <TextBlock Text="{Binding [FeatureOffline], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Panel>
         </Border>
 
         <!-- Right Side: Email/Password Entry -->

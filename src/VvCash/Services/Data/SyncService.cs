@@ -129,7 +129,15 @@ public class SyncService : ISyncService
 
                                         if (updateRoot.TryGetProperty("status", out var updateStatus) && updateStatus.GetInt32() == 0)
                                         {
-                                            if (updateRoot.TryGetProperty("body", out var updateBody) && updateBody.ValueKind == JsonValueKind.Array)
+                                            // Backend must return an array (possibly empty). A null/missing body
+                                            // means "no data delivered" — do NOT advance the version, otherwise
+                                            // this version is skipped forever once the backend is fixed.
+                                            if (!updateRoot.TryGetProperty("body", out var updateBody) || updateBody.ValueKind != JsonValueKind.Array)
+                                            {
+                                                Console.WriteLine($"[SyncService] update/{version}: body is null/not an array — backend returned no product data; stopping without advancing version");
+                                                break;
+                                            }
+
                                             {
                                                 foreach (var item in updateBody.EnumerateArray())
                                                 {
