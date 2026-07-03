@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using VvCash.Models;
+using VvCash.Models.Api;
 
 namespace VvCash.Services;
 
@@ -20,6 +21,12 @@ public interface ICartService
 
     // Customer loyalty card discount
     decimal CustomerDiscountPercent { get; }
+
+    // Server-quoted discount snapshot (null => offline/flat fallback)
+    QuoteResult? Quote { get; }
+    string? QuoteId { get; }
+    void ApplyQuote(QuoteResult result);
+    void ClearQuote();
 
     void AddProduct(Product product);
     void RemoveItem(CartItem item);

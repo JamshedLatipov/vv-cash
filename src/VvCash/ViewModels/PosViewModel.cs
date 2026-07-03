@@ -23,7 +23,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IProductService _productService;
     private readonly ICategoryService _categoryService;
     private readonly ICartService _cartService;
-    private readonly IDiscountService _discountService;
     private readonly IPrinterService _printerService;
     private readonly ICustomerDisplayService _customerDisplayService;
     private readonly IShiftService _shiftService;
@@ -34,8 +33,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ICounterpartyService _counterpartyService;
     private readonly IParkedSaleService _parkedSaleService;
     private readonly IReturnService _returnService;
+    private readonly IQuoteService _quoteService;
+    private readonly ISessionContext _session;
     private readonly HttpClient _httpClient;
     private CancellationTokenSource? _syncCancellationTokenSource;
+    private System.Threading.CancellationTokenSource? _quoteCts;
+    private bool _applyingQuoteResult;
+    private string? _activePromoCode;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -115,6 +119,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         SelectedCustomer = null;
         _cartService.ClearCustomerDiscount();
+        TriggerRequote();
     }
 
     [ObservableProperty] private decimal _totalDiscount;
@@ -247,7 +252,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IProductService productService,
         ICategoryService categoryService,
         ICartService cartService,
-        IDiscountService discountService,
         IPrinterService printerService,
         ICustomerDisplayService customerDisplayService,
         IShiftService shiftService,
@@ -258,12 +262,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ICounterpartyService counterpartyService,
         IParkedSaleService parkedSaleService,
         IReturnService returnService,
+        IQuoteService quoteService,
+        ISessionContext session,
         HttpClient httpClient)
     {
         _productService = productService;
         _categoryService = categoryService;
         _cartService = cartService;
-        _discountService = discountService;
         _printerService = printerService;
         _customerDisplayService = customerDisplayService;
         _shiftService = shiftService;
@@ -274,6 +279,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _counterpartyService = counterpartyService;
         _parkedSaleService = parkedSaleService;
         _returnService = returnService;
+        _quoteService = quoteService;
+        _session = session;
         _httpClient = httpClient;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
@@ -443,7 +450,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private void OnCartChanged(object? sender, EventArgs e)
     {
         CartItems = new ObservableCollection<CartItem>(_cartService.Items);
-        AppliedCoupons = new ObservableCollection<Coupon>(_cartService.AppliedCoupons);
+        RefreshPromoChip();
         if (CartItems.Count == 1)
         {
             OrderNumber++;
@@ -471,6 +478,103 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
 
         _ = _customerDisplayService.ShowTotalAsync(TotalAmount);
+
+        if (!_applyingQuoteResult)
+            TriggerRequote();
+    }
+
+    private void TriggerRequote() => _ = RequoteSafeAsync();
+
+    private async Task RequoteSafeAsync()
+    {
+        try
+        {
+            await RequoteDebouncedAsync();
+        }
+        catch (Exception ex)
+        {
+            // Detached task: a requote failure must not vanish silently nor crash.
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Requote failed: {ex}");
+        }
+    }
+
+    private async Task RequoteDebouncedAsync()
+    {
+        _quoteCts?.Cancel();
+        var cts = new System.Threading.CancellationTokenSource();
+        _quoteCts = cts;
+        try { await Task.Delay(300, cts.Token); }
+        catch (TaskCanceledException) { return; }
+        await RequoteAsync(cts);
+    }
+
+    // Triggers all originate on the UI thread and the codebase never uses
+    // ConfigureAwait(false), so these continuations resume on the UI thread —
+    // required because applying a quote raises CartChanged, which rebuilds
+    // UI-bound collections.
+    private async Task RequoteAsync(System.Threading.CancellationTokenSource cts)
+    {
+        var ct = cts.Token;
+        var cardId = SelectedCustomer?.DiscountCard?.Identifier;
+        var hasInput = !string.IsNullOrWhiteSpace(cardId) || !string.IsNullOrWhiteSpace(_activePromoCode);
+
+        if (!IsSystemOnline || !hasInput || _cartService.Items.Count == 0 || string.IsNullOrWhiteSpace(_session.WarehouseId))
+        {
+            if (IsCurrentQuote(cts)) ApplyQuoteGuarded(() => _cartService.ClearQuote());
+            return;
+        }
+
+        var request = QuoteRequestBuilder.Build(_cartService.Items, _session.WarehouseId!, cardId, _activePromoCode);
+        var result = await _quoteService.QuoteAsync(request, ct);
+        if (!IsCurrentQuote(cts)) return; // a newer requote superseded this one
+
+        if (result == null)
+        {
+            // Network failure / offline: fall back to flat %.
+            ApplyQuoteGuarded(() => _cartService.ClearQuote());
+            return;
+        }
+
+        ApplyQuoteGuarded(() => _cartService.ApplyQuote(result));
+
+        if (result.Rejected.Count > 0)
+        {
+            StatusMessage = $"Промокод отклонён: {result.Rejected[0].Reason}";
+            ClearActivePromo();
+        }
+        else if (!string.IsNullOrWhiteSpace(_activePromoCode) && result.Applied.Count > 0)
+        {
+            StatusMessage = "Промокод применён";
+        }
+    }
+
+    // True only while cts is still the active request (not superseded by a newer
+    // trigger nor cancelled), so a stale in-flight quote can never apply after a newer one.
+    private bool IsCurrentQuote(System.Threading.CancellationTokenSource cts)
+        => ReferenceEquals(_quoteCts, cts) && !cts.IsCancellationRequested;
+
+    // The promo path is now server-driven via _activePromoCode (not _cartService coupons),
+    // so the coupon-chip UI (bound to AppliedCoupons) mirrors the active promo code.
+    private void RefreshPromoChip()
+    {
+        AppliedCoupons = string.IsNullOrWhiteSpace(_activePromoCode)
+            ? new ObservableCollection<Coupon>()
+            : new ObservableCollection<Coupon> { new Coupon { Code = _activePromoCode } };
+    }
+
+    private void ClearActivePromo()
+    {
+        _activePromoCode = null;
+        RefreshPromoChip();
+    }
+
+    // Guard against recursion: ApplyQuote/ClearQuote raise CartChanged ->
+    // OnCartChanged must not start another requote.
+    private void ApplyQuoteGuarded(System.Action apply)
+    {
+        _applyingQuoteResult = true;
+        try { apply(); }
+        finally { _applyingQuoteResult = false; }
     }
 
     private void OnPrinterStatusChanged(object? sender, PrinterStatus status)
@@ -528,6 +632,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _syncCancellationTokenSource?.Cancel();
         _syncCancellationTokenSource?.Dispose();
         _syncCancellationTokenSource = null;
+
+        // Cancel any in-flight debounced requote so it can't mutate a disposed VM.
+        _quoteCts?.Cancel();
+        _quoteCts?.Dispose();
+        _quoteCts = null;
     }
 
     [RelayCommand]
@@ -627,30 +736,28 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCart();
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
+        ClearActivePromo();
         _ = _customerDisplayService.ClearAsync();
     }
 
     [RelayCommand]
-    private async Task ApplyCoupon()
+    private Task ApplyCoupon()
     {
-        if (string.IsNullOrWhiteSpace(CouponCode)) return;
-        var coupon = await _discountService.ValidateCouponAsync(CouponCode);
-        if (coupon != null)
-        {
-            _cartService.ApplyCoupon(coupon);
-            StatusMessage = $"Coupon '{coupon.Code}' applied: {coupon.Description}";
-            CouponCode = string.Empty;
-        }
-        else
-        {
-            StatusMessage = $"Invalid coupon code: {CouponCode}";
-        }
+        if (string.IsNullOrWhiteSpace(CouponCode)) return Task.CompletedTask;
+        _activePromoCode = CouponCode.Trim();
+        RefreshPromoChip(); // show the entered code immediately (removed if server rejects)
+        StatusMessage = $"Проверка кода: {_activePromoCode}…";
+        CouponCode = string.Empty;
+        TriggerRequote();
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
     private void RemoveCoupon(string code)
     {
+        ClearActivePromo();
         _cartService.RemoveCoupon(code);
+        TriggerRequote();
     }
 
     [RelayCommand]
@@ -737,7 +844,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     SelectedCustomer = result;
                     if (result.DiscountCard != null && result.DiscountCard.Discount > 0)
                     {
-                        _cartService.SetCustomerDiscount(result.DiscountCard.Discount);
+                        _cartService.SetCustomerDiscount(result.DiscountCard.Discount); // offline fallback
                         StatusMessage = $"Клиент: {result.FullName} • Скидка по карте: {result.DiscountCard.Discount}%";
                     }
                     else
@@ -745,6 +852,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _cartService.ClearCustomerDiscount();
                         StatusMessage = $"Выбран клиент: {result.FullName}";
                     }
+                    TriggerRequote();
                 }
             }
         }
@@ -801,6 +909,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCart();
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
+        ClearActivePromo();
         _ = _customerDisplayService.ClearAsync();
 
         IsParkLabelModalVisible = false;
@@ -850,6 +959,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             _cartService.ClearCart();
             _cartService.ClearCustomerDiscount();
             SelectedCustomer = null;
+            ClearActivePromo();
         }
 
         var snapshot = await _parkedSaleService.ResumeAsync(id);
@@ -868,6 +978,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             snapshot.ManualDiscountPercent, snapshot.ManualDiscountAmount,
             snapshot.CustomerDiscountPercent,
             snapshot.AppliedCoupons);
+
+        TriggerRequote();
 
         StatusMessage = "Отложенный чек возвращён.";
     }
@@ -904,14 +1016,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             Discount = TotalDiscount,
                             Remained = Math.Max(0, TotalAmount - (cashAmount + cardAmount))
                         },
-                        Products = _cartService.Items.Select(item => new DocumentProduct
+                        Products = _cartService.Items.Select(item =>
                         {
-                            Name = item.Product.Name,
-                            ProductId = item.Product.Id,
-                            Quantity = item.Quantity,
-                            SellPrice = item.Product.Price,
-                            PriceBeforeDiscount = item.Product.OriginalPrice ?? item.Product.Price,
-                            DiscountPercent = item.Product.DiscountPercent ?? 0m
+                            var (pct, before) = QuoteLineResolver.Resolve(_cartService.Quote, item);
+                            return new DocumentProduct
+                            {
+                                Name = item.Product.Name,
+                                ProductId = item.Product.Id,
+                                Quantity = item.Quantity,
+                                SellPrice = item.Product.Price,
+                                PriceBeforeDiscount = before,
+                                DiscountPercent = pct
+                            };
                         }).ToList()
                     };
 
@@ -927,6 +1043,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;
+                        ClearActivePromo();
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null)

@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Net.Http.Json;
+using VvCash.Services;
 
 namespace VvCash.Services.Api;
 
@@ -11,11 +12,31 @@ public class ShiftService : IShiftService
 {
     private readonly HttpClient _httpClient;
     private readonly ISettingsService _settingsService;
+    private readonly ISessionContext _session;
 
-    public ShiftService(HttpClient httpClient, ISettingsService settingsService)
+    public ShiftService(HttpClient httpClient, ISettingsService settingsService, ISessionContext session)
     {
         _httpClient = httpClient;
         _settingsService = settingsService;
+        _session = session;
+    }
+
+    /// <summary>Extracts warehouse id from the untyped cash-session body.
+    /// Tries "warehouse_id", then "warehouse" (flat string or nested object with "id").</summary>
+    public static string? ExtractWarehouseId(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object) return null;
+
+        if (body.TryGetProperty("warehouse_id", out var wid) && wid.ValueKind == JsonValueKind.String)
+            return wid.GetString();
+
+        if (body.TryGetProperty("warehouse", out var w))
+        {
+            if (w.ValueKind == JsonValueKind.String) return w.GetString();
+            if (w.ValueKind == JsonValueKind.Object && w.TryGetProperty("id", out var nid) && nid.ValueKind == JsonValueKind.String)
+                return nid.GetString();
+        }
+        return null;
     }
 
     private string GetBaseUrl()
@@ -56,6 +77,8 @@ public class ShiftService : IShiftService
                 {
                     if (root.TryGetProperty("body", out var bodyElement) && bodyElement.TryGetProperty("id", out var idElement))
                     {
+                        var wh = ExtractWarehouseId(bodyElement);
+                        if (!string.IsNullOrEmpty(wh)) _session.WarehouseId = wh;
                         return idElement.GetString();
                     }
                 }
@@ -134,6 +157,8 @@ public class ShiftService : IShiftService
                         if (bodyElement.ValueKind == JsonValueKind.Null) return null;
                         if (bodyElement.TryGetProperty("id", out var idElement))
                         {
+                            var wh = ExtractWarehouseId(bodyElement);
+                            if (!string.IsNullOrEmpty(wh)) _session.WarehouseId = wh;
                             return idElement.GetString();
                         }
                     }
