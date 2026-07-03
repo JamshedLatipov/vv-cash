@@ -335,7 +335,7 @@
             </Grid>
 
             <!-- Order panel -->
-            <Border Grid.Column="2" Width="500" Background="White" CornerRadius="20"
+            <Border Grid.Column="2" Width="550" Background="White" CornerRadius="20"
                     BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1"
                     BoxShadow="0 12 32 -16 #2E0F172A" ClipToBounds="True">
                 <Grid RowDefinitions="Auto, *, Auto">
