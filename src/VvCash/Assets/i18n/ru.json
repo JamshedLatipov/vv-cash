@@ -133,5 +133,20 @@
   "Prev": "Назад",
   "Next": "Вперёд",
   "ReturnOpenDrawerSetting": "Открывать денежный ящик при возврате",
-  "ReturnPrintReceiptSetting": "Печатать чек возврата"
+  "ReturnPrintReceiptSetting": "Печатать чек возврата",
+  "Categories": "Категории",
+  "Pay": "Оплатить",
+  "Coupon": "Купон",
+  "Search": "Поиск",
+  "NoProductsFound": "Ничего не найдено по вашему запросу",
+  "QUICKAMOUNT": "БЫСТРАЯ СУММА",
+  "Exact": "Точно",
+  "TOTALDUE": "К ОПЛАТЕ",
+  "REMAINING": "ОСТАЛОСЬ",
+  "CHANGEDUE": "СДАЧА",
+  "FULLYPAID": "ОПЛАЧЕНО ПОЛНОСТЬЮ",
+  "WelcomeSignIn": "С возвращением! Войдите, чтобы открыть смену и начать продажи.",
+  "FeatureTwoTaps": "Продажа в два касания",
+  "FeatureScan": "Мгновенный поиск и сканирование штрихкода",
+  "FeatureOffline": "Работает офлайн, синхронизируется позже"
 }

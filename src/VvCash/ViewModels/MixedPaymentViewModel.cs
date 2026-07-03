@@ -1,5 +1,7 @@
 using System;
+using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -34,6 +36,20 @@ public partial class MixedPaymentViewModel : ViewModelBase
 
     public decimal RemainingAmount => TotalAmount - (CashAmount + CardAmount + GiftAmount);
 
+    // ---- Receipt-panel helpers (redesigned payment screen) ----
+    public decimal PaidAmount => CashAmount + CardAmount + GiftAmount;
+    public decimal RemainingDue => Math.Max(0, RemainingAmount);
+    public decimal ChangeAmount => Math.Max(0, -RemainingAmount);
+    public bool IsFullyPaid => RemainingAmount <= 0;
+    public bool HasChange => ChangeAmount > 0;
+    public double ProgressPercent => TotalAmount > 0
+        ? Math.Min(100.0, (double)(PaidAmount / TotalAmount) * 100.0)
+        : 100.0;
+
+    // Quick-tender: exact remaining + round-ups (for cash payments)
+    public decimal ExactAmount { get; private set; }
+    public ObservableCollection<decimal> RoundUpAmounts { get; } = new();
+
     // Raw string buffer to support decimal points properly
     private string _currentInputBuffer = "0";
 
@@ -46,7 +62,50 @@ public partial class MixedPaymentViewModel : ViewModelBase
     {
         TotalAmount = totalAmount;
         _onCompletion = onCompletion;
+        RecomputeQuickAmounts();
     }
+
+    private void NotifyDerived()
+    {
+        OnPropertyChanged(nameof(PaidAmount));
+        OnPropertyChanged(nameof(RemainingDue));
+        OnPropertyChanged(nameof(ChangeAmount));
+        OnPropertyChanged(nameof(IsFullyPaid));
+        OnPropertyChanged(nameof(HasChange));
+        OnPropertyChanged(nameof(ProgressPercent));
+        ConfirmPaymentCommand.NotifyCanExecuteChanged();
+        RecomputeQuickAmounts();
+    }
+
+    private decimal AmountOf(string method) => method switch
+    {
+        "Cash" => CashAmount,
+        "Card" => CardAmount,
+        "Gift" => GiftAmount,
+        _ => 0
+    };
+
+    private void RecomputeQuickAmounts()
+    {
+        // Remaining if the active method's own entry were zeroed out.
+        var rem = TotalAmount - (PaidAmount - AmountOf(SelectedMethod));
+        var baseAmount = rem > 0 ? rem : TotalAmount;
+        ExactAmount = Math.Round(baseAmount, 2);
+        OnPropertyChanged(nameof(ExactAmount));
+
+        RoundUpAmounts.Clear();
+        foreach (var step in new[] { 10m, 50m, 100m })
+        {
+            var up = Math.Ceiling(baseAmount / step) * step;
+            if (up > baseAmount && !RoundUpAmounts.Contains(up))
+                RoundUpAmounts.Add(up);
+        }
+    }
+
+    partial void OnCashAmountChanged(decimal value) => NotifyDerived();
+    partial void OnCardAmountChanged(decimal value) => NotifyDerived();
+    partial void OnGiftAmountChanged(decimal value) => NotifyDerived();
+    partial void OnTotalAmountChanged(decimal value) => NotifyDerived();
 
     [RelayCommand]
     private void Close()
@@ -60,9 +119,12 @@ public partial class MixedPaymentViewModel : ViewModelBase
         _onCompletion(false, 0, 0);
     }
 
-    [RelayCommand]
+    private bool CanConfirmPayment() => IsFullyPaid;
+
+    [RelayCommand(CanExecute = nameof(CanConfirmPayment))]
     private void ConfirmPayment()
     {
+        if (!IsFullyPaid) return;
         _onCompletion(true, CashAmount, CardAmount);
     }
 
@@ -75,6 +137,21 @@ public partial class MixedPaymentViewModel : ViewModelBase
             "Gift" => GiftAmount.ToString("0.##", CultureInfo.InvariantCulture),
             _ => "0"
         };
+        RecomputeQuickAmounts();
+    }
+
+    [RelayCommand]
+    private void SelectMethod(string method)
+    {
+        SelectedMethod = method;
+    }
+
+    [RelayCommand]
+    private void SetQuickAmount(decimal amount)
+    {
+        _currentInputBuffer = amount.ToString("0.##", CultureInfo.InvariantCulture);
+        UpdateAmount(amount);
+        OnPropertyChanged(nameof(QuickInputText));
     }
 
     [RelayCommand]
@@ -136,13 +213,7 @@ public partial class MixedPaymentViewModel : ViewModelBase
         // Add remaining amount to the selected method
         if (RemainingAmount > 0)
         {
-            decimal newAmount = RemainingAmount + (SelectedMethod switch
-            {
-                "Cash" => CashAmount,
-                "Card" => CardAmount,
-                "Gift" => GiftAmount,
-                _ => 0
-            });
+            decimal newAmount = RemainingAmount + AmountOf(SelectedMethod);
             _currentInputBuffer = newAmount.ToString("0.##", CultureInfo.InvariantCulture);
             UpdateAmount(newAmount);
             OnPropertyChanged(nameof(QuickInputText));

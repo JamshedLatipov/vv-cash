@@ -154,5 +154,20 @@
   "Prev": "Қаблӣ",
   "Next": "Баъдӣ",
   "ReturnOpenDrawerSetting": "Кушодани қуттии пул ҳангоми бозгашт",
-  "ReturnPrintReceiptSetting": "Чопи чеки бозгашт"
+  "ReturnPrintReceiptSetting": "Чопи чеки бозгашт",
+  "Categories": "Категорияҳо",
+  "Pay": "Пардохт",
+  "Coupon": "Купон",
+  "Search": "Ҷустуҷӯ",
+  "NoProductsFound": "Аз рӯи дархости шумо чизе ёфт нашуд",
+  "QUICKAMOUNT": "МАБЛАҒИ ЗУД",
+  "Exact": "Дақиқ",
+  "TOTALDUE": "БА ПАРДОХТ",
+  "REMAINING": "БОҚӢ МОНД",
+  "CHANGEDUE": "БАҚИЯ",
+  "FULLYPAID": "ПУРРА ПАРДОХТ ШУД",
+  "WelcomeSignIn": "Хуш омадед! Барои кушодани баст ва оғози фурӯш ворид шавед.",
+  "FeatureTwoTaps": "Фурӯш бо ду ламс",
+  "FeatureScan": "Ҷустуҷӯи фаврӣ ва скани штрих-код",
+  "FeatureOffline": "Офлайн кор мекунад, баъдан ҳамоҳанг мешавад"
 }

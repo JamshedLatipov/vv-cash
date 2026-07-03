@@ -82,6 +82,36 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
 
+    // Coupon modal (coupons live in a modal instead of the totals panel)
+    [ObservableProperty] private bool _isCouponModalVisible = false;
+
+    public bool HasAppliedCoupons => AppliedCoupons.Count > 0;
+    partial void OnAppliedCouponsChanged(ObservableCollection<Coupon> value)
+        => OnPropertyChanged(nameof(HasAppliedCoupons));
+
+    // Cart summary helpers for the always-visible order panel
+    public int CartItemsCount => CartItems.Sum(i => i.Quantity);
+    public bool HasCartItems => CartItems.Count > 0;
+    partial void OnCartItemsChanged(ObservableCollection<CartItem> value)
+    {
+        OnPropertyChanged(nameof(CartItemsCount));
+        OnPropertyChanged(nameof(HasCartItems));
+    }
+
+    public bool HasTotalDiscount => TotalDiscount > 0;
+    partial void OnTotalDiscountChanged(decimal value)
+        => OnPropertyChanged(nameof(HasTotalDiscount));
+
+    public bool HasProducts => Products.Count > 0;
+    public bool ShowCatalogEmptyState => !IsViewingCategories && !HasProducts;
+    partial void OnProductsChanged(ObservableCollection<Product> value)
+    {
+        OnPropertyChanged(nameof(HasProducts));
+        OnPropertyChanged(nameof(ShowCatalogEmptyState));
+    }
+    partial void OnIsViewingCategoriesChanged(bool value)
+        => OnPropertyChanged(nameof(ShowCatalogEmptyState));
+
     // Manual Discount Properties
     [ObservableProperty] private bool _isDiscountModalVisible = false;
     [ObservableProperty] private string _discountInputValue = string.Empty;
@@ -98,6 +128,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private decimal _manualDiscountAmount;
 
     public bool HasManualDiscount => ManualDiscountAmount > 0;
+    partial void OnManualDiscountAmountChanged(decimal value)
+        => OnPropertyChanged(nameof(HasManualDiscount));
 
     // Selected customer
     [ObservableProperty]
@@ -127,7 +159,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private string _printerStatusText = "Printer Ready";
     [ObservableProperty] private bool _isPrinterReady = true;
     [ObservableProperty] private string _statusMessage = string.Empty;
-    [ObservableProperty] private bool _isCatalogOpen = false;
     [ObservableProperty] private bool _isShiftOpen = false;
     [ObservableProperty] private bool _isShiftModalVisible = false;
     [ObservableProperty] private bool _isLoadingShift = false;
@@ -227,9 +258,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         StatusMessage = "Starting full database reinitialization...";
         await _syncService.FullReinitializeAsync();
-        StatusMessage = "Reinitialization complete. Catalog updated.";
         await LoadCategoriesAsync();
         await LoadProductsAsync(SelectedCategory?.Id);
+        // Surface the catalog size so an empty/failed sync is immediately visible.
+        var totalProducts = (await _productService.GetAllProductsAsync()).Count();
+        StatusMessage = totalProducts > 0
+            ? $"Catalog updated: {totalProducts} products, {AllCategories.Count} categories."
+            : "Sync finished but catalog is EMPTY — check Backend URL / tokens in Settings.";
     }
 
     private async Task LoadCategoriesAsync()
@@ -422,11 +457,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     partial void OnSearchQueryChanged(string value)
     {
-        if (!string.IsNullOrWhiteSpace(value) && !IsCatalogOpen)
-        {
-            IsCatalogOpen = true;
-        }
-
         if (AllCategories != null)
         {
             var currentLevelCats = CurrentParentCategory == null
@@ -642,7 +672,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task SearchProducts()
     {
-        IsCatalogOpen = true;
         await LoadProductsAsync(SelectedCategory?.Id);
     }
 
@@ -650,7 +679,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private async Task SelectCategory(Category? category)
     {
         SearchQuery = string.Empty;
-        IsCatalogOpen = true;
 
         if (category == null)
         {
@@ -699,9 +727,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    private void CloseCatalog()
+    private void ClearSearch()
     {
-        IsCatalogOpen = false;
         SearchQuery = string.Empty;
     }
 
@@ -743,13 +770,33 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private Task ApplyCoupon()
     {
-        if (string.IsNullOrWhiteSpace(CouponCode)) return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(CouponCode))
+        {
+            IsCouponModalVisible = false;
+            return Task.CompletedTask;
+        }
+        // Redesign's coupon modal, but the code is now resolved server-side via the
+        // quote (not the old mock DiscountService): stash it and re-quote.
         _activePromoCode = CouponCode.Trim();
         RefreshPromoChip(); // show the entered code immediately (removed if server rejects)
         StatusMessage = $"Проверка кода: {_activePromoCode}…";
         CouponCode = string.Empty;
+        IsCouponModalVisible = false;
         TriggerRequote();
         return Task.CompletedTask;
+    }
+
+    [RelayCommand]
+    private void OpenCouponModal()
+    {
+        CouponCode = string.Empty;
+        IsCouponModalVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseCouponModal()
+    {
+        IsCouponModalVisible = false;
     }
 
     [RelayCommand]

@@ -154,5 +154,20 @@
   "Prev": "Oldingi",
   "Next": "Keyingi",
   "ReturnOpenDrawerSetting": "Qaytarishda kassa qutisini ochish",
-  "ReturnPrintReceiptSetting": "Qaytarish chekini chop etish"
+  "ReturnPrintReceiptSetting": "Qaytarish chekini chop etish",
+  "Categories": "Kategoriyalar",
+  "Pay": "To'lash",
+  "Coupon": "Kupon",
+  "Search": "Qidiruv",
+  "NoProductsFound": "So'rovingiz bo'yicha hech narsa topilmadi",
+  "QUICKAMOUNT": "TEZKOR SUMMA",
+  "Exact": "Aniq",
+  "TOTALDUE": "TO'LOVGA",
+  "REMAINING": "QOLDI",
+  "CHANGEDUE": "QAYTIM",
+  "FULLYPAID": "TO'LIQ TO'LANDI",
+  "WelcomeSignIn": "Xush kelibsiz! Smenani ochish va savdoni boshlash uchun tizimga kiring.",
+  "FeatureTwoTaps": "Ikki bosishda savdo",
+  "FeatureScan": "Tezkor qidiruv va shtrix-kod skaneri",
+  "FeatureOffline": "Oflayn ishlaydi, keyin sinxronlanadi"
 }

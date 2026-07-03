@@ -1,8 +1,10 @@
 using System;
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using VvCash.ViewModels;
 
 namespace VvCash.Views;
@@ -11,10 +13,13 @@ public partial class PosView : UserControl
 {
     private string _barcodeBuffer = string.Empty;
     private DateTime _lastKeyTime = DateTime.MinValue;
+    private int _prevCartCount;
+    private PosViewModel? _subscribedVm;
 
     public PosView()
     {
         InitializeComponent();
+        DataContextChanged += OnDataContextChangedHandler;
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -34,7 +39,55 @@ public partial class PosView : UserControl
         {
             topLevel.RemoveHandler(InputElement.KeyDownEvent, OnGlobalKeyDown);
         }
+        Unsubscribe();
         base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnDataContextChangedHandler(object? sender, EventArgs e)
+    {
+        Unsubscribe();
+        if (DataContext is PosViewModel vm)
+        {
+            _subscribedVm = vm;
+            _prevCartCount = vm.CartItems.Count;
+            vm.PropertyChanged += OnVmPropertyChanged;
+        }
+    }
+
+    private void Unsubscribe()
+    {
+        if (_subscribedVm != null)
+        {
+            _subscribedVm.PropertyChanged -= OnVmPropertyChanged;
+            _subscribedVm = null;
+        }
+    }
+
+    // Auto-scroll to the newest cart line so the cashier never hunts for it.
+    private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PosViewModel.CartItems)) return;
+        var vm = _subscribedVm;
+        if (vm == null) return;
+        var count = vm.CartItems.Count;
+        var grew = count > _prevCartCount;
+        _prevCartCount = count;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (grew) CartScroll.ScrollToEnd();
+            UpdatePagerVisibility();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private static bool LooksLikeBarcode(string text)
+    {
+        // Real barcodes are digit-only (EAN-8/13, UPC…). Anything else is a text search.
+        if (text.Length < 4) return false;
+        foreach (var c in text)
+        {
+            if (!char.IsDigit(c)) return false;
+        }
+        return true;
     }
 
     private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
@@ -43,19 +96,61 @@ public partial class PosView : UserControl
         {
             if (sender is TextBox textBox && !string.IsNullOrWhiteSpace(textBox.Text))
             {
-                var barcode = textBox.Text;
+                var text = textBox.Text.Trim();
                 if (DataContext is PosViewModel vm)
                 {
-                    _ = vm.HandleBarcodeAsync(barcode);
-                    vm.SearchQuery = string.Empty;
+                    if (LooksLikeBarcode(text))
+                    {
+                        // Digits → barcode lookup (exact match, alert when missing).
+                        _ = vm.HandleBarcodeAsync(text);
+                        vm.SearchQuery = string.Empty;
+                    }
+                    // Text → keep the live-filtered catalog; do NOT treat it as a
+                    // barcode (that always ended in "Товар не найден").
                 }
                 e.Handled = true;
             }
+        }
+        else if (e.Key == Key.Escape)
+        {
+            if (DataContext is PosViewModel vm)
+            {
+                vm.SearchQuery = string.Empty;
+            }
+            e.Handled = true;
         }
     }
 
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        // Hotkeys: F2 focus search · F4 pay · Esc clear search
+        if (e.Key == Key.F2)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.F4)
+        {
+            if (DataContext is PosViewModel payVm && payVm.PayCommand.CanExecute(null))
+            {
+                payVm.PayCommand.Execute(null);
+            }
+            e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Escape)
+        {
+            if (DataContext is PosViewModel escVm && !string.IsNullOrEmpty(escVm.SearchQuery))
+            {
+                escVm.SearchQuery = string.Empty;
+                e.Handled = true;
+            }
+            return;
+        }
+
+        // Hardware barcode scanner: fast digit bursts terminated by Enter.
         var now = DateTime.UtcNow;
         var elapsed = (now - _lastKeyTime).TotalMilliseconds;
 
@@ -99,4 +194,32 @@ public partial class PosView : UserControl
             _barcodeBuffer += ch;
         }
     }
+
+    // ---- Kiosk-friendly cart paging: big up/down buttons instead of finger-drag scrolling ----
+
+    private void OnCartScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdatePagerVisibility();
+    }
+
+    private void UpdatePagerVisibility()
+    {
+        var offset = CartScroll.Offset.Y;
+        var viewport = CartScroll.Viewport.Height;
+        var extent = CartScroll.Extent.Height;
+        PagerUp.IsVisible = offset > 4;
+        PagerDown.IsVisible = offset + viewport < extent - 4;
+    }
+
+    private void PageBy(double direction)
+    {
+        var viewport = CartScroll.Viewport.Height;
+        var target = Math.Max(0, CartScroll.Offset.Y + direction * viewport * 0.8);
+        CartScroll.Offset = CartScroll.Offset.WithY(target);
+        UpdatePagerVisibility();
+    }
+
+    private void OnPagerUpClick(object? sender, RoutedEventArgs e) => PageBy(-1);
+
+    private void OnPagerDownClick(object? sender, RoutedEventArgs e) => PageBy(1);
 }
