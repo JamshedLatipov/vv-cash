@@ -129,13 +129,16 @@ public class SyncService : ISyncService
 
                                         if (updateRoot.TryGetProperty("status", out var updateStatus) && updateStatus.GetInt32() == 0)
                                         {
-                                            // Backend must return an array (possibly empty). A null/missing body
-                                            // means "no data delivered" — do NOT advance the version, otherwise
-                                            // this version is skipped forever once the backend is fixed.
+                                            // A null/missing body is a legitimate empty version: the backend
+                                            // serializes "no products in this version for this cash's warehouse"
+                                            // as null. Advance past it and keep walking, otherwise one empty
+                                            // version blocks all later ones.
                                             if (!updateRoot.TryGetProperty("body", out var updateBody) || updateBody.ValueKind != JsonValueKind.Array)
                                             {
-                                                Console.WriteLine($"[SyncService] update/{version}: body is null/not an array — backend returned no product data; stopping without advancing version");
-                                                break;
+                                                Console.WriteLine($"[SyncService] update/{version}: empty body — nothing for this cash in this version; advancing");
+                                                lastVersion = version;
+                                                await _storageService.SetLastSyncVersionAsync(lastVersion);
+                                                continue;
                                             }
 
                                             {
