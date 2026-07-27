@@ -10,6 +10,7 @@ using VvCash.Services;
 using System.Net.Http;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
 using VvCash.ViewModels;
 using VvCash.Views;
@@ -151,6 +152,7 @@ public partial class App : Application
 
         // POS Services
         services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddSingleton<IPromotionProvider, PromotionProvider>();
         services.AddSingleton<ICartService, CartService>();
         services.AddSingleton<IParkedSaleService, ParkedSaleService>();
         services.AddHttpClient<IQuoteService, QuoteService>().AddHttpMessageHandler<AuthHeaderHandler>();

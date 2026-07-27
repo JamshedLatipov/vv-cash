@@ -17,7 +17,7 @@ public class QuoteLineResolverTest
         // Product.Price differs from the quote's UnitPrice to prove the quote line wins.
         var item = new CartItem { Product = new Product { Id = "p1", Price = 100m }, Quantity = 1 };
 
-        var (pct, before) = QuoteLineResolver.Resolve(quote, item);
+        var (pct, before) = QuoteLineResolver.Resolve(quote, null, item, 0);
 
         Assert.Equal(15m, pct);
         Assert.Equal(85m, before);
@@ -32,7 +32,7 @@ public class QuoteLineResolverTest
             Quantity = 1
         };
 
-        var (pct, before) = QuoteLineResolver.Resolve(null, item);
+        var (pct, before) = QuoteLineResolver.Resolve(null, null, item, 0);
 
         Assert.Equal(10m, pct);
         Assert.Equal(90m, before);
@@ -44,7 +44,7 @@ public class QuoteLineResolverTest
         var quote = new QuoteResult { Lines = { new QuoteLineResult { ProductId = "other" } } };
         var item = new CartItem { Product = new Product { Id = "p1", Price = 50m }, Quantity = 1 };
 
-        var (pct, before) = QuoteLineResolver.Resolve(quote, item);
+        var (pct, before) = QuoteLineResolver.Resolve(quote, null, item, 0);
 
         Assert.Equal(0m, pct);
         Assert.Equal(50m, before);

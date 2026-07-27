@@ -36,7 +36,7 @@ public class EscPosPrinterService : IPrinterService
         _connectionString = connectionString;
     }
 
-    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons)
+    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null)
     {
         try
         {
@@ -50,14 +50,18 @@ public class EscPosPrinterService : IPrinterService
             Write(ms, CmdAlignLeft);
             foreach (var item in items)
             {
-                var line = $"{item.Product.Name} x{item.Quantity}";
+                var line = $"{item.Product.Name} x{item.QuantityDisplay}";
                 var price = $"${item.LineTotal:F2}";
                 WriteLine(ms, PadLine(line, price, 32));
             }
             WriteLine(ms, "----------------------------");
             WriteLine(ms, PadLine("Subtotal:", $"${subtotal:F2}", 32));
             if (discount > 0)
+            {
                 WriteLine(ms, PadLine("Discount:", $"-${discount:F2}", 32));
+                if (!string.IsNullOrWhiteSpace(discountName))
+                    WriteLine(ms, Truncate(discountName!, 32));
+            }
 
             Write(ms, CmdBoldOn);
             WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
@@ -90,7 +94,7 @@ public class EscPosPrinterService : IPrinterService
             WriteLine(ms, "----------------------------");
             Write(ms, CmdAlignLeft);
             foreach (var item in items)
-                WriteLine(ms, $"  {item.Product.Name} x{item.Quantity}");
+                WriteLine(ms, $"  {item.Product.Name} x{item.QuantityDisplay}");
             WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
             Write(ms, CmdLineFeed);
             Write(ms, CmdCut);
@@ -115,6 +119,11 @@ public class EscPosPrinterService : IPrinterService
         var spaces = width - left.Length - right.Length;
         return left + new string(' ', Math.Max(1, spaces)) + right;
     }
+
+    /// <summary>Clips a label to the paper width. A promotion name is free text and
+    /// a long one would wrap into a ragged second line on a 32-column roll.</summary>
+    private static string Truncate(string s, int width)
+        => s.Length <= width ? s : s.Substring(0, width);
 
     private async Task SendAsync(byte[] data)
     {

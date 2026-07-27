@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using VvCash.Models;
 using VvCash.Models.Api;
+using VvCash.Services.Discounts;
 
 namespace VvCash.Services;
 
@@ -11,6 +12,16 @@ public class CartService : ICartService
 {
     private readonly ObservableCollection<CartItem> _items = new();
     private readonly ObservableCollection<Coupon> _appliedCoupons = new();
+    private readonly IPromotionProvider _promotionProvider;
+
+    /// <summary>Best local promotion for the current cart, recomputed on every
+    /// change. Only consulted when there is no server quote.</summary>
+    private PromotionOutcome? _offlinePromotion;
+
+    public CartService(IPromotionProvider promotionProvider)
+    {
+        _promotionProvider = promotionProvider;
+    }
 
     public IReadOnlyList<CartItem> Items => _items;
     public IReadOnlyList<Coupon> AppliedCoupons => _appliedCoupons;
@@ -22,7 +33,50 @@ public class CartService : ICartService
     public QuoteResult? Quote { get; private set; }
     public string? QuoteId => Quote?.QuoteId;
 
+    public MoneyPolicy MoneyPolicy => _promotionProvider.MoneyPolicy;
+
+    /// <summary>The local promotion only when it actually drives the cart's
+    /// discount: offline, and beating the flat coupon/customer path it competes
+    /// with. Gating on the win matters — the sale reports this id to the server,
+    /// which charges the promotion's usage against max_uses, so a promotion that
+    /// lost must not be billed for a use it never granted.</summary>
+    public PromotionOutcome? OfflinePromotion
+    {
+        get
+        {
+            if (Quote != null || _offlinePromotion == null) return null;
+            return _offlinePromotion.Total > FlatDiscount(Subtotal) ? _offlinePromotion : null;
+        }
+    }
+
+    /// <summary>Label for the discount actually in force — the server's winning
+    /// source online, the locally-picked promotion offline. Null when the discount
+    /// comes only from the cashier's manual entry or a flat customer percent.</summary>
+    public string? AppliedDiscountName
+    {
+        get
+        {
+            if (Quote != null)
+            {
+                var applied = Quote.Applied.FirstOrDefault();
+                if (applied == null) return null;
+                return string.IsNullOrWhiteSpace(applied.Name) ? applied.Ref : applied.Name;
+            }
+            return OfflinePromotion?.Name;
+        }
+    }
+
     public decimal Subtotal => _items.Sum(i => i.LineTotal);
+
+    /// <summary>The legacy flat path: applied coupons plus the customer's card
+    /// percent. Offline this competes with the best local promotion.</summary>
+    private decimal FlatDiscount(decimal subtotal)
+    {
+        var couponPercent = _appliedCoupons.Sum(c => c.DiscountPercent) / 100m * subtotal;
+        var couponFlat = _appliedCoupons.Sum(c => c.DiscountAmount);
+        var customerPercent = CustomerDiscountPercent / 100m * subtotal;
+        return couponPercent + couponFlat + customerPercent;
+    }
 
     public decimal TotalDiscount
     {
@@ -33,16 +87,15 @@ public class CartService : ICartService
             decimal baseDiscount;
             if (Quote != null)
             {
-                // Server best-deal already includes loyalty/promo/tiers.
+                // Server best-deal already includes loyalty/promo/tiers/promotions.
                 baseDiscount = Quote.DiscountTotal;
             }
             else
             {
-                // Offline / no card: legacy flat path.
-                var couponPercent = _appliedCoupons.Sum(c => c.DiscountPercent) / 100m * subtotal;
-                var couponFlat = _appliedCoupons.Sum(c => c.DiscountAmount);
-                var customerPercent = CustomerDiscountPercent / 100m * subtotal;
-                baseDiscount = couponPercent + couponFlat + customerPercent;
+                // Offline: flat path versus the best local promotion, whichever
+                // gives more. Mirrors the server's best-deal — one source wins,
+                // sources never stack.
+                baseDiscount = Math.Max(FlatDiscount(subtotal), _offlinePromotion?.Total ?? 0m);
             }
 
             // Cashier manual discount always on top.
@@ -86,7 +139,7 @@ public class CartService : ICartService
 
     public void DecreaseQuantity(CartItem item)
     {
-        if (item.Quantity > 1)
+        if (item.Quantity > 1m)
         {
             item.Quantity--;
             RaiseCartChanged();
@@ -95,6 +148,20 @@ public class CartService : ICartService
         {
             RemoveItem(item);
         }
+    }
+
+    /// <summary>Sets an exact quantity — the entry point for weighted goods, where
+    /// the amount comes from a scale rather than from +/- taps. A non-positive
+    /// quantity removes the line, matching what DecreaseQuantity does at zero.</summary>
+    public void SetQuantity(CartItem item, decimal quantity)
+    {
+        if (quantity <= 0m)
+        {
+            RemoveItem(item);
+            return;
+        }
+        item.Quantity = quantity;
+        RaiseCartChanged();
     }
 
     public void ClearCart()
@@ -185,5 +252,33 @@ public class CartService : ICartService
         RaiseCartChanged();
     }
 
-    private void RaiseCartChanged() => CartChanged?.Invoke(this, EventArgs.Empty);
+    private void RaiseCartChanged()
+    {
+        RecalculateOfflinePromotion();
+        CartChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Recomputes the local best-deal promotion. Done once per cart change
+    /// rather than inside <see cref="TotalDiscount"/>, which the UI reads repeatedly
+    /// per render.</summary>
+    private void RecalculateOfflinePromotion()
+    {
+        if (_items.Count == 0)
+        {
+            _offlinePromotion = null;
+            return;
+        }
+
+        var lines = _items.Select(i => new PromoCartLine
+        {
+            ProductId = i.Product.Id,
+            Quantity = i.Quantity,
+            UnitPrice = i.Product.Price,
+            CategoryId = i.Product.Category,
+            TagIds = i.Product.TagIds ?? new List<string>(),
+        }).ToList();
+
+        _offlinePromotion = PromotionCalculator.BestDeal(
+            _promotionProvider.Promotions, lines, DateTimeOffset.Now, _promotionProvider.MoneyPolicy);
+    }
 }
