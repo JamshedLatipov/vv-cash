@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models;
 using VvCash.Services;
+using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
 
@@ -19,22 +20,30 @@ namespace VvCash.ViewModels;
 /// Flow: a grid of name tiles (<see cref="Sellers"/>) -> tap one
 /// (<see cref="SelectSellerCommand"/>) -> a 4-digit PIN pad
 /// (<see cref="AppendDigitCommand"/>) that auto-submits on the fourth digit -> the
-/// overlay closes on success.</summary>
+/// overlay closes on success.
+///
+/// A third case lives inside the switch flow specifically (never approval — see
+/// <see cref="BeginPinSetup"/>): a seller whose PIN was never set
+/// (<see cref="SwitchResult.PinNotSet"/>) gets to create one on the spot instead of
+/// being shown an error — see the "PIN setup (Task 19)" region below.</summary>
 public partial class SellerSwitchViewModel : ViewModelBase
 {
     private const int PinLength = 4;
 
     private readonly ISellerSession _session;
+    private readonly ISellerRosterService _rosterService;
 
-    // Set for the duration of SubmitAsync and checked by every other entry point
-    // that mutates overlay state (SelectSeller, Back, a fresh Show via Open/
-    // OpenForApproval). Today SellerSession's Task-returning members complete
-    // synchronously (see its class remarks), so the dispatcher never actually
-    // pumps other input mid-submit and this guard never trips in practice. It
-    // exists anyway for the day that stops being true — e.g. a roster refresh or
-    // a server round-trip during SubmitAsync — so a tap on "Back" or a fresh
-    // Open() can't land mid-submit and hide/reset the overlay (or, in approval
-    // mode, raise Approved) out from under a user who has already navigated away.
+    // Set for the duration of SubmitAsync (and, for the PIN-setup flow, its own
+    // network round-trip) and checked by every other entry point that mutates
+    // overlay state (SelectSeller, Back, a fresh Show via Open/OpenForApproval).
+    // SellerSession's Task-returning members complete synchronously (see its class
+    // remarks), so for the plain switch/approval path the dispatcher never actually
+    // pumps other input mid-submit and this guard rarely trips in practice there.
+    // It is NOT hypothetical for PIN setup, though: SetPinAsync (see
+    // SubmitPinSetupStepAsync) is genuine network I/O with a real suspension point,
+    // so without this guard a stray tap on "Back" or a fresh Open() while that
+    // request is in flight could hide/reset the overlay — or start a second,
+    // overlapping setup attempt — out from under the still-pending call.
     private bool _isBusy;
 
     [ObservableProperty] private bool _isVisible;
@@ -43,6 +52,38 @@ public partial class SellerSwitchViewModel : ViewModelBase
     [ObservableProperty] private string _pin = string.Empty;
     [ObservableProperty] private bool _hasError;
     [ObservableProperty] private string _errorMessage = string.Empty;
+
+    /// <summary>True while the PIN pad is being used to create (rather than verify) a
+    /// PIN — see the "PIN setup (Task 19)" region. Combine with
+    /// <see cref="IsConfirmingNewPin"/> via <see cref="IsCreatingNewPin"/>/
+    /// <see cref="IsRepeatingNewPin"/> to pick the right prompt.</summary>
+    [ObservableProperty] private bool _isSettingPin;
+
+    /// <summary>True on the second ("repeat it") step of PIN setup; false on the
+    /// first. Meaningless unless <see cref="IsSettingPin"/> is also true.</summary>
+    [ObservableProperty] private bool _isConfirmingNewPin;
+
+    /// <summary>The first entry of a new PIN, held only long enough to compare
+    /// against the second — see <see cref="SubmitPinSetupStepAsync"/>.</summary>
+    private string? _pendingNewPin;
+
+    /// <summary>Drives the "create a PIN" prompt (first entry of PIN setup).</summary>
+    public bool IsCreatingNewPin => IsSettingPin && !IsConfirmingNewPin;
+
+    /// <summary>Drives the "repeat it" prompt (second entry of PIN setup).</summary>
+    public bool IsRepeatingNewPin => IsSettingPin && IsConfirmingNewPin;
+
+    partial void OnIsSettingPinChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsCreatingNewPin));
+        OnPropertyChanged(nameof(IsRepeatingNewPin));
+    }
+
+    partial void OnIsConfirmingNewPinChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsCreatingNewPin));
+        OnPropertyChanged(nameof(IsRepeatingNewPin));
+    }
 
     /// <summary>True while the overlay is verifying a PIN to approve an operation on
     /// behalf of the current seller (see <see cref="OpenForApproval"/>); false while it
@@ -57,9 +98,10 @@ public partial class SellerSwitchViewModel : ViewModelBase
     /// <summary>Raised when an escalation PIN was accepted, carrying the approving seller.</summary>
     public event EventHandler<SellerInfo>? Approved;
 
-    public SellerSwitchViewModel(ISellerSession session)
+    public SellerSwitchViewModel(ISellerSession session, ISellerRosterService rosterService)
     {
         _session = session;
+        _rosterService = rosterService;
     }
 
     /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.</summary>
@@ -87,12 +129,16 @@ public partial class SellerSwitchViewModel : ViewModelBase
             Sellers.Add(seller);
 
         // Reset everything so a previous failed attempt (wrong PIN, corrupt hash,
-        // etc.) never leaks into the next time the overlay opens.
+        // a half-finished PIN-setup, etc.) never leaks into the next time the
+        // overlay opens.
         SelectedSeller = null;
         Pin = string.Empty;
         HasError = false;
         ErrorMessage = string.Empty;
         IsPinEntry = false;
+        IsSettingPin = false;
+        IsConfirmingNewPin = false;
+        _pendingNewPin = null;
         IsVisible = true;
     }
 
@@ -106,6 +152,12 @@ public partial class SellerSwitchViewModel : ViewModelBase
         HasError = false;
         ErrorMessage = string.Empty;
         IsPinEntry = true;
+        // A fresh selection is never mid PIN-setup for whichever seller was
+        // selected before — see BeginPinSetup for why this state must not leak
+        // from one selected seller to another.
+        IsSettingPin = false;
+        IsConfirmingNewPin = false;
+        _pendingNewPin = null;
     }
 
     [RelayCommand]
@@ -144,12 +196,21 @@ public partial class SellerSwitchViewModel : ViewModelBase
         Pin = string.Empty;
         HasError = false;
         ErrorMessage = string.Empty;
+        IsSettingPin = false;
+        IsConfirmingNewPin = false;
+        _pendingNewPin = null;
     }
 
     private async Task SubmitAsync()
     {
         if (SelectedSeller == null) return;
         var sellerId = SelectedSeller.Id;
+
+        if (IsSettingPin)
+        {
+            await SubmitPinSetupStepAsync(sellerId);
+            return;
+        }
 
         _isBusy = true;
         try
@@ -159,7 +220,9 @@ public partial class SellerSwitchViewModel : ViewModelBase
                 // ApproveAsync now surfaces the same SwitchResult vocabulary as
                 // SwitchAsync (see ApprovalResult), so both modes share one
                 // result-to-message mapping instead of the approval path
-                // collapsing every failure into a generic "wrong PIN".
+                // collapsing every failure into a generic "wrong PIN". PinNotSet is
+                // NOT routed into PIN setup here — see BeginPinSetup's remarks for
+                // why that flow is scoped to the plain switch below only.
                 var approval = await _session.ApproveAsync(sellerId, Pin);
                 if (approval.Result != SwitchResult.Ok)
                 {
@@ -177,6 +240,14 @@ public partial class SellerSwitchViewModel : ViewModelBase
             var result = await _session.SwitchAsync(sellerId, Pin);
             if (result != SwitchResult.Ok)
             {
+                // Task 19: a seller who has never set a PIN gets to create one on the
+                // spot instead of being stuck on "PIN не задан". See BeginPinSetup.
+                if (result == SwitchResult.PinNotSet)
+                {
+                    BeginPinSetup();
+                    return;
+                }
+
                 Fail(MessageFor(result));
                 return;
             }
@@ -187,6 +258,147 @@ public partial class SellerSwitchViewModel : ViewModelBase
         {
             _isBusy = false;
         }
+    }
+
+    // -----------------------------------------------------------------------------
+    // PIN setup (Task 19): a seller whose pin_hash is empty gets to set their own
+    // PIN on first use instead of requiring an administrator to seed it ahead of
+    // time. Scoped to the plain switch flow only (see the PinNotSet branch in
+    // SubmitAsync above) — never approval mode. An escalation approval keeps the
+    // old "PIN не задан" error instead, for two reasons: (1) the whole point of
+    // this flow is that the seller ends up selected as Current, which approval
+    // never does by design, and (2) the offline degradation below relies on the
+    // register falling back to crediting the shift owner when Current stays
+    // unset — a guarantee that only holds for the switch flow.
+    // -----------------------------------------------------------------------------
+
+    /// <summary>Moves the overlay from "PIN rejected as not set" into the first step
+    /// of PIN creation: same PIN pad, different prompt (<see cref="IsCreatingNewPin"/>).</summary>
+    private void BeginPinSetup()
+    {
+        IsSettingPin = true;
+        IsConfirmingNewPin = false;
+        _pendingNewPin = null;
+        Pin = string.Empty;
+        HasError = false;
+        ErrorMessage = string.Empty;
+    }
+
+    /// <summary>Handles one 4-digit entry while <see cref="IsSettingPin"/> is true —
+    /// either the first entry, the confirming second entry (compared locally, no
+    /// network yet), or — once both agree and pass <see cref="IsTrivialPin"/> —
+    /// the actual <see cref="ISellerRosterService.SetPinAsync"/> round-trip.</summary>
+    private async Task SubmitPinSetupStepAsync(string sellerId)
+    {
+        if (!IsConfirmingNewPin)
+        {
+            // First entry: reject the obviously-trivial patterns the backend also
+            // rejects (see IsTrivialPin) right here, before asking for a second
+            // entry that would only be wasted — an instant, specific message beats
+            // a round-trip whose failure SetPinAsync's bool-only contract can't
+            // even distinguish from "offline" (see the class-level PIN-setup
+            // remarks and this decision's write-up in the task report).
+            if (IsTrivialPin(Pin))
+            {
+                Pin = string.Empty;
+                HasError = true;
+                ErrorMessage = I18nService.Instance["PinTooWeak"];
+                return;
+            }
+
+            _pendingNewPin = Pin;
+            Pin = string.Empty;
+            IsConfirmingNewPin = true;
+            HasError = false;
+            ErrorMessage = string.Empty;
+            return;
+        }
+
+        if (Pin != _pendingNewPin)
+        {
+            // Restart the whole entry, not just the second attempt: a mismatch
+            // means at least one of the two was a typo, and there is no way to
+            // tell which — the first entry is no longer trustworthy either.
+            Pin = string.Empty;
+            _pendingNewPin = null;
+            IsConfirmingNewPin = false;
+            HasError = true;
+            ErrorMessage = I18nService.Instance["PinMismatch"];
+            return;
+        }
+
+        var confirmedPin = Pin;
+        _pendingNewPin = null;
+
+        // The actual network round-trip — the one genuine suspension point in this
+        // whole flow, and exactly what _isBusy exists to cover (see the class-level
+        // remarks): without it, a tap on Back or a fresh Open() while this is
+        // in-flight could hide/reset the overlay, or start a second, overlapping
+        // setup attempt, out from under this still-pending call.
+        _isBusy = true;
+        try
+        {
+            var success = await _rosterService.SetPinAsync(sellerId, confirmedPin);
+            if (!success)
+            {
+                // Offline (or any other SetPinAsync failure — see its own remarks on
+                // why it can't distinguish the two): close without selecting anyone.
+                // The register's existing designed fallback (Pay() omitting SellerId
+                // when Current is null) then credits the shift owner instead.
+                CloseWithoutSelecting(I18nService.Instance["SellerPinSetupOffline"]);
+                return;
+            }
+
+            // SetPinAsync already refreshed SellerRosterService's own cache, but
+            // ISellerSession holds its own separate in-memory roster (see
+            // ISellerSession.LoadRosterAsync) that knows nothing about that yet —
+            // it must be handed the fresh hash explicitly before the PIN just set
+            // can verify against it.
+            await _session.LoadRosterAsync(await _rosterService.GetCachedAsync());
+
+            var result = await _session.SwitchAsync(sellerId, confirmedPin);
+            if (result != SwitchResult.Ok)
+            {
+                // Should not happen: the server just accepted this exact PIN and the
+                // roster was reloaded with its hash. If it somehow still doesn't
+                // verify (e.g. the seller vanished from the roster in that instant),
+                // there is nothing productive to retry — degrade the same way the
+                // offline branch above does rather than leaving the overlay stuck in
+                // a half-finished PIN-setup state.
+                Debug.Assert(false,
+                    $"{nameof(SubmitPinSetupStepAsync)}: SwitchAsync unexpectedly returned {result} immediately after SetPinAsync succeeded.");
+                CloseWithoutSelecting(MessageFor(result));
+                return;
+            }
+
+            Succeed();
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    /// <summary>The backend rejects PINs that are all one digit (e.g. "1111") or a
+    /// run of four consecutive ascending/descending digits (e.g. "1234", "4321").
+    /// The UI only ever collects exactly <see cref="PinLength"/> digits, so the
+    /// backend's separate 4-6 length rule can never be violated here and isn't
+    /// checked.</summary>
+    private static bool IsTrivialPin(string pin)
+    {
+        if (pin.Length != PinLength) return false; // defensive; UI never allows this
+
+        var allSame = true;
+        var ascending = true;
+        var descending = true;
+        for (var i = 1; i < pin.Length; i++)
+        {
+            if (pin[i] != pin[0]) allSame = false;
+            if (pin[i] - pin[i - 1] != 1) ascending = false;
+            if (pin[i - 1] - pin[i] != 1) descending = false;
+        }
+
+        return allSame || ascending || descending;
     }
 
     /// <summary>Maps a failure <see cref="SwitchResult"/> (never <see cref="SwitchResult.Ok"/>,
@@ -228,6 +440,9 @@ public partial class SellerSwitchViewModel : ViewModelBase
     {
         IsVisible = false;
         IsPinEntry = false;
+        IsSettingPin = false;
+        IsConfirmingNewPin = false;
+        _pendingNewPin = null;
         SelectedSeller = null;
         Pin = string.Empty;
         HasError = false;
@@ -236,6 +451,25 @@ public partial class SellerSwitchViewModel : ViewModelBase
 
     private void Fail(string message)
     {
+        Pin = string.Empty;
+        HasError = true;
+        ErrorMessage = message;
+    }
+
+    /// <summary>Closes the overlay entirely without selecting anyone — the PIN-setup
+    /// flow's own failure exit (offline, or the near-impossible post-success mismatch;
+    /// see SubmitPinSetupStepAsync). Deliberately not the same as <see cref="Fail"/>,
+    /// which keeps the overlay open for a retry: there is nothing to retry here
+    /// (SetPinAsync already ran), so leaving the PIN pad up would just invite another
+    /// attempt against a request that already happened.</summary>
+    private void CloseWithoutSelecting(string message)
+    {
+        IsVisible = false;
+        IsPinEntry = false;
+        IsSettingPin = false;
+        IsConfirmingNewPin = false;
+        _pendingNewPin = null;
+        SelectedSeller = null;
         Pin = string.Empty;
         HasError = true;
         ErrorMessage = message;

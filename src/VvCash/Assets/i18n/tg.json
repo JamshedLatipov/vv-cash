@@ -179,5 +179,10 @@
   "SellerNotOnRoster": "Фурӯшанда дар рӯйхат ёфт нашуд — рӯйхатро нав кунед",
   "ConfirmWithPin": "Бо PIN тасдиқ кунед",
   "CurrentSeller": "Фурӯшанда",
-  "SellerVerificationFailed": "PIN-ро тафтиш кардан имконнопазир аст. Бори дигар кӯшиш кунед"
+  "SellerVerificationFailed": "PIN-ро тафтиш кардан имконнопазир аст. Бори дигар кӯшиш кунед",
+  "CreatePin": "PIN-и худро муайян кунед",
+  "RepeatPin": "PIN-ро такрор кунед",
+  "PinMismatch": "PIN мувофиқат накард",
+  "SellerPinSetupOffline": "Пайваст нест — PIN-ро баъдтар танзим кунед",
+  "PinTooWeak": "PIN хеле содда аст — дигарашро санҷед"
 }

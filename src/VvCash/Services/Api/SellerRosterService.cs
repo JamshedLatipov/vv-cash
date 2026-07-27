@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using VvCash.Models;
@@ -194,6 +195,67 @@ public class SellerRosterService : ISellerRosterService
         {
             Debug.WriteLine($"[SellerRosterService] Error refreshing seller roster: {ex.Message}");
             return await SafeGetCachedAsync();
+        }
+    }
+
+    /// <summary>Sets a PIN for a seller whose <c>pin_hash</c> is empty (see
+    /// <see cref="SellerInfo.HasPin"/>) — Task 19's first-time PIN setup. This runs
+    /// under the *current* caller's own auth token (the shift owner's), not the
+    /// target seller's own credentials: the shift owner is setting a PIN on someone
+    /// else's behalf, which is exactly why it POSTs to the admin PIN-reset endpoint
+    /// (requires the <c>users.pin_reset</c> permission the shift owner's token
+    /// carries) instead of a self-service one. On success, refreshes the roster so
+    /// the freshly cached hash is available to whatever verifies the PIN next (a
+    /// SwitchAsync/ApproveAsync call the caller typically makes right after). Never
+    /// throws — same discipline as <see cref="RefreshAsync"/> — any failure
+    /// (blank BackendUrl, network error, non-2xx, malformed/unexpected envelope) is
+    /// reported as false so the caller can degrade gracefully (see
+    /// SellerSwitchViewModel's offline fallback) instead of crashing mid-setup.</summary>
+    public async Task<bool> SetPinAsync(string sellerId, string pin)
+    {
+        try
+        {
+            var baseUrl = _settingsService.BackendUrl;
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                Debug.WriteLine("[SellerRosterService] SetPinAsync: BackendUrl is not configured.");
+                return false;
+            }
+
+            if (!baseUrl.EndsWith("/"))
+                baseUrl += "/";
+
+            var url = $"{baseUrl}users/pin/reset/";
+            Debug.WriteLine($"[SellerRosterService] POST {url} for seller {sellerId}");
+            var response = await _httpClient.PostAsJsonAsync(url, new { user = sellerId, pin });
+            Debug.WriteLine($"[SellerRosterService] SetPinAsync response status: {response.StatusCode}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Debug.WriteLine("[SellerRosterService] SetPinAsync: non-success status; not refreshing roster.");
+                return false;
+            }
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            using var jsonDoc = JsonDocument.Parse(responseContent);
+            var root = jsonDoc.RootElement;
+
+            if (!root.TryGetProperty("status", out var statusElement) || statusElement.GetInt32() != 0)
+            {
+                Debug.WriteLine("[SellerRosterService] SetPinAsync: envelope status is not 0; not refreshing roster.");
+                return false;
+            }
+
+            // The server accepted the new PIN; make sure the roster this instance
+            // (and, through GetCachedAsync, the caller) hands out next actually
+            // carries its hash rather than the stale empty one.
+            await RefreshAsync();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[SellerRosterService] Error setting seller PIN: {ex.Message}");
+            return false;
         }
     }
 

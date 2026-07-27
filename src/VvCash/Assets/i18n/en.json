@@ -179,5 +179,10 @@
   "SellerNotOnRoster": "Seller not found on the list — refresh the list",
   "ConfirmWithPin": "Confirm with PIN",
   "CurrentSeller": "Seller",
-  "SellerVerificationFailed": "Could not verify PIN. Try again"
+  "SellerVerificationFailed": "Could not verify PIN. Try again",
+  "CreatePin": "Create a PIN",
+  "RepeatPin": "Repeat the PIN",
+  "PinMismatch": "PINs did not match",
+  "SellerPinSetupOffline": "No connection — set the PIN later",
+  "PinTooWeak": "PIN is too simple — try another"
 }

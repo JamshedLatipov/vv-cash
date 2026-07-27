@@ -158,5 +158,10 @@
   "SellerNotOnRoster": "Продавец не найден в списке — обновите список",
   "ConfirmWithPin": "Подтвердите PIN",
   "CurrentSeller": "Продавец",
-  "SellerVerificationFailed": "Не удалось проверить PIN. Попробуйте снова"
+  "SellerVerificationFailed": "Не удалось проверить PIN. Попробуйте снова",
+  "CreatePin": "Придумайте PIN",
+  "RepeatPin": "Повторите PIN",
+  "PinMismatch": "PIN не совпал",
+  "SellerPinSetupOffline": "Нет связи — задайте PIN позже",
+  "PinTooWeak": "Слишком простой PIN — попробуйте другой"
 }

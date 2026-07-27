@@ -112,7 +112,17 @@
                             <TextBlock Text="{Binding SelectedSeller.FullName}" FontSize="22" FontWeight="Black"
                                        Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center"/>
                             <TextBlock Text="{Binding [EnterPin], Source={x:Static services:I18nService.Instance}}"
-                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"/>
+                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"
+                                       IsVisible="{Binding !IsSettingPin}"/>
+                            <!-- Task 19: a seller with no PIN yet gets prompted to create one,
+                                 then to repeat it, on this same pad instead of EnterPin's
+                                 normal "verify" prompt. -->
+                            <TextBlock Text="{Binding [CreatePin], Source={x:Static services:I18nService.Instance}}"
+                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"
+                                       IsVisible="{Binding IsCreatingNewPin}"/>
+                            <TextBlock Text="{Binding [RepeatPin], Source={x:Static services:I18nService.Instance}}"
+                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"
+                                       IsVisible="{Binding IsRepeatingNewPin}"/>
                         </StackPanel>
                         <!-- balances the back button's width so the header text is
                              actually centred, not just centred-within-the-remainder -->

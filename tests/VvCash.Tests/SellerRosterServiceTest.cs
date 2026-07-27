@@ -448,4 +448,124 @@ public class SellerRosterServiceTest
 
         Assert.Equal(2, result.Count);
     }
+
+    // ---------------------------------------------------------------------------------
+    // SetPinAsync (Task 19): first-time PIN setup for a seller whose pin_hash is
+    // empty. Runs under the caller's own token (the shift owner's) against the admin
+    // PIN-reset endpoint, and — same never-throw discipline as RefreshAsync — must
+    // report every failure as false rather than propagate an exception.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SetPinAsync_Success_PostsToResetEndpointAndRefreshesRoster()
+    {
+        var storage = new FakeStorage();
+        HttpRequestMessage? pinResetRequest = null;
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var path = req.RequestUri!.ToString();
+            if (path.Contains("users/pin/reset/"))
+            {
+                pinResetRequest = req;
+                return (HttpStatusCode.OK, """{"status":0,"body":null}""");
+            }
+            if (path.Contains("cashes/seller/"))
+                return (HttpStatusCode.OK, SuccessBody);
+            throw new InvalidOperationException($"unexpected request to {path}");
+        });
+        var svc = Build(handler, storage);
+
+        var result = await svc.SetPinAsync("u-9", "4821");
+
+        Assert.True(result);
+
+        Assert.NotNull(pinResetRequest);
+        Assert.Equal(HttpMethod.Post, pinResetRequest!.Method);
+        Assert.Contains("users/pin/reset/", pinResetRequest.RequestUri!.ToString());
+        Assert.Contains("\"user\":\"u-9\"", handler.LastRequestBody);
+        Assert.Contains("\"pin\":\"4821\"", handler.LastRequestBody);
+
+        // Roster was refreshed and re-cached as a consequence of the successful reset.
+        Assert.Equal(2, storage.Sellers.Count);
+    }
+
+    [Fact]
+    public async Task SetPinAsync_NonSuccessStatusCode_ReturnsFalseWithoutRefreshingRoster()
+    {
+        var storage = new FakeStorage();
+        var rosterCallCount = 0;
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var path = req.RequestUri!.ToString();
+            if (path.Contains("users/pin/reset/"))
+                return (HttpStatusCode.BadRequest, """{"status":1,"message":"weak pin"}""");
+            rosterCallCount++;
+            return (HttpStatusCode.OK, SuccessBody);
+        });
+        var svc = Build(handler, storage);
+
+        var result = await svc.SetPinAsync("u-9", "1111");
+
+        Assert.False(result);
+        Assert.Equal(0, rosterCallCount);
+        Assert.Empty(storage.Sellers);
+    }
+
+    [Fact]
+    public async Task SetPinAsync_EnvelopeStatusNonZero_ReturnsFalseWithoutRefreshingRoster()
+    {
+        var storage = new FakeStorage();
+        var rosterCallCount = 0;
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var path = req.RequestUri!.ToString();
+            if (path.Contains("users/pin/reset/"))
+                return (HttpStatusCode.OK, """{"status":1,"message":"weak pin"}""");
+            rosterCallCount++;
+            return (HttpStatusCode.OK, SuccessBody);
+        });
+        var svc = Build(handler, storage);
+
+        var result = await svc.SetPinAsync("u-9", "1111");
+
+        Assert.False(result);
+        Assert.Equal(0, rosterCallCount);
+    }
+
+    [Fact]
+    public async Task SetPinAsync_NetworkFailure_ReturnsFalseWithoutThrowing()
+    {
+        var storage = new FakeStorage();
+        var handler = new StubHttpMessageHandler(req => throw new HttpRequestException("network down"));
+        var svc = Build(handler, storage);
+
+        var result = await svc.SetPinAsync("u-9", "4821");
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task SetPinAsync_BlankBackendUrl_ReturnsFalseWithoutNetworkCall()
+    {
+        var storage = new FakeStorage();
+        var handler = new StubHttpMessageHandler(req => throw new InvalidOperationException("should not be called"));
+        var settings = new FakeSettings { BackendUrl = "" };
+        var svc = new SellerRosterService(new HttpClient(handler), settings, storage);
+
+        var result = await svc.SetPinAsync("u-9", "4821");
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task SetPinAsync_MalformedJsonResponse_ReturnsFalseWithoutThrowing()
+    {
+        var storage = new FakeStorage();
+        var handler = new StubHttpMessageHandler(req => (HttpStatusCode.OK, "not json at all"));
+        var svc = Build(handler, storage);
+
+        var result = await svc.SetPinAsync("u-9", "4821");
+
+        Assert.False(result);
+    }
 }
