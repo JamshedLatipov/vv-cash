@@ -1,0 +1,125 @@
+<UserControl x:Name="RootWindow" xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
+        xmlns:vm="using:VvCash.ViewModels"
+        xmlns:models="using:VvCash.Models"
+        xmlns:material="using:Material.Icons.Avalonia"
+        xmlns:converters="using:VvCash.Converters"
+        x:Class="VvCash.Views.SellerSwitchView"
+        IsVisible="{Binding IsVisible}">
+
+    <UserControl.Resources>
+        <converters:PinMaskConverter x:Key="PinMaskConverter"/>
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <!-- large tap tile in the seller grid -->
+        <Style Selector="Button.SellerTile">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="CornerRadius" Value="18"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Width" Value="172"/>
+            <Setter Property="Height" Value="172"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.SellerTile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+        </Style>
+        <Style Selector="Button.SellerTile:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+        </Style>
+        <Style Selector="Button.SellerTile:pressed /template/ ContentPresenter TextBlock">
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+    </UserControl.Styles>
+
+    <!-- Full-bleed scrim; the caller places this control over the POS screen. -->
+    <Border Background="#B30F172A" ZIndex="3000">
+        <Border Background="White" CornerRadius="24" Padding="36"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                MinWidth="560" MaxWidth="760" BoxShadow="0 20 48 0 #40000000">
+
+            <Grid>
+                <!-- ======================= State 1: tile grid ======================= -->
+                <StackPanel Spacing="28" IsVisible="{Binding !IsPinEntry}">
+                    <TextBlock Text="{Binding [SelectSeller], Source={x:Static services:I18nService.Instance}}"
+                               FontSize="26" FontWeight="Black" Foreground="{StaticResource Slate900Brush}"
+                               HorizontalAlignment="Center"/>
+
+                    <ItemsControl ItemsSource="{Binding Sellers}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel HorizontalAlignment="Center"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:SellerInfo">
+                                <Button Classes="SellerTile" Margin="10"
+                                        Command="{Binding DataContext.SelectSellerCommand, ElementName=RootWindow}"
+                                        CommandParameter="{Binding}">
+                                    <StackPanel Spacing="12" HorizontalAlignment="Center">
+                                        <Border Width="56" Height="56" CornerRadius="99" Background="{StaticResource PrimaryLightBrush}" HorizontalAlignment="Center">
+                                            <material:MaterialIcon Kind="AccountCircle" Width="32" Height="32"
+                                                Foreground="{StaticResource PrimaryBrush}"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding FullName}" FontSize="17" FontWeight="Bold"
+                                                   Foreground="{StaticResource Slate900Brush}"
+                                                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="136"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- ======================= State 2: PIN pad ======================= -->
+                <StackPanel Spacing="20" Width="360" IsVisible="{Binding IsPinEntry}">
+                    <StackPanel Spacing="4" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding SelectedSeller.FullName}" FontSize="22" FontWeight="Black"
+                                   Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding [EnterPin], Source={x:Static services:I18nService.Instance}}"
+                                   FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding ErrorMessage}" IsVisible="{Binding HasError}"
+                               Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="SemiBold"
+                               TextAlignment="Center" TextWrapping="Wrap" HorizontalAlignment="Center"/>
+
+                    <!-- masked PIN display -->
+                    <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}"
+                            BorderThickness="1" CornerRadius="14" Padding="16,14" MinHeight="64">
+                        <TextBlock Text="{Binding Pin, Converter={StaticResource PinMaskConverter}}"
+                                   FontSize="30" FontWeight="Black" LetterSpacing="10"
+                                   Foreground="{StaticResource Slate900Brush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- 3x4 keypad -->
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*,*">
+                        <Button Grid.Row="0" Grid.Column="0" Classes="NumpadButton" Content="1" Command="{Binding AppendDigitCommand}" CommandParameter="1"/>
+                        <Button Grid.Row="0" Grid.Column="1" Classes="NumpadButton" Content="2" Command="{Binding AppendDigitCommand}" CommandParameter="2"/>
+                        <Button Grid.Row="0" Grid.Column="2" Classes="NumpadButton" Content="3" Command="{Binding AppendDigitCommand}" CommandParameter="3"/>
+                        <Button Grid.Row="1" Grid.Column="0" Classes="NumpadButton" Content="4" Command="{Binding AppendDigitCommand}" CommandParameter="4"/>
+                        <Button Grid.Row="1" Grid.Column="1" Classes="NumpadButton" Content="5" Command="{Binding AppendDigitCommand}" CommandParameter="5"/>
+                        <Button Grid.Row="1" Grid.Column="2" Classes="NumpadButton" Content="6" Command="{Binding AppendDigitCommand}" CommandParameter="6"/>
+                        <Button Grid.Row="2" Grid.Column="0" Classes="NumpadButton" Content="7" Command="{Binding AppendDigitCommand}" CommandParameter="7"/>
+                        <Button Grid.Row="2" Grid.Column="1" Classes="NumpadButton" Content="8" Command="{Binding AppendDigitCommand}" CommandParameter="8"/>
+                        <Button Grid.Row="2" Grid.Column="2" Classes="NumpadButton" Content="9" Command="{Binding AppendDigitCommand}" CommandParameter="9"/>
+                        <Button Grid.Row="3" Grid.Column="0" Classes="NumpadActionButton" Command="{Binding BackCommand}">
+                            <material:MaterialIcon Kind="ArrowLeft" Width="26" Height="26"/>
+                        </Button>
+                        <Button Grid.Row="3" Grid.Column="1" Classes="NumpadButton" Content="0" Command="{Binding AppendDigitCommand}" CommandParameter="0"/>
+                        <Button Grid.Row="3" Grid.Column="2" Classes="NumpadActionButton" Command="{Binding BackspaceCommand}">
+                            <material:MaterialIcon Kind="BackspaceOutline" Width="26" Height="26"/>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Border>
+</UserControl>
