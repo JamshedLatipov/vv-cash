@@ -169,5 +169,14 @@
   "WelcomeSignIn": "Xush kelibsiz! Smenani ochish va savdoni boshlash uchun tizimga kiring.",
   "FeatureTwoTaps": "Ikki bosishda savdo",
   "FeatureScan": "Tezkor qidiruv va shtrix-kod skaneri",
-  "FeatureOffline": "Oflayn ishlaydi, keyin sinxronlanadi"
+  "FeatureOffline": "Oflayn ishlaydi, keyin sinxronlanadi",
+  "SelectSeller": "Kim sotmoqda?",
+  "EnterPin": "PIN kiriting",
+  "SellerPinWrong": "PIN xato",
+  "SellerLocked": "Bir daqiqaga bloklandi",
+  "SellerPinNotSet": "PIN o'rnatilmagan",
+  "SellerHashCorrupt": "Sotuvchi ma'lumotlari buzilgan — ro'yxatni yangilang",
+  "SellerNotOnRoster": "Sotuvchi ro'yxatda topilmadi — ro'yxatni yangilang",
+  "ConfirmWithPin": "PIN bilan tasdiqlang",
+  "CurrentSeller": "Sotuvchi"
 }

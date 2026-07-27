@@ -169,5 +169,14 @@
   "WelcomeSignIn": "Хуш омадед! Барои кушодани баст ва оғози фурӯш ворид шавед.",
   "FeatureTwoTaps": "Фурӯш бо ду ламс",
   "FeatureScan": "Ҷустуҷӯи фаврӣ ва скани штрих-код",
-  "FeatureOffline": "Офлайн кор мекунад, баъдан ҳамоҳанг мешавад"
+  "FeatureOffline": "Офлайн кор мекунад, баъдан ҳамоҳанг мешавад",
+  "SelectSeller": "Кӣ мефурӯшад?",
+  "EnterPin": "PIN-ро ворид кунед",
+  "SellerPinWrong": "PIN нодуруст",
+  "SellerLocked": "Барои як дақиқа баста шуд",
+  "SellerPinNotSet": "PIN танзим нашудааст",
+  "SellerHashCorrupt": "Маълумоти фурӯшанда вайрон шудааст — рӯйхатро нав кунед",
+  "SellerNotOnRoster": "Фурӯшанда дар рӯйхат ёфт нашуд — рӯйхатро нав кунед",
+  "ConfirmWithPin": "Бо PIN тасдиқ кунед",
+  "CurrentSeller": "Фурӯшанда"
 }

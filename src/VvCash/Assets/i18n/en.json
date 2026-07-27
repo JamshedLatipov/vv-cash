@@ -169,5 +169,14 @@
   "WelcomeSignIn": "Welcome back! Sign in to open your shift and start selling.",
   "FeatureTwoTaps": "Ring up a sale in two taps",
   "FeatureScan": "Instant search & barcode scan",
-  "FeatureOffline": "Works offline, syncs later"
+  "FeatureOffline": "Works offline, syncs later",
+  "SelectSeller": "Who is selling?",
+  "EnterPin": "Enter PIN",
+  "SellerPinWrong": "Wrong PIN",
+  "SellerLocked": "Locked for a minute",
+  "SellerPinNotSet": "PIN is not set",
+  "SellerHashCorrupt": "Seller data is corrupt — refresh the list",
+  "SellerNotOnRoster": "Seller not found on the list — refresh the list",
+  "ConfirmWithPin": "Confirm with PIN",
+  "CurrentSeller": "Seller"
 }
