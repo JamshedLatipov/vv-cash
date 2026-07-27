@@ -178,5 +178,6 @@
   "SellerHashCorrupt": "Seller data is corrupt — refresh the list",
   "SellerNotOnRoster": "Seller not found on the list — refresh the list",
   "ConfirmWithPin": "Confirm with PIN",
-  "CurrentSeller": "Seller"
+  "CurrentSeller": "Seller",
+  "SellerVerificationFailed": "Could not verify PIN. Try again"
 }

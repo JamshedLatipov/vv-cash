@@ -178,5 +178,6 @@
   "SellerHashCorrupt": "Sotuvchi ma'lumotlari buzilgan — ro'yxatni yangilang",
   "SellerNotOnRoster": "Sotuvchi ro'yxatda topilmadi — ro'yxatni yangilang",
   "ConfirmWithPin": "PIN bilan tasdiqlang",
-  "CurrentSeller": "Sotuvchi"
+  "CurrentSeller": "Sotuvchi",
+  "SellerVerificationFailed": "PIN-ni tekshirib bo'lmadi. Qayta urinib ko'ring"
 }

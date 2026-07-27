@@ -178,5 +178,6 @@
   "SellerHashCorrupt": "Маълумоти фурӯшанда вайрон шудааст — рӯйхатро нав кунед",
   "SellerNotOnRoster": "Фурӯшанда дар рӯйхат ёфт нашуд — рӯйхатро нав кунед",
   "ConfirmWithPin": "Бо PIN тасдиқ кунед",
-  "CurrentSeller": "Фурӯшанда"
+  "CurrentSeller": "Фурӯшанда",
+  "SellerVerificationFailed": "PIN-ро тафтиш кардан имконнопазир аст. Бори дигар кӯшиш кунед"
 }

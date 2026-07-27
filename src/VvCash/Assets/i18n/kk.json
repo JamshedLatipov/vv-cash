@@ -178,5 +178,6 @@
   "SellerHashCorrupt": "Сатушы деректері бүлінген — тізімді жаңартыңыз",
   "SellerNotOnRoster": "Сатушы тізімде табылмады — тізімді жаңартыңыз",
   "ConfirmWithPin": "PIN арқылы растаңыз",
-  "CurrentSeller": "Сатушы"
+  "CurrentSeller": "Сатушы",
+  "SellerVerificationFailed": "PIN-ді тексеру мүмкін болмады. Қайта көріңіз"
 }

@@ -157,5 +157,6 @@
   "SellerHashCorrupt": "Данные продавца повреждены — обновите список",
   "SellerNotOnRoster": "Продавец не найден в списке — обновите список",
   "ConfirmWithPin": "Подтвердите PIN",
-  "CurrentSeller": "Продавец"
+  "CurrentSeller": "Продавец",
+  "SellerVerificationFailed": "Не удалось проверить PIN. Попробуйте снова"
 }

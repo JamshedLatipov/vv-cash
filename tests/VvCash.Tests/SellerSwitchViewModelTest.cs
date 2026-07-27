@@ -215,20 +215,18 @@ public class SellerSwitchViewModelTest
     }
 
     [Fact]
-    public async Task AppendDigit_RapidRepeatOnFourthDigit_DoesNotDoubleSubmit()
+    public async Task AppendDigit_CalledAgainAfterPinIsFull_IsIgnoredByLengthGuard()
     {
-        // SellerSession's own Task-returning members are backed by
-        // Task.FromResult/Task.CompletedTask (see its class remarks) — no
-        // real suspension point — so an `await` on them completes
-        // synchronously within the current call. That means a command
-        // invocation started on the UI thread runs the whole
-        // AppendDigit -> SubmitAsync -> SwitchAsync chain to completion
-        // before control returns to the caller, and by the time a second,
-        // near-simultaneous tap is dispatched, Pin has already reached
-        // PinLength, so AppendDigitAsync's own `Pin.Length >= PinLength`
-        // guard rejects it. This test simulates the worst case — starting
-        // both calls before awaiting either — to confirm no double switch
-        // happens.
+        // NOT a concurrency test: SellerSession's own Task-returning members are
+        // backed by Task.FromResult/Task.CompletedTask (see its class remarks) —
+        // no real suspension point — so both ExecuteAsync calls below run to
+        // completion sequentially, one fully finishing before the next starts.
+        // What this actually proves is that AppendDigitAsync's own
+        // `Pin.Length >= PinLength` guard rejects a call that lands once the PIN
+        // is already full (e.g. a stray extra tap after auto-submit already
+        // fired) — not that it survives a genuine race. See
+        // WhileSubmitIsPending_OtherEntryPointsAreIgnored below for the version
+        // that exercises a real suspension point via a controllable fake session.
         var session = await SessionWithRoster();
         var raised = 0;
         session.CurrentChanged += (_, _) => raised++;
@@ -246,5 +244,88 @@ public class SellerSwitchViewModelTest
 
         Assert.Equal(1, raised);
         Assert.Equal("u-1", session.Current?.Id);
+    }
+
+    [Fact]
+    public async Task WhileSubmitIsPending_OtherEntryPointsAreIgnored()
+    {
+        // Exercises the _isBusy guard for real: unlike SellerSession, SlowSession
+        // below does not complete SwitchAsync synchronously, so awaiting it is a
+        // genuine suspension point — the same kind a future roster refresh or
+        // server round-trip inside SellerSession would introduce (see Task 19).
+        // While that await is pending, SelectSeller/Back/Open must all be no-ops;
+        // without _isBusy each would mutate state out from under the still-
+        // pending SubmitAsync continuation.
+        var roster = new List<SellerInfo>
+        {
+            new() { Id = "u-1", FirstName = "Азиз", CanSell = true },
+            new() { Id = "u-2", FirstName = "Дилноза", CanSell = true }
+        };
+        var session = new SlowSession(roster);
+        var vm = new SellerSwitchViewModel(session);
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+
+        await vm.AppendDigitCommand.ExecuteAsync("1");
+        await vm.AppendDigitCommand.ExecuteAsync("2");
+        await vm.AppendDigitCommand.ExecuteAsync("3");
+        // The fourth digit starts SubmitAsync, which suspends on SlowSession's
+        // controllable task — the overlay is now genuinely "mid-submit"
+        // (_isBusy == true).
+        var submitting = vm.AppendDigitCommand.ExecuteAsync("4");
+
+        vm.SelectSellerCommand.Execute(vm.Sellers[1]);
+        Assert.Equal("u-1", vm.SelectedSeller?.Id);
+
+        vm.BackCommand.Execute(null);
+        Assert.True(vm.IsPinEntry);
+
+        vm.Open();
+        Assert.Equal("u-1", vm.SelectedSeller?.Id);
+        Assert.True(vm.IsPinEntry);
+
+        session.CompleteSwitch(SwitchResult.Ok, vm.Sellers[0]);
+        await submitting;
+
+        Assert.False(vm.IsVisible);
+    }
+
+    /// <summary>Minimal ISellerSession fake whose SwitchAsync returns a task held
+    /// open by a TaskCompletionSource, so a test can pause mid-submit — something
+    /// SellerSession itself can't do today, since its async members always
+    /// complete synchronously (see its class remarks). ApproveAsync isn't
+    /// exercised by the busy-gate test above and just fails.</summary>
+    private sealed class SlowSession : ISellerSession
+    {
+        private readonly TaskCompletionSource<SwitchResult> _pendingSwitch = new();
+
+        public SlowSession(IReadOnlyList<SellerInfo> roster) => Roster = roster;
+
+        public SellerInfo? Current { get; private set; }
+        public bool IsStale => false;
+        public IReadOnlyList<SellerInfo> Roster { get; }
+        public event EventHandler? CurrentChanged;
+
+        public Task LoadRosterAsync(IEnumerable<SellerInfo> sellers) => Task.CompletedTask;
+
+        public Task<SwitchResult> SwitchAsync(string sellerId, string pin) => _pendingSwitch.Task;
+
+        public Task<ApprovalResult> ApproveAsync(string sellerId, string pin)
+            => Task.FromResult(ApprovalResult.Failure(SwitchResult.WrongPin));
+
+        public void Touch() { }
+
+        public void Clear() { }
+
+        public void CompleteSwitch(SwitchResult result, SellerInfo? seller = null)
+        {
+            if (result == SwitchResult.Ok && seller != null)
+            {
+                Current = seller;
+                CurrentChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            _pendingSwitch.SetResult(result);
+        }
     }
 }
