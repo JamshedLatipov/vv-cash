@@ -189,14 +189,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay —
     /// either because the register requires a fresh seller confirmation at the start of a
     /// receipt (see <see cref="AddToCart"/>) or because the cashier tapped the seller chip
-    /// (see <see cref="OpenSellerSwitch"/>). Same shape as <see cref="NavigationRequest"/>:
-    /// PosViewModel raises intent, the host wires it to the actual overlay.</summary>
+    /// (see <see cref="OpenSellerSwitch"/>). Plays the same decoupling role as
+    /// <see cref="NavigationRequest"/> and <see cref="CustomerDisplayViewModel"/> —
+    /// PosViewModel raises intent without knowing how it's fulfilled — but unlike those two
+    /// settable delegate/property members, this is a genuine event: the host subscribes to
+    /// it rather than being handed a callback to invoke.</summary>
     public event EventHandler? SellerSwitchRequested;
 
-    /// <summary>Current seller's name for the header chip, or a "no seller" placeholder
-    /// when none is selected. Recomputed whenever <see cref="ISellerSession.CurrentChanged"/>
-    /// fires (see <see cref="OnSellerChanged"/>).</summary>
-    public string SellerChipText => _sellerSession.Current?.FullName ?? I18nService.Instance["CurrentSeller"];
+    /// <summary>Current seller's name for the header chip, or — when none is selected — the
+    /// same action-shaped invitation ("Who is selling?") already used by this button's
+    /// tooltip and by the overlay's own heading, so an empty chip reads as something to
+    /// press rather than as a caption. Recomputed whenever
+    /// <see cref="ISellerSession.CurrentChanged"/> fires (see <see cref="OnSellerChanged"/>).</summary>
+    public string SellerChipText => _sellerSession.Current?.FullName ?? I18nService.Instance["SelectSeller"];
 
     private void OnSellerChanged(object? sender, EventArgs e)
         => OnPropertyChanged(nameof(SellerChipText));

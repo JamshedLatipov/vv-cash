@@ -44,7 +44,23 @@ public class PosViewModelSellerGateTest
     private class FakeSellerSession : ISellerSession
     {
         public SellerInfo? Current { get; private set; }
-        public bool IsStale { get; set; }
+
+        /// <summary>Mirrors the elapsed-idle-timeout half of the real
+        /// SellerSession.IsStale rule (i.e. "the clock says re-confirm"). This fake has no
+        /// real clock, so tests set it directly instead of waiting out a timeout. Touch()
+        /// clears it, matching Touch() resetting _lastActivity in the real implementation —
+        /// but, like production, that alone can never make IsStale false while no seller is
+        /// selected; see IsStale below.</summary>
+        public bool TimedOut { get; set; }
+
+        // Mirrors ISellerSession.IsStale's actual rule (SellerSession.cs: "Current == null
+        // || _clock() - _lastActivity > _idleTimeout") instead of being an independent
+        // settable flag. That distinction matters: Touch() alone can never clear staleness
+        // while nobody is selected — only a successful switch (SetCurrent below) can. A
+        // fake that let a test claim "not stale" with Current == null would assert a state
+        // production can never reach.
+        public bool IsStale => Current == null || TimedOut;
+
         public IReadOnlyList<SellerInfo> Roster { get; private set; } = Array.Empty<SellerInfo>();
         public event EventHandler? CurrentChanged;
         public int TouchCount { get; private set; }
@@ -63,7 +79,7 @@ public class PosViewModelSellerGateTest
         public void Touch()
         {
             TouchCount++;
-            IsStale = false;
+            TimedOut = false;
         }
 
         public void Clear()
@@ -339,7 +355,7 @@ public class PosViewModelSellerGateTest
     public void AddToCart_EmptyCartAndStaleSession_RaisesSellerSwitchRequested()
     {
         using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.IsStale = true;
+        deps.SellerSession.TimedOut = true; // also implied by Current == null, set explicitly for intent
         var raisedCount = 0;
         vm.SellerSwitchRequested += (s, e) => raisedCount++;
 
@@ -351,8 +367,12 @@ public class PosViewModelSellerGateTest
     [Fact]
     public void AddToCart_EmptyCartButSessionNotStale_DoesNotRaise()
     {
+        // IsStale is false only once a seller has actually been confirmed (Current != null)
+        // and the idle clock hasn't elapsed — the real SellerSession can never be "not
+        // stale" with nobody selected, so the fake must be put in that same state, not just
+        // told to report false.
         using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.IsStale = false;
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "s0", FirstName = "Prior", LastName = "Seller" });
         var raisedCount = 0;
         vm.SellerSwitchRequested += (s, e) => raisedCount++;
 
@@ -362,21 +382,23 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void AddToCart_SecondItemMidReceipt_NeverInterruptsEvenIfSessionGoesStaleAgain()
+    public void AddToCart_SecondItemMidReceipt_NeverInterruptsEvenWhileSessionRemainsStale()
     {
-        // Three items rung up by the same person must ask once, not once per item — and
-        // must never interrupt an in-progress receipt even if the idle clock (simulated
-        // here directly, since FakeSellerSession's IsStale is test-controlled rather than
-        // clock-driven) claims staleness again mid-sale.
+        // Three items rung up by the same person must ask once, not once per item. Nobody
+        // ever completes the overlay in this test (Current stays null throughout), so per
+        // the real SellerSession.IsStale rule the session is stale for the whole test —
+        // Touch() alone can never clear that. This is exactly the scenario that proves the
+        // mid-receipt guard is doing real work: the gate must still not fire a second time,
+        // because it is gated on the cart being empty, not on staleness.
         using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.IsStale = true;
+        deps.SellerSession.TimedOut = true;
         var raisedCount = 0;
         vm.SellerSwitchRequested += (s, e) => raisedCount++;
 
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m)); // cart was empty -> gate fires, Touch() clears IsStale
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m)); // cart was empty -> gate fires
         Assert.Equal(1, raisedCount);
+        Assert.True(deps.SellerSession.IsStale); // Touch() cannot clear this while Current is still null
 
-        deps.SellerSession.IsStale = true; // force staleness back on, as if the clock elapsed mid-receipt
         vm.AddToCartCommand.Execute(MakeProduct("p2", 5m)); // cart is non-empty -> gate must not fire again
 
         Assert.Equal(1, raisedCount);
@@ -386,7 +408,6 @@ public class PosViewModelSellerGateTest
     public void AddToCart_AlwaysTouchesSessionOnGenuineActivity()
     {
         using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.IsStale = false;
 
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
         vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
@@ -398,10 +419,13 @@ public class PosViewModelSellerGateTest
     public void OpenSellerSwitch_AlwaysRaisesRegardlessOfCartOrStaleness()
     {
         // Tapping the header chip is an explicit request, not the implicit start-of-receipt
-        // gate, so it must open the overlay even mid-receipt / while not stale.
+        // gate, so it must open the overlay even mid-receipt / while not stale. "Not stale"
+        // requires an actually-confirmed seller (see AddToCart_EmptyCartButSessionNotStale_
+        // DoesNotRaise above), so simulate that first rather than just claiming it.
         using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.IsStale = false;
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "s0", FirstName = "Prior", LastName = "Seller" });
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        Assert.False(deps.SellerSession.IsStale);
         var raisedCount = 0;
         vm.SellerSwitchRequested += (s, e) => raisedCount++;
 
