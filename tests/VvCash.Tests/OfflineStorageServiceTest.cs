@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using VvCash.Models;
 using VvCash.Services.Data;
 using Xunit;
@@ -34,7 +35,12 @@ public class OfflineStorageServiceTest : IDisposable
 
     public void Dispose()
     {
-        // SQLite may leave -wal/-shm files alongside the main db; sweep all three.
+        // Microsoft.Data.Sqlite pools connections by connection string, so the native
+        // file handle can outlive a disposed SqliteConnection — deleting the file
+        // without clearing the pool first fails silently on Windows (file in use).
+        SqliteConnection.ClearAllPools();
+
+        // SQLite may also leave -wal/-shm files alongside the main db; sweep all three.
         foreach (var path in new[] { _dbPath, _dbPath + "-wal", _dbPath + "-shm", _dbPath + "-journal" })
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { /* best effort cleanup */ }
