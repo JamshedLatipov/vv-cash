@@ -1284,6 +1284,23 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// <see cref="OnCloseShiftApproved"/>) so it is reachable from a unit test without a
     /// running Avalonia application, since that dialog itself is not.
     ///
+    /// Resuming fills the cart directly, without ever going through
+    /// <see cref="AddToCart"/> — so a stale/absent session (e.g. the register just
+    /// restarted and the cashier's first action is resuming a parked sale, never scanning
+    /// a product) would otherwise reach <see cref="Pay"/> with nobody confirmed, and the
+    /// resulting sale gets silently credited to the shift owner with no flag anywhere (see
+    /// this task's own write-up). Fixed by applying the exact same start-of-receipt gate
+    /// here: whenever this method is about to hand the cart a set of items nobody has
+    /// rung up yet — which, by the time we reach the check below, is unconditionally true:
+    /// either the cart started empty, or the auto-park branch just emptied it — ask if the
+    /// session is stale, exactly like AddToCart's own gate. Checked, and the overlay
+    /// requested, before <see cref="ISellerSession.Touch"/> and before the resumed items
+    /// land in the cart: Touch() would clear staleness and defeat the check (same ordering
+    /// AddToCart depends on), and asking before the cart visibly fills mirrors "ask at the
+    /// start of the receipt" rather than after the cashier can already see it. The gate
+    /// runs at most once per resumed receipt — there is exactly one check per call, not
+    /// one per auto-park-then-resume step.
+    ///
     /// Restores <see cref="ParkedSaleSnapshot.ApprovedById"/> into <see cref="_approvedById"/>
     /// after the rest of the snapshot loads, so an over-cap discount that was already
     /// approved before parking keeps its approver on resume instead of riding through with
@@ -1293,7 +1310,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// that never needed one; never a crash. If the cashier subsequently raises the
     /// discount further, ApplyManualDiscount re-gates it through NeedsDiscountApproval same
     /// as any fresh discount; if they clear it, ClearManualDiscount drops this approver
-    /// same as it always has.</summary>
+    /// same as it always has. That approver id is about who authorised a discount, not who
+    /// is selling — entirely independent of the seller gate added here, which never reads
+    /// or writes <see cref="_approvedById"/>.
+    ///
+    /// Deliberately does NOT record which seller parked the sale: the person resuming is
+    /// not necessarily the person who parked it (a sale parked at end of shift is
+    /// routinely resumed by whoever is on register next), so crediting the resumed sale to
+    /// whoever parked it would just be a different, equally silent mis-attribution — the
+    /// same failure this whole feature exists to prevent, one step removed. Re-asking who
+    /// is selling right now, same as any other start of a receipt, is the only choice that
+    /// can't misattribute the resumed sale.</summary>
     public async Task ResumeParkedSale(string id)
     {
         // Если в корзине уже есть товары — авто-отложить текущую продажу.
@@ -1309,6 +1336,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         var snapshot = await _parkedSaleService.ResumeAsync(id);
         if (snapshot == null) return;
+
+        // Same start-of-receipt gate as AddToCart, applied here because resuming skips
+        // AddToCart entirely — see this method's own remarks for why this must run before
+        // Touch() and before the cart is populated below.
+        if (_sellerSession.IsStale)
+            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+
+        // Resuming a parked sale is genuine register activity, same as AddToCart's own
+        // Touch() call — resets the idle timer so a long-parked receipt that just got
+        // pulled back up doesn't immediately look stale again.
+        _sellerSession.Touch();
 
         var items = snapshot.Items
             .Select(i => new CartItem { Product = i.Product, Quantity = i.Quantity })

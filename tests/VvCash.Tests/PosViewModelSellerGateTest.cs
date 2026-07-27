@@ -1304,6 +1304,117 @@ public class PosViewModelSellerGateTest
     }
 
     // ---------------------------------------------------------------------------------
+    // Resume seller gate (whole-branch review follow-up): resuming a parked sale fills the
+    // cart via CartService.LoadSnapshot directly, never through AddToCart, so it used to be
+    // a way to reach Pay() with a stale/absent session and no gate ever having fired — worse
+    // than the removed-seller case, because an omitted seller is the legitimate backward-
+    // compatible path and the server does not flag it. ResumeParkedSale now applies the same
+    // start-of-receipt gate AddToCart uses.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ResumeParkedSale_SessionStale_RequestsSellerSwitchOverlay()
+    {
+        // No SetCurrent call: Current stays null, exactly the "register just restarted,
+        // nobody has confirmed on yet" scenario from the bug report — resuming is the
+        // cashier's very first action, never touching AddToCart at all.
+        using var vm = CreateViewModel(out var deps);
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.Equal(1, raisedCount);
+        // The gate does not block the resume itself — the parked items still land in the
+        // cart; the overlay is a request the host opens on top, not a hard stop here.
+        Assert.Single(deps.CartService.Items);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_SessionFreshWithActiveSeller_DoesNotRequestOverlay()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_RestoredApprovedById_IsUnaffectedBySellerGateFiring()
+    {
+        // A genuine park -> (session goes stale, e.g. the register restarted before anyone
+        // resumed) -> resume round trip through FakeParkedSaleService, proving the discount
+        // approval carried by ParkedSaleSnapshot.ApprovedById survives completely
+        // independently of whether the new seller gate fires on the same resume — the two
+        // concerns (who authorised the discount vs. who is selling) must never conflate.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+
+        // Simulate the session going stale/absent before the resume (e.g. a restart with
+        // no seller persisted, or the idle timeout) — this is exactly what makes the new
+        // gate fire below.
+        deps.SellerSession.Clear();
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        await vm.ResumeParkedSale(deps.ParkedSaleService.LastParkedId!);
+
+        Assert.Equal(1, raisedCount); // sanity check: the gate did fire for this resume
+        Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // the approved discount still came back
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        // The approver id reached Pay() untouched by the seller gate having fired.
+        Assert.Equal("supervisor-9", deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_AutoParksExistingCart_GateStillFiresOnlyOnce()
+    {
+        // Resuming while the cart already holds an in-progress receipt auto-parks that
+        // receipt first, then loads the requested one — two cart-clearing/filling steps in
+        // a single call. The gate must still fire at most once, not once per step.
+        using var vm = CreateViewModel(out var deps);
+        // Cart starts with an item from a receipt already in progress under a stale
+        // session (mirrors AddToCart_SecondItemMidReceipt_NeverInterruptsEvenWhileSessionRemainsStale:
+        // Touch() alone can never clear staleness while Current stays null).
+        vm.AddToCartCommand.Execute(MakeProduct("p-current", 5m));
+        Assert.True(deps.SellerSession.IsStale);
+
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.Equal(1, raisedCount);
+        Assert.Single(deps.CartService.Items);
+        Assert.Equal("p1", deps.CartService.Items[0].Product.Id);
+    }
+
+    // ---------------------------------------------------------------------------------
     // Revoked shift session banner (Task 22): a 401 on a queued document must never throw
     // the cashier out to the login screen mid-receipt — receipts keep queueing, only a
     // banner (bound to IsSessionRevoked) appears. IExpenseDocumentService.SessionRevoked
