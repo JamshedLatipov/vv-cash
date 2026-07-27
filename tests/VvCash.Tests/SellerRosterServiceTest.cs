@@ -32,6 +32,9 @@ public class SellerRosterServiceTest
     private sealed class FakeStorage : IOfflineStorageService
     {
         public List<SellerInfo> Sellers = new();
+        public bool ThrowOnGetSellers;
+        public bool ThrowOnSaveSellers;
+        public int GetSellersCallCount;
 
         public Task SaveProductsAsync(IEnumerable<Product> products) => Task.CompletedTask;
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
@@ -57,11 +60,19 @@ public class SellerRosterServiceTest
 
         public Task SaveSellersAsync(IEnumerable<SellerInfo> sellers)
         {
+            if (ThrowOnSaveSellers)
+                throw new InvalidOperationException("simulated storage failure on save");
             Sellers = sellers.ToList();
             return Task.CompletedTask;
         }
 
-        public Task<IEnumerable<SellerInfo>> GetSellersAsync() => Task.FromResult<IEnumerable<SellerInfo>>(Sellers);
+        public Task<IEnumerable<SellerInfo>> GetSellersAsync()
+        {
+            GetSellersCallCount++;
+            if (ThrowOnGetSellers)
+                throw new InvalidOperationException("simulated storage failure on read");
+            return Task.FromResult<IEnumerable<SellerInfo>>(Sellers);
+        }
 
         public Task InitializeAsync() => Task.CompletedTask;
     }
@@ -243,5 +254,68 @@ public class SellerRosterServiceTest
 
         Assert.Single(result);
         Assert.Equal("only-cached", result[0].Id);
+    }
+
+    [Fact]
+    public async Task GetCachedAsync_StorageThrows_PropagatesException()
+    {
+        // Deliberate: unlike RefreshAsync, GetCachedAsync makes no non-throwing
+        // promise. It is a bare passthrough (per spec), so a broken local
+        // database should surface to the caller rather than being silently
+        // reported as "this register has no sellers".
+        var storage = new FakeStorage { ThrowOnGetSellers = true };
+        var handler = new StubHttpMessageHandler(req => throw new InvalidOperationException("must not hit network"));
+        var svc = Build(handler, storage);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.GetCachedAsync());
+    }
+
+    [Fact]
+    public async Task RefreshAsync_NetworkFailsAndCacheReadThrows_ReturnsEmptyWithoutThrowing()
+    {
+        // The last line of defence (the cache read inside the catch block) must
+        // itself be safe. If it isn't, a locked/corrupt local database turns a
+        // routine refresh into an unhandled exception - strictly worse than
+        // "nothing changed".
+        var storage = new FakeStorage { ThrowOnGetSellers = true };
+        var handler = new StubHttpMessageHandler(req => throw new HttpRequestException("network down"));
+        var svc = Build(handler, storage);
+
+        var result = await svc.RefreshAsync();
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SuccessfulResponse_DoesNotTouchCacheReadEvenIfItWouldThrow()
+    {
+        // The success path returns the freshly parsed roster directly; it must
+        // not consult the cache at all, so a broken cache read must not affect
+        // a successful refresh.
+        var storage = new FakeStorage { ThrowOnGetSellers = true };
+        var handler = new StubHttpMessageHandler(req => (HttpStatusCode.OK, SuccessBody));
+        var svc = Build(handler, storage);
+
+        var result = (await svc.RefreshAsync()).ToList();
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(0, storage.GetSellersCallCount);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SaveThrows_ReturnsOldCachedRosterNotParsedOne()
+    {
+        // A successful parse whose persistence fails must fall back to the
+        // previously cached roster - not the freshly parsed (but unsaved) one,
+        // and not an exception.
+        var storage = new FakeStorage { ThrowOnSaveSellers = true };
+        storage.Sellers = new List<SellerInfo> { new SellerInfo { Id = "old-cached" } };
+        var handler = new StubHttpMessageHandler(req => (HttpStatusCode.OK, SuccessBody));
+        var svc = Build(handler, storage);
+
+        var result = (await svc.RefreshAsync()).ToList();
+
+        Assert.Single(result);
+        Assert.Equal("old-cached", result[0].Id);
     }
 }
