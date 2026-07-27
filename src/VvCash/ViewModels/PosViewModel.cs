@@ -205,6 +205,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// raises intent without knowing how the overlay gets opened.</summary>
     public event EventHandler? CloseShiftApprovalRequested;
 
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay in
+    /// approval mode because the current seller lacks <c>CanRefund</c> — see
+    /// <see cref="OpenReturns"/>. Same role as <see cref="CloseShiftApprovalRequested"/>.</summary>
+    public event EventHandler? RefundApprovalRequested;
+
     /// <summary>Current seller's name for the header chip, or — when none is selected — the
     /// same action-shaped invitation ("Who is selling?") already used by this button's
     /// tooltip and by the overlay's own heading, so an empty chip reads as something to
@@ -1142,6 +1147,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     [RelayCommand]
     private async Task OpenReturns()
+    {
+        // Opening returns requires CanRefund. Nobody having confirmed at all
+        // (Current == null) is treated the same as lacking the right — fail closed,
+        // same reasoning CloseShift already uses for CanCloseShift. A seller who
+        // lacks it must escalate through a supervisor PIN instead: raise intent and
+        // let the host (App.axaml.cs) open the overlay in approval mode.
+        if (!(_sellerSession.Current?.CanRefund ?? false))
+        {
+            RefundApprovalRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        await ShowReturnsDialogAsync();
+    }
+
+    /// <summary>Actually opens the returns dialog — the direct target of
+    /// <see cref="OpenReturns"/> once the current seller already holds CanRefund, and
+    /// also the continuation App.axaml.cs hands to <c>SellerSwitchViewModel.OpenForApproval</c>
+    /// for <see cref="RefundApprovalRequested"/>, so a successful approval genuinely opens
+    /// returns rather than merely dismissing the overlay.</summary>
+    public async Task ShowReturnsDialogAsync()
     {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {

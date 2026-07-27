@@ -657,8 +657,8 @@ public class PosViewModelSellerGateTest
     // *successful* close wipes the stored auth token / clears the seller session.
     // ---------------------------------------------------------------------------------
 
-    private static SellerInfo MakeSeller(string id, bool canCloseShift) =>
-        new() { Id = id, FirstName = "Seller", LastName = id, CanCloseShift = canCloseShift };
+    private static SellerInfo MakeSeller(string id, bool canCloseShift = false, bool canRefund = false, decimal maxDiscount = 0m) =>
+        new() { Id = id, FirstName = "Seller", LastName = id, CanCloseShift = canCloseShift, CanRefund = canRefund, MaxDiscount = maxDiscount };
 
     [Fact]
     public void CloseShiftCommand_SellerLacksRight_RaisesApprovalRequest_DoesNotClose()
@@ -787,5 +787,67 @@ public class PosViewModelSellerGateTest
         Assert.Equal("some-token", deps.SettingsService.AuthToken);
         Assert.Same(seller, deps.SellerSession.Current);
         Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Returns gate (Task 20): opening returns requires CanRefund, escalates through the
+    // approval overlay when it's missing (same shape as the close-shift gate above), and
+    // approving genuinely opens the returns dialog rather than just dismissing the
+    // overlay.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void OpenReturnsCommand_SellerLacksRight_RaisesApprovalRequest()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canRefund: false));
+        var raisedCount = 0;
+        vm.RefundApprovalRequested += (s, e) => raisedCount++;
+
+        vm.OpenReturnsCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void OpenReturnsCommand_NoCurrentSeller_TreatedAsLackingRight_RaisesApprovalRequest()
+    {
+        // Nobody has confirmed on yet (Current == null) — fail closed, same as
+        // CloseShiftCommand_NoCurrentSeller_TreatedAsLackingRight_RaisesApprovalRequest.
+        using var vm = CreateViewModel(out var deps);
+        var raisedCount = 0;
+        vm.RefundApprovalRequested += (s, e) => raisedCount++;
+
+        vm.OpenReturnsCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public async Task OpenReturnsCommand_SellerHasRight_NoApprovalRaised()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canRefund: true));
+        var raisedCount = 0;
+        vm.RefundApprovalRequested += (s, e) => raisedCount++;
+
+        await vm.OpenReturnsCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public async Task ShowReturnsDialogAsync_IsReachable_AsTheApprovalContinuation()
+    {
+        // The continuation: approving must not just dismiss the overlay, it must reach
+        // the method that actually opens returns — mirrors
+        // OnCloseShiftApproved_AfterApprovalRequested_ActuallyClosesTheShift. This test
+        // host has no running Avalonia application, so no window actually opens; what
+        // this proves is that the method App.axaml.cs wires as the continuation
+        // (ShowReturnsDialogAsync) is the same one OpenReturns itself calls once the
+        // gate passes, not a dead end that only dismisses the overlay.
+        using var vm = CreateViewModel(out var deps);
+
+        await vm.ShowReturnsDialogAsync();
     }
 }

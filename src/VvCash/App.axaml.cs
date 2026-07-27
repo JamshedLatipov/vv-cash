@@ -75,6 +75,12 @@ public partial class App : Application
                     x => x.CanCloseShift,
                     _ => posVm.OnCloseShiftApproved());
 
+                // Opening returns without CanRefund escalates the same way — see
+                // OpenReturns/ShowReturnsDialogAsync.
+                posVm.RefundApprovalRequested += (s, e) => sellerSwitchVm.OpenForApproval(
+                    x => x.CanRefund,
+                    _ => posVm.ShowReturnsDialogAsync());
+
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)
                 {
