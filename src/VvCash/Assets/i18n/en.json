@@ -169,5 +169,21 @@
   "WelcomeSignIn": "Welcome back! Sign in to open your shift and start selling.",
   "FeatureTwoTaps": "Ring up a sale in two taps",
   "FeatureScan": "Instant search & barcode scan",
-  "FeatureOffline": "Works offline, syncs later"
+  "FeatureOffline": "Works offline, syncs later",
+  "SelectSeller": "Who is selling?",
+  "EnterPin": "Enter PIN",
+  "SellerPinWrong": "Wrong PIN",
+  "SellerLocked": "Locked for a minute",
+  "SellerPinNotSet": "PIN is not set",
+  "SellerHashCorrupt": "Seller data is corrupt — refresh the list",
+  "SellerNotOnRoster": "Seller not found on the list — refresh the list",
+  "ConfirmWithPin": "Confirm with PIN",
+  "CurrentSeller": "Seller",
+  "SellerVerificationFailed": "Could not verify PIN. Try again",
+  "CreatePin": "Create a PIN",
+  "RepeatPin": "Repeat the PIN",
+  "PinMismatch": "PINs did not match",
+  "SellerPinSetupOffline": "No connection — set the PIN later",
+  "PinTooWeak": "PIN is too simple — try another",
+  "SessionRevokedBanner": "Shift session is no longer valid. Receipts are being saved — sign in again after this customer."
 }

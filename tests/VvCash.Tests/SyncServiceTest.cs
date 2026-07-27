@@ -92,6 +92,8 @@ public class SyncServiceTest
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult<IEnumerable<ParkedSale>>(Array.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);
         public Task DeleteParkedSaleAsync(string id) => Task.CompletedTask;
+        public Task SaveSellersAsync(IEnumerable<SellerInfo> sellers) => Task.CompletedTask;
+        public Task<IEnumerable<SellerInfo>> GetSellersAsync() => Task.FromResult<IEnumerable<SellerInfo>>(Array.Empty<SellerInfo>());
         public Task InitializeAsync() => Task.CompletedTask;
     }
 
@@ -101,6 +103,7 @@ public class SyncServiceTest
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }
+        public event EventHandler? SessionRevoked { add { } remove { } }
     }
 
     private static SyncService Build(StubHttpMessageHandler handler, FakeStorage storage)

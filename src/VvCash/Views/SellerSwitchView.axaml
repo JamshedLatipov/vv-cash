@@ -1,0 +1,178 @@
+<UserControl x:Name="RootWindow" xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:VvCash.Services"
+        xmlns:models="using:VvCash.Models"
+        xmlns:material="using:Material.Icons.Avalonia"
+        xmlns:converters="using:VvCash.Converters"
+        x:Class="VvCash.Views.SellerSwitchView"
+        IsVisible="{Binding IsVisible}">
+
+    <UserControl.Resources>
+        <converters:PinMaskConverter x:Key="PinMaskConverter"/>
+    </UserControl.Resources>
+
+    <UserControl.Styles>
+        <!-- large tap tile in the seller grid -->
+        <Style Selector="Button.SellerTile">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="CornerRadius" Value="18"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Width" Value="160"/>
+            <Setter Property="MinHeight" Value="160"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.SellerTile:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+        </Style>
+        <Style Selector="Button.SellerTile:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+        </Style>
+        <Style Selector="Button.SellerTile:pressed /template/ ContentPresenter TextBlock">
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <!-- masked PIN display, with a red error state instead of a quiet text-only cue -->
+        <Style Selector="Border.PinDisplay">
+            <Setter Property="Background" Value="{StaticResource Slate50Brush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Slate200Brush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="16,14"/>
+        </Style>
+        <Style Selector="Border.PinDisplay.Error">
+            <Setter Property="Background" Value="{StaticResource Red50Brush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Red500Brush}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+        </Style>
+    </UserControl.Styles>
+
+    <!-- Full-bleed scrim; the caller places this control over the POS screen. -->
+    <Border Background="#B30F172A" ZIndex="3000">
+        <Border Background="White" CornerRadius="24" Padding="36"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                MinWidth="560" MaxWidth="980" BoxShadow="0 20 48 0 #40000000">
+
+            <Grid>
+                <!-- ======================= State 1: tile grid ======================= -->
+                <StackPanel Spacing="28" IsVisible="{Binding !IsPinEntry}">
+                    <!-- heading depends on why the overlay is open: switching who is
+                         selling asks "who is selling?"; approving another seller's
+                         operation must not ask that of the supervisor confirming it -->
+                    <TextBlock Text="{Binding [ConfirmWithPin], Source={x:Static services:I18nService.Instance}}"
+                               FontSize="26" FontWeight="Black" Foreground="{StaticResource Slate900Brush}"
+                               HorizontalAlignment="Center" IsVisible="{Binding IsApprovalMode}"/>
+                    <TextBlock Text="{Binding [SelectSeller], Source={x:Static services:I18nService.Instance}}"
+                               FontSize="26" FontWeight="Black" Foreground="{StaticResource Slate900Brush}"
+                               HorizontalAlignment="Center" IsVisible="{Binding !IsApprovalMode}"/>
+
+                    <ItemsControl ItemsSource="{Binding Sellers}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel HorizontalAlignment="Center"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="models:SellerInfo">
+                                <Button Classes="SellerTile" Margin="8"
+                                        Command="{Binding DataContext.SelectSellerCommand, ElementName=RootWindow}"
+                                        CommandParameter="{Binding}">
+                                    <StackPanel Spacing="12" HorizontalAlignment="Center">
+                                        <Border Width="56" Height="56" CornerRadius="99" Background="{StaticResource PrimaryLightBrush}" HorizontalAlignment="Center">
+                                            <material:MaterialIcon Kind="AccountCircle" Width="32" Height="32"
+                                                Foreground="{StaticResource PrimaryBrush}"
+                                                HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding FullName}" FontSize="17" FontWeight="Bold"
+                                                   Foreground="{StaticResource Slate900Brush}"
+                                                   TextAlignment="Center" TextWrapping="Wrap" MaxWidth="128"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- Dismiss control for State 1 only: the PIN pad already has its own way
+                     back (BackCommand demotes it to the tile grid, then this button — or
+                     Escape from either state, see PosView.axaml.cs — closes the rest of the
+                     way). Same IconButton + Close icon convention as every other modal in
+                     this app (e.g. the discount/coupon modals in PosView.axaml). -->
+                <Button HorizontalAlignment="Right" VerticalAlignment="Top" Classes="IconButton"
+                        Command="{Binding CancelCommand}" IsVisible="{Binding !IsPinEntry}">
+                    <material:MaterialIcon Kind="Close" Width="28" Height="28" Foreground="{StaticResource Slate600Brush}"/>
+                </Button>
+
+                <!-- ======================= State 2: PIN pad ======================= -->
+                <StackPanel Spacing="20" Width="360" IsVisible="{Binding IsPinEntry}">
+                    <!-- header: back-to-tiles on the left, seller + prompt centred.
+                         Back lives here, not in the keypad grid below, so it can never
+                         be mistaken for the "clear" key every other numpad in this app
+                         puts in the keypad's bottom-left corner (PosView.axaml:662,
+                         MixedPaymentView.axaml:191) — a mis-tap there would otherwise
+                         discard the whole PIN entry and the seller selection. -->
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <Button Grid.Column="0" Classes="IconButton" Width="40" Height="40" Command="{Binding BackCommand}">
+                            <material:MaterialIcon Kind="ArrowLeft" Width="20" Height="20"/>
+                        </Button>
+                        <StackPanel Grid.Column="1" Spacing="4" HorizontalAlignment="Center">
+                            <TextBlock Text="{Binding SelectedSeller.FullName}" FontSize="22" FontWeight="Black"
+                                       Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding [EnterPin], Source={x:Static services:I18nService.Instance}}"
+                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"
+                                       IsVisible="{Binding !IsSettingPin}"/>
+                            <!-- Task 19: a seller with no PIN yet gets prompted to create one,
+                                 then to repeat it, on this same pad instead of EnterPin's
+                                 normal "verify" prompt. -->
+                            <TextBlock Text="{Binding [CreatePin], Source={x:Static services:I18nService.Instance}}"
+                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"
+                                       IsVisible="{Binding IsCreatingNewPin}"/>
+                            <TextBlock Text="{Binding [RepeatPin], Source={x:Static services:I18nService.Instance}}"
+                                       FontSize="14" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center"
+                                       IsVisible="{Binding IsRepeatingNewPin}"/>
+                        </StackPanel>
+                        <!-- balances the back button's width so the header text is
+                             actually centred, not just centred-within-the-remainder -->
+                        <Border Grid.Column="2" Width="40"/>
+                    </Grid>
+
+                    <TextBlock Text="{Binding ErrorMessage}" IsVisible="{Binding HasError}"
+                               Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="SemiBold"
+                               TextAlignment="Center" TextWrapping="Wrap" HorizontalAlignment="Center"/>
+
+                    <!-- masked PIN display: filled bullets for entered digits, hollow
+                         placeholders for the remaining 4, and a red border/background
+                         (Classes.Error) when HasError, louder than text alone for a
+                         cashier who is looking at the customer, not the screen -->
+                    <Border Classes="PinDisplay" Classes.Error="{Binding HasError}" MinHeight="64">
+                        <TextBlock Text="{Binding Pin, Converter={StaticResource PinMaskConverter}, ConverterParameter=4}"
+                                   FontSize="30" FontWeight="Black" LetterSpacing="10"
+                                   Foreground="{StaticResource Slate900Brush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- 3x4 keypad; bottom-left is left empty on purpose (see header
+                         comment above) -->
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*,*">
+                        <Button Grid.Row="0" Grid.Column="0" Classes="NumpadButton" Margin="4" Content="1" Command="{Binding AppendDigitCommand}" CommandParameter="1"/>
+                        <Button Grid.Row="0" Grid.Column="1" Classes="NumpadButton" Margin="4" Content="2" Command="{Binding AppendDigitCommand}" CommandParameter="2"/>
+                        <Button Grid.Row="0" Grid.Column="2" Classes="NumpadButton" Margin="4" Content="3" Command="{Binding AppendDigitCommand}" CommandParameter="3"/>
+                        <Button Grid.Row="1" Grid.Column="0" Classes="NumpadButton" Margin="4" Content="4" Command="{Binding AppendDigitCommand}" CommandParameter="4"/>
+                        <Button Grid.Row="1" Grid.Column="1" Classes="NumpadButton" Margin="4" Content="5" Command="{Binding AppendDigitCommand}" CommandParameter="5"/>
+                        <Button Grid.Row="1" Grid.Column="2" Classes="NumpadButton" Margin="4" Content="6" Command="{Binding AppendDigitCommand}" CommandParameter="6"/>
+                        <Button Grid.Row="2" Grid.Column="0" Classes="NumpadButton" Margin="4" Content="7" Command="{Binding AppendDigitCommand}" CommandParameter="7"/>
+                        <Button Grid.Row="2" Grid.Column="1" Classes="NumpadButton" Margin="4" Content="8" Command="{Binding AppendDigitCommand}" CommandParameter="8"/>
+                        <Button Grid.Row="2" Grid.Column="2" Classes="NumpadButton" Margin="4" Content="9" Command="{Binding AppendDigitCommand}" CommandParameter="9"/>
+                        <Button Grid.Row="3" Grid.Column="1" Classes="NumpadButton" Margin="4" Content="0" Command="{Binding AppendDigitCommand}" CommandParameter="0"/>
+                        <Button Grid.Row="3" Grid.Column="2" Classes="NumpadActionButton" Margin="4" Command="{Binding BackspaceCommand}">
+                            <material:MaterialIcon Kind="BackspaceOutline" Width="26" Height="26"/>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Border>
+</UserControl>

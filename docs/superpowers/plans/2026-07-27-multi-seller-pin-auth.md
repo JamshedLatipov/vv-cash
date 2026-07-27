@@ -36,7 +36,7 @@ dotnet test tests/VvCash.Tests/VvCash.Tests.csproj
 
 | Файл | Ответственность |
 |---|---|
-| `migrations/20260727000000_seller_pin.up.sql` / `.down.sql` | `users.pin_hash`, `users.pin_updated_at`, `cash_users.max_discount`, `document_expenses.approved_by` |
+| `migrations/20260727000000_seller_pin.up.sql` / `.down.sql` | `users.pin_hash`, `users.pin_updated_at`, `cash_users.max_discount`, `document_expenses.approved_by_id` |
 | `migrations/20260727000100_shift_close_permission.up.sql` / `.down.sql` | permission-строка `cashes.shift_close` |
 | `users/pin.go` | хэширование/проверка/валидация PIN (PBKDF2) |
 | `users/pin_test.go` | тесты PIN-хелперов |
@@ -101,15 +101,15 @@ dotnet test tests/VvCash.Tests/VvCash.Tests.csproj
 ```sql
 ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_updated_at timestamptz;
-ALTER TABLE cash_users ADD COLUMN IF NOT EXISTS max_discount numeric NULL;
-ALTER TABLE document_expenses ADD COLUMN IF NOT EXISTS approved_by uuid NULL REFERENCES users(id);
+ALTER TABLE cash_users ADD COLUMN IF NOT EXISTS max_discount numeric;
+ALTER TABLE document_expenses ADD COLUMN IF NOT EXISTS approved_by_id uuid REFERENCES users(id);
 ```
 
 - [ ] **Step 2: Написать down-миграцию**
 
 `migrations/20260727000000_seller_pin.down.sql`:
 ```sql
-ALTER TABLE document_expenses DROP COLUMN IF EXISTS approved_by;
+ALTER TABLE document_expenses DROP COLUMN IF EXISTS approved_by_id;
 ALTER TABLE cash_users DROP COLUMN IF EXISTS max_discount;
 ALTER TABLE users DROP COLUMN IF EXISTS pin_updated_at;
 ALTER TABLE users DROP COLUMN IF EXISTS pin_hash;
@@ -557,6 +557,14 @@ type SellerItem struct {
 
 В `cashes/cash_repo.go` заменить тело `GetSellersForCash` на:
 ```go
+// ЧЕРНОВИК — НЕ КОПИРОВАТЬ. Две ошибки, найденные при реализации:
+//   1. `u.phone` — такой колонки в `users` нет; из-за неё GetSellersForCash падал
+//      и на master (эндпоинт всегда отдавал 500). Починено отдельным коммитом.
+//   2. join на `stores.max_discount` — такой колонки не существует, см. примечание
+//      «РЕШЕНО при реализации» ниже.
+// Фактическая реализация — в `cashes/cash_repo.go` на ветке feat/seller-pin:
+// EXISTS-подзапросы с UNION по прямым и групповым правам, по образцу
+// `authorization.AuthRepo.EffectivePermissionCodes`.
 func (r *CashRepo) GetSellersForCash(ctx context.Context, db base.PGXDB, cashID string) ([]SellerItem, error) {
 	rows, err := db.Query(ctx,
 		`SELECT cu.user_id, u.first_name, u.last_name, u.email, u.phone,
@@ -606,7 +614,9 @@ func (r *CashRepo) GetSellersForCash(ctx context.Context, db base.PGXDB, cashID 
 }
 ```
 
-**Проверить перед написанием:** имена колонок `warehouses.store_id` и `stores.max_discount` — свериться с `warehouses/` и `stores/` (там используется `stores.GetMaxAllowedDiscount`). Если колонка лимита называется иначе, подставить фактическое имя; если лимит магазина хранится не в `stores`, заменить `COALESCE(cu.max_discount, s.max_discount, 0)` на `COALESCE(cu.max_discount, 0)` и оставить наследование лимита магазина серверной проверке.
+**РЕШЕНО при реализации:** колонки `stores.max_discount` не существует. `stores.GetMaxAllowedDiscount` (`stores/settings.go`) читает EAV-таблицу `store_settings` по ключу `MAX_ALLOWED_DISCOUNT_FOR_COUNTERPARTY` — это лимит скидки **контрагенту**, другое понятие, с семантикой «строки нет → безлимит». Join отброшен, используется `COALESCE(cu.max_discount, 0)`.
+
+Следствие для клиента: **`max_discount == 0` значит «персональный потолок не задан», а не «скидка запрещена»** — при нуле ручная скидка не гейтится вовсе (см. Task 21). Иначе сразу после миграции, когда потолок не задан ни у кого, каждая ручная скидка требовала бы PIN старшего.
 
 - [ ] **Step 5: Запустить тест**
 
@@ -856,7 +866,7 @@ git commit -m "feat: credit sale to seller from request body, flagging disallowe
 func (r *DocumentRepo) InsertDocumentExpense(ctx context.Context, db base.PGXDB, docBaseID, warehouseID, cashID, sellerID string, shiftID *string, soldSource expenseSoldSource, quoteID, approvedBy string) (string, error) {
 	var id string
 	err := db.QueryRow(ctx,
-		`INSERT INTO document_expenses (document_base_id, warehouse_id, cash_id, seller_id, shift_id, sold_source, quote_id, approved_by)
+		`INSERT INTO document_expenses (document_base_id, warehouse_id, cash_id, seller_id, shift_id, sold_source, quote_id, approved_by_id)
 		 VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')::uuid,NULLIF($8,'')::uuid) RETURNING id`,
 		docBaseID, warehouseID, cashID, sellerID, shiftID, soldSource, quoteID, approvedBy,
 	).Scan(&id)
@@ -887,6 +897,16 @@ git commit -m "feat: persist approved_by on expense documents"
 # ФАЗА 2 — Клиент
 
 ## Task 8: Проверка PIN-хэша на клиенте
+
+> **РЕАЛИЗОВАНО, форма изменилась при ревью.** `PinHasher.Verify` возвращает не `bool`, а
+> `PinVerificationResult { Valid, WrongPin, Malformed }`. Причина: `false` на всё подряд
+> означал бы, что испорченная запись в кэше засчитывается счётчику попыток Task 12 как
+> промах — и честного продавца блокировали бы за чужую ошибку, которую повтором ввода не
+> исправить. `Malformed` описывает **хранимый хэш**, а не ввод: пустой PIN против валидного
+> хэша — это `WrongPin`. Также добавлен потолок итераций (испорченное значение в
+> нешифрованной SQLite иначе вешает UI на минуты) и зафиксирована реальная фикстура,
+> сгенерированная Go. Приведённые ниже сигнатуры тестов — черновик до этих правок;
+> фактическая реализация в `src/VvCash/Services/PinHasher.cs`.
 
 **Files:**
 - Create: `src/VvCash/Services/PinHasher.cs`
@@ -1542,6 +1562,20 @@ public class SellerSessionTest
     }
 
     [Fact]
+    public async Task SwitchAsync_WithCorruptHash_DoesNotCountTowardLockout()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-4", FirstName = "Битый", PinHash = "not-a-valid-hash", CanSell = true }
+        });
+
+        for (var i = 0; i < 6; i++)
+            Assert.Equal(SwitchResult.CorruptHash, await session.SwitchAsync("u-4", "4821"));
+    }
+
+    [Fact]
     public async Task Clear_DropsCurrentSeller()
     {
         var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
@@ -1578,7 +1612,11 @@ public enum SwitchResult
     WrongPin,
     Locked,
     PinNotSet,
-    UnknownSeller
+    UnknownSeller,
+
+    /// <summary>The cached hash is unusable — a corrupt row, not a bad guess.
+    /// No PIN can succeed until the roster is refreshed.</summary>
+    CorruptHash
 }
 
 public interface ISellerSession
@@ -1698,12 +1736,19 @@ public class SellerSession : ISellerSession
             _failures.Remove(sellerId);
         }
 
-        if (!PinHasher.Verify(pin, seller.PinHash))
+        // Only a genuinely wrong PIN counts toward the lockout. A corrupt cached
+        // hash would otherwise lock out a seller who typed correctly, for a fault
+        // that is not theirs and that retrying cannot clear.
+        switch (PinHasher.Verify(pin, seller.PinHash))
         {
-            var count = _failures.TryGetValue(sellerId, out var c) ? c + 1 : 1;
-            _failures[sellerId] = count;
-            if (count >= MaxFailures) _lockedUntil[sellerId] = _clock() + LockDuration;
-            return (SwitchResult.WrongPin, null);
+            case PinVerificationResult.Malformed:
+                return (SwitchResult.CorruptHash, null);
+
+            case PinVerificationResult.WrongPin:
+                var count = _failures.TryGetValue(sellerId, out var c) ? c + 1 : 1;
+                _failures[sellerId] = count;
+                if (count >= MaxFailures) _lockedUntil[sellerId] = _clock() + LockDuration;
+                return (SwitchResult.WrongPin, null);
         }
 
         _failures.Remove(sellerId);
@@ -2773,7 +2818,17 @@ Expected: FAIL — у `OpenForApproval` нет второго параметра
 
 - [ ] **Step 5: Подключить эскалацию скидки**
 
-В команде применения ручной скидки: если `ManualDiscountAmount` в процентах превышает `_sellerSession.Current?.MaxDiscount`, вместо применения вызвать
+**`MaxDiscount == 0` означает «персональный потолок не задан» — гейта нет.** Не «скидка запрещена». Сразу после миграции потолок не задан ни у кого, и обратная трактовка потребовала бы PIN старшего на каждую ручную скидку с первого дня. Подробности — в спеке, раздел про `cash_users.max_discount`.
+
+В команде применения ручной скидки:
+```csharp
+    private bool NeedsDiscountApproval(decimal percent)
+    {
+        var cap = _sellerSession.Current?.MaxDiscount ?? 0m;
+        return cap > 0m && percent > cap;
+    }
+```
+Если `NeedsDiscountApproval(...)` — вместо применения вызвать
 ```csharp
         RequestDiscountApproval?.Invoke(this, EventArgs.Empty);
 ```
@@ -2781,10 +2836,10 @@ Expected: FAIL — у `OpenForApproval` нет второго параметра
 ```csharp
     public event EventHandler? RequestDiscountApproval;
 ```
-и подпиской в `App.axaml.cs`:
+и подпиской в `App.axaml.cs` (подтвердить может тот, у кого потолок задан и покрывает запрошенный процент):
 ```csharp
                 posVm.RequestDiscountApproval += (s, e) => switchVm.OpenForApproval(
-                    x => x.MaxDiscount >= posVm.PendingDiscountPercent,
+                    x => x.MaxDiscount > 0m && x.MaxDiscount >= posVm.PendingDiscountPercent,
                     approver => { posVm.ApplyApprovedDiscount(approver.Id); return Task.CompletedTask; });
 ```
 Добавить в `PosViewModel` свойство `PendingDiscountPercent` (процент, который пытались применить) и метод:

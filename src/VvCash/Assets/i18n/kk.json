@@ -169,5 +169,21 @@
   "WelcomeSignIn": "Қош келдіңіз! Ауысымды ашып, сатуды бастау үшін кіріңіз.",
   "FeatureTwoTaps": "Екі түртумен сату",
   "FeatureScan": "Жылдам іздеу және штрихкод сканерлеу",
-  "FeatureOffline": "Офлайн жұмыс істейді, кейін синхрондалады"
+  "FeatureOffline": "Офлайн жұмыс істейді, кейін синхрондалады",
+  "SelectSeller": "Кім сатады?",
+  "EnterPin": "PIN енгізіңіз",
+  "SellerPinWrong": "PIN қате",
+  "SellerLocked": "Бір минутқа бұғатталды",
+  "SellerPinNotSet": "PIN орнатылмаған",
+  "SellerHashCorrupt": "Сатушы деректері бүлінген — тізімді жаңартыңыз",
+  "SellerNotOnRoster": "Сатушы тізімде табылмады — тізімді жаңартыңыз",
+  "ConfirmWithPin": "PIN арқылы растаңыз",
+  "CurrentSeller": "Сатушы",
+  "SellerVerificationFailed": "PIN-ді тексеру мүмкін болмады. Қайта көріңіз",
+  "CreatePin": "PIN ойлап табыңыз",
+  "RepeatPin": "PIN-ді қайталаңыз",
+  "PinMismatch": "PIN сәйкес келмеді",
+  "SellerPinSetupOffline": "Байланыс жоқ — PIN-ді кейінірек орнатыңыз",
+  "PinTooWeak": "PIN тым қарапайым — басқасын байқаңыз",
+  "SessionRevokedBanner": "Ауысым сеансы жарамсыз. Чектер сақталуда — ағымдағы клиенттен кейін қайта кіріңіз."
 }

@@ -38,10 +38,29 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IPromotionProvider _promotionProvider;
     private readonly ISessionContext _session;
     private readonly HttpClient _httpClient;
+    private readonly ISellerSession _sellerSession;
+    private readonly ISellerRosterService _rosterService;
+    private readonly IAuthService _authService;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
+
+    /// <summary>Id of the seller who approved the current receipt's manual discount when
+    /// it exceeded the ringing seller's own cap (see <see cref="NeedsDiscountApproval"/>
+    /// / <see cref="ApplyApprovedDiscount"/>) — stamped onto <see cref="DocumentRequest.ApprovedBy"/>
+    /// in <see cref="Pay"/>. Lives only for the current receipt: cleared everywhere the
+    /// cart itself is cleared (<see cref="ClearCart"/>, Pay's own success branch) and
+    /// whenever the manual discount is replaced or removed without a fresh approval
+    /// (<see cref="ApplyManualDiscount"/>, <see cref="ClearManualDiscount"/>), so it can
+    /// never leak into a receipt — or a discount — it wasn't actually approved for.
+    /// Parking is the one exception to "cleared": the approval genuinely happened, so
+    /// <see cref="BuildSnapshot"/> carries this value into
+    /// <see cref="ParkedSaleSnapshot.ApprovedById"/> before the field is reset for the
+    /// next receipt, and <see cref="ResumeParkedSale"/> restores it — re-prompting a
+    /// supervisor to re-approve their own earlier decision would be wrong, and would fail
+    /// outright once that supervisor has gone home.</summary>
+    private string? _approvedById;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -184,11 +203,74 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     public string SystemStatusText => IsSystemOnline ? "SYSTEM ONLINE" : "SYSTEM OFFLINE";
 
+    /// <summary>Task 22: set (on the UI thread — see <see cref="OnSessionRevoked"/>) once
+    /// <see cref="IExpenseDocumentService.SessionRevoked"/> fires, driving the banner in
+    /// PosView.axaml. Deliberately never cleared back to false by anything in this class:
+    /// the server rejecting the shift session (401) means the current auth token is bad,
+    /// and a bad token doesn't heal itself — the next queued document hits the exact same
+    /// 401 and SyncOfflineDocumentsAsync stops at the first one every time (see its own
+    /// remarks), so no sync can ever succeed afterward to justify auto-clearing the banner.
+    /// Silently hiding it on some later event the cashier didn't cause would be actively
+    /// misleading: the only thing that actually fixes a revoked session is signing in
+    /// again, and that flow constructs a brand-new PosViewModel (see Dispose's own remarks
+    /// on why this class is transient across logout/login), so the banner's true reset is
+    /// simply this instance going away.</summary>
+    [ObservableProperty] private bool _isSessionRevoked;
+
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
     public IAsyncRelayCommand OpenCustomerRegistrationCommand { get; }
     public IRelayCommand CloseApplicationCommand { get; }
+
+    /// <summary>Set by App.axaml.cs (mirrors <see cref="CustomerDisplayViewModel"/>): the
+    /// overlay view model PosView hosts and binds its DataContext to. PosViewModel doesn't
+    /// own its lifecycle, only asks for it to open via <see cref="SellerSwitchRequested"/>.</summary>
+    public SellerSwitchViewModel? SellerSwitchViewModel { get; set; }
+
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay —
+    /// either because the register requires a fresh seller confirmation at the start of a
+    /// receipt (see <see cref="AddToCart"/>) or because the cashier tapped the seller chip
+    /// (see <see cref="OpenSellerSwitch"/>). Plays the same decoupling role as
+    /// <see cref="NavigationRequest"/> and <see cref="CustomerDisplayViewModel"/> —
+    /// PosViewModel raises intent without knowing how it's fulfilled — but unlike those two
+    /// settable delegate/property members, this is a genuine event: the host subscribes to
+    /// it rather than being handed a callback to invoke.</summary>
+    public event EventHandler? SellerSwitchRequested;
+
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch
+    /// overlay in approval mode (see <see cref="SellerSwitchViewModel.OpenForApproval"/>)
+    /// because the current seller lacks <c>CanCloseShift</c> — see <see cref="CloseShift"/>.
+    /// Plays the same decoupling role as <see cref="SellerSwitchRequested"/>: PosViewModel
+    /// raises intent without knowing how the overlay gets opened.</summary>
+    public event EventHandler? CloseShiftApprovalRequested;
+
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay in
+    /// approval mode because the current seller lacks <c>CanRefund</c> — see
+    /// <see cref="OpenReturns"/>. Same role as <see cref="CloseShiftApprovalRequested"/>.</summary>
+    public event EventHandler? RefundApprovalRequested;
+
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay in
+    /// approval mode because a manual discount (see <see cref="ApplyManualDiscount"/>)
+    /// exceeds the current seller's <c>MaxDiscount</c> cap — see
+    /// <see cref="NeedsDiscountApproval"/> for exactly when. Carries the requested percent
+    /// so the host can both filter approvers by it (only a seller whose own cap covers
+    /// this percent may approve) and hand the same value back to
+    /// <see cref="ApplyApprovedDiscount"/> once approved.</summary>
+    public event EventHandler<decimal>? DiscountApprovalRequested;
+
+    /// <summary>Current seller's name for the header chip, or — when none is selected — the
+    /// same action-shaped invitation ("Who is selling?") already used by this button's
+    /// tooltip and by the overlay's own heading, so an empty chip reads as something to
+    /// press rather than as a caption. Recomputed whenever
+    /// <see cref="ISellerSession.CurrentChanged"/> fires (see <see cref="OnSellerChanged"/>).</summary>
+    public string SellerChipText => _sellerSession.Current?.FullName ?? I18nService.Instance["SelectSeller"];
+
+    private void OnSellerChanged(object? sender, EventArgs e)
+        => OnPropertyChanged(nameof(SellerChipText));
+
+    [RelayCommand]
+    private void OpenSellerSwitch() => SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
     private async Task OpenShiftAsync()
@@ -202,6 +284,23 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             IsShiftOpen = true;
             IsShiftModalVisible = false;
+
+            // This can land moments after (or overlap with) StartBackgroundSync's own
+            // roster refresh on startup (see InitializeAsync below and the periodic
+            // loop) — that's fine, not a duplicate-fetch bug: SellerRosterService
+            // coalesces overlapping RefreshAsync callers onto a single in-flight fetch,
+            // so both call sites end up with the identical result instead of racing two
+            // independent HTTP round-trips where a stale one could resolve last and
+            // overwrite a fresh one. Kept deliberately per Task 17's spec (load on
+            // shift open) rather than removed to avoid the overlap.
+            //
+            // OpenShiftAsync is a [RelayCommand], invoked from a UI-triggered Execute()
+            // and — since this codebase never uses ConfigureAwait(false) — every await
+            // above resumes back on the UI thread via the captured Avalonia
+            // SynchronizationContext, so we're still on the UI thread here.
+            // LoadRosterAsync mutates SellerSession state and requires that; no extra
+            // Dispatcher marshalling is needed.
+            await _sellerSession.LoadRosterAsync(await _rosterService.RefreshAsync());
         }
     }
 
@@ -210,6 +309,23 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrEmpty(CurrentShiftId)) return;
 
+        // Closing a shift requires CanCloseShift. Nobody having confirmed at all
+        // (Current == null) is treated the same as lacking the right — fail closed,
+        // same reasoning as SellerSession.LoadRosterAsync treating a disabled
+        // seller as absent. A seller who lacks it must escalate through a
+        // supervisor PIN instead of closing outright: raise intent (mirrors
+        // AddToCart's SellerSwitchRequested) and let the host open the overlay.
+        if (!(_sellerSession.Current?.CanCloseShift ?? false))
+        {
+            CloseShiftApprovalRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        await ProceedToCloseShiftAsync();
+    }
+
+    private async Task ProceedToCloseShiftAsync()
+    {
         if (ParkedSalesCount > 0)
         {
             IsShiftCloseConfirmVisible = true;
@@ -217,6 +333,20 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
 
         await DoCloseShiftAsync();
+    }
+
+    /// <summary>The continuation App.axaml.cs hands to
+    /// <c>SellerSwitchViewModel.OpenForApproval</c> when wiring up
+    /// <see cref="CloseShiftApprovalRequested"/>. SellerSwitchViewModel invokes this only
+    /// when the specific approval it was opened for succeeds (each <c>OpenForApproval</c>
+    /// call owns its own continuation slot — see that class's remarks), so unlike the
+    /// pending-flag this used to need, a cancelled or unrelated approval can never reach
+    /// here: without a real completion there is nothing for App.axaml.cs to have wired.
+    /// This is what makes the approval flow actually finish closing the shift rather than
+    /// just dismissing the overlay.</summary>
+    public async Task OnCloseShiftApproved()
+    {
+        await ProceedToCloseShiftAsync();
     }
 
     [RelayCommand]
@@ -246,6 +376,22 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             CurrentShiftId = null;
             IsShiftOpen = false;
             IsShiftModalVisible = true;
+
+            // The auth token's lifetime is now tied to the shift (see
+            // AuthConstants.MaxShiftHours), so a closed shift must not leave a
+            // still-"remembered" token sitting in settings for the next register
+            // start to silently resume from, nor a stale seller left selected
+            // against a session that — as far as the register is concerned — just
+            // ended. Deliberately only on this success branch: a cancelled confirm
+            // dialog or a failed CloseShiftAsync call must leave both untouched, so
+            // the shift (and whoever is signed in) is genuinely still open.
+            //
+            // Wiping AuthToken/AuthTokenExpiresAt is IAuthService's job, not this
+            // view model's — AuthService.LoginAsync is the only other writer of those
+            // fields, and duplicating that logic here (reaching into ISettingsService
+            // directly) would let the two drift apart.
+            _sellerSession.Clear();
+            _authService.ClearSession();
         }
     }
 
@@ -310,7 +456,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IQuoteService quoteService,
         IPromotionProvider promotionProvider,
         ISessionContext session,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        ISellerSession sellerSession,
+        ISellerRosterService rosterService,
+        IAuthService authService)
     {
         _promotionProvider = promotionProvider;
         _productService = productService;
@@ -329,12 +478,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _quoteService = quoteService;
         _session = session;
         _httpClient = httpClient;
+        _sellerSession = sellerSession;
+        _rosterService = rosterService;
+        _authService = authService;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
+        _sellerSession.CurrentChanged += OnSellerChanged;
 
         _ = InitializeAsync();
     }
@@ -362,6 +515,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 if (DateTime.Now - lastSyncTime >= TimeSpan.FromMinutes(intervalMinutes))
                 {
                     await _syncService.SyncProductsAsync();
+
+                    // Roster changes (new hire, revoked seller, changed PIN) should reach
+                    // the register on the same cadence as the product catalogue. This
+                    // whole loop runs on a background thread (started via Task.Run above,
+                    // no captured UI SynchronizationContext), so RefreshAsync — which only
+                    // touches HTTP and SQLite — is safe to call directly here. It never
+                    // throws (falls back to the cache, worst case an empty roster), so a
+                    // roster-refresh problem can't take down the product sync around it.
+                    // LoadRosterAsync mutates SellerSession state and asserts UI-thread
+                    // access, so it must be marshalled via Dispatcher.UIThread — the same
+                    // idiom OnProductsSynced below uses for the same reason.
+                    var roster = await _rosterService.RefreshAsync();
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                        async () => await _sellerSession.LoadRosterAsync(roster));
+
                     lastSyncTime = DateTime.Now;
                 }
 
@@ -388,6 +556,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _expenseDocumentService.UnsyncedDocumentsCountChanged += OnUnsyncedDocumentsCountChanged;
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
 
+        _expenseDocumentService.SessionRevoked += OnSessionRevoked;
+
         _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
 
@@ -413,6 +583,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         IsShiftModalVisible = !IsShiftOpen;
+
+        if (IsShiftOpen)
+        {
+            // A register that restarts mid-shift must still get its roster before the
+            // cashier can ring up a first receipt. InitializeAsync is kicked off
+            // fire-and-forget from the constructor, which App.axaml.cs always calls on
+            // the UI thread (NavigateToPos runs from UI-thread event handlers); with no
+            // ConfigureAwait(false) anywhere in this codebase, every await above resumes
+            // on that captured UI SynchronizationContext, so this is still the UI thread.
+            //
+            // StartBackgroundSync (called earlier in this same method) starts its loop
+            // with lastSyncTime = DateTime.MinValue, so it also fires an immediate
+            // roster refresh on a background thread around now. That overlap is
+            // deliberately left in place, not coalesced away at the call site:
+            // SellerRosterService.RefreshAsync itself coalesces concurrent callers onto
+            // one in-flight fetch, so this and the background loop's call either share a
+            // single HTTP round-trip (if they overlap) or each make their own
+            // consistent one (if they don't) — never two racing round-trips where a
+            // stale response could resolve later and overwrite a fresh one.
+            await _sellerSession.LoadRosterAsync(await _rosterService.RefreshAsync());
+        }
 
         // Initial view is just all categories
         Products.Clear();
@@ -647,6 +838,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => UnsyncedDocumentsCount = count);
     }
 
+    /// <summary>SyncOfflineDocumentsAsync's loop runs on a background thread, so — same
+    /// idiom as every other handler in this file that reacts to a background-thread event
+    /// (OnUnsyncedDocumentsCountChanged right above, OnSyncStatusChanged, etc.) — this
+    /// marshals onto the UI thread via Dispatcher.UIThread before touching the
+    /// UI-bound IsSessionRevoked property.</summary>
+    private void OnSessionRevoked(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSessionRevoked = true);
+    }
+
     private void OnParkedSaleCountChanged(object? sender, int count)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
@@ -677,9 +878,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.CartChanged -= OnCartChanged;
         _printerService.StatusChanged -= OnPrinterStatusChanged;
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
+        _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
+        _sellerSession.CurrentChanged -= OnSellerChanged;
 
         _syncCancellationTokenSource?.Cancel();
         _syncCancellationTokenSource?.Dispose();
@@ -757,6 +960,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void AddToCart(Product product)
     {
+        // Ask who is selling only at the start of a receipt: an empty cart plus a stale
+        // session means nobody has confirmed identity since the idle timeout, so raise the
+        // overlay request before this item lands. Once the cart has an item, the receipt is
+        // in progress and must never be interrupted for this — same reasoning as Touch()
+        // below keeping the session alive through the rest of the sale.
+        if (!_cartService.Items.Any() && _sellerSession.IsStale)
+            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+
+        // Any add is genuine register activity, not just the first one — resets the idle
+        // timer so a long receipt never goes stale mid-sale.
+        _sellerSession.Touch();
+
         _cartService.AddProduct(product);
         _ = _customerDisplayService.ShowItemAsync(product.Name, product.Price);
     }
@@ -786,6 +1001,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
         ClearActivePromo();
+        _approvedById = null;
         _ = _customerDisplayService.ClearAsync();
     }
 
@@ -862,26 +1078,67 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>A manual discount above the current seller's own cap needs a supervisor's
+    /// approval. <c>MaxDiscount == 0</c> means "no personal cap configured", not "no
+    /// discounts allowed" — right after the seller-PIN migration every seller has no cap
+    /// (see the max_discount column's own remarks in the design spec), so treating 0 as a
+    /// limit would demand a supervisor PIN for every manual discount from day one. Only
+    /// gates when a cap is actually set. <paramref name="percent"/>-only: amount-mode
+    /// discounts (see <see cref="IsDiscountAmountMode"/>) aren't compared against a
+    /// percent cap and are out of scope here, same as before this task.</summary>
+    private bool NeedsDiscountApproval(decimal percent)
+    {
+        var cap = _sellerSession.Current?.MaxDiscount ?? 0m;
+        return cap > 0m && percent > cap;
+    }
+
     [RelayCommand]
     private void ApplyManualDiscount()
     {
-        if (decimal.TryParse(DiscountInputValue, out var value))
+        if (!decimal.TryParse(DiscountInputValue, out var value))
         {
-            if (IsDiscountPercentMode)
-            {
-                _cartService.SetManualDiscount(value, 0);
-            }
-            else
-            {
-                _cartService.SetManualDiscount(0, value);
-            }
+            CloseDiscountModal();
+            return;
+        }
+
+        if (IsDiscountPercentMode && NeedsDiscountApproval(value))
+        {
+            CloseDiscountModal();
+            DiscountApprovalRequested?.Invoke(this, value);
+            return;
+        }
+
+        // A fresh discount that didn't need escalation invalidates whatever approval
+        // was recorded for a previous one on this same receipt (see _approvedById) —
+        // otherwise a stale approver id could end up attached to a discount nobody
+        // with a covering cap ever actually signed off on.
+        _approvedById = null;
+
+        if (IsDiscountPercentMode)
+        {
+            _cartService.SetManualDiscount(value, 0);
+        }
+        else
+        {
+            _cartService.SetManualDiscount(0, value);
         }
         CloseDiscountModal();
+    }
+
+    /// <summary>Continuation for <see cref="DiscountApprovalRequested"/> — applies the
+    /// percent discount that triggered the escalation and records who approved it, so
+    /// <see cref="Pay"/> can stamp it onto the outgoing <see cref="DocumentRequest.ApprovedBy"/>.
+    /// See <see cref="_approvedById"/> for how its lifetime is kept scoped to this receipt.</summary>
+    public void ApplyApprovedDiscount(string approverId, decimal percent)
+    {
+        _approvedById = approverId;
+        _cartService.SetManualDiscount(percent, 0);
     }
 
     [RelayCommand]
     private void ClearManualDiscount()
     {
+        _approvedById = null;
         _cartService.ClearManualDiscount();
         CloseDiscountModal();
     }
@@ -952,7 +1209,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         CustomerDiscountPercent = _cartService.CustomerDiscountPercent,
         AppliedCoupons = _cartService.AppliedCoupons.ToList(),
         Customer = SelectedCustomer,
-        Label = label
+        Label = label,
+        // Carry any approval that already happened along with the discount it authorised
+        // — see _approvedById's remarks on why this is the one place it is not reset.
+        ApprovedById = _approvedById
     };
 
     [RelayCommand]
@@ -980,6 +1240,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
         ClearActivePromo();
+        _approvedById = null;
         _ = _customerDisplayService.ClearAsync();
 
         IsParkLabelModalVisible = false;
@@ -1008,6 +1269,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task OpenReturns()
     {
+        // Opening returns requires CanRefund. Nobody having confirmed at all
+        // (Current == null) is treated the same as lacking the right — fail closed,
+        // same reasoning CloseShift already uses for CanCloseShift. A seller who
+        // lacks it must escalate through a supervisor PIN instead: raise intent and
+        // let the host (App.axaml.cs) open the overlay in approval mode.
+        if (!(_sellerSession.Current?.CanRefund ?? false))
+        {
+            RefundApprovalRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        await ShowReturnsDialogAsync();
+    }
+
+    /// <summary>Actually opens the returns dialog — the direct target of
+    /// <see cref="OpenReturns"/> once the current seller already holds CanRefund, and
+    /// also the continuation App.axaml.cs hands to <c>SellerSwitchViewModel.OpenForApproval</c>
+    /// for <see cref="RefundApprovalRequested"/>, so a successful approval genuinely opens
+    /// returns rather than merely dismissing the overlay.</summary>
+    public async Task ShowReturnsDialogAsync()
+    {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             var mainWindow = desktop.MainWindow;
@@ -1020,7 +1302,49 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task ResumeParkedSale(string id)
+    /// <summary>The direct target of <see cref="OpenParkedSales"/> once a parked sale is
+    /// picked from the dialog — public (like <see cref="ShowReturnsDialogAsync"/> and
+    /// <see cref="OnCloseShiftApproved"/>) so it is reachable from a unit test without a
+    /// running Avalonia application, since that dialog itself is not.
+    ///
+    /// Resuming fills the cart directly, without ever going through
+    /// <see cref="AddToCart"/> — so a stale/absent session (e.g. the register just
+    /// restarted and the cashier's first action is resuming a parked sale, never scanning
+    /// a product) would otherwise reach <see cref="Pay"/> with nobody confirmed, and the
+    /// resulting sale gets silently credited to the shift owner with no flag anywhere (see
+    /// this task's own write-up). Fixed by applying the exact same start-of-receipt gate
+    /// here: whenever this method is about to hand the cart a set of items nobody has
+    /// rung up yet — which, by the time we reach the check below, is unconditionally true:
+    /// either the cart started empty, or the auto-park branch just emptied it — ask if the
+    /// session is stale, exactly like AddToCart's own gate. Checked, and the overlay
+    /// requested, before <see cref="ISellerSession.Touch"/> and before the resumed items
+    /// land in the cart: Touch() would clear staleness and defeat the check (same ordering
+    /// AddToCart depends on), and asking before the cart visibly fills mirrors "ask at the
+    /// start of the receipt" rather than after the cashier can already see it. The gate
+    /// runs at most once per resumed receipt — there is exactly one check per call, not
+    /// one per auto-park-then-resume step.
+    ///
+    /// Restores <see cref="ParkedSaleSnapshot.ApprovedById"/> into <see cref="_approvedById"/>
+    /// after the rest of the snapshot loads, so an over-cap discount that was already
+    /// approved before parking keeps its approver on resume instead of riding through with
+    /// approved_by silently null. A snapshot parked by a build that predates this field
+    /// deserializes ApprovedById as null (System.Text.Json's default for a missing
+    /// property), which this assigns through unchanged — no approver, same as a discount
+    /// that never needed one; never a crash. If the cashier subsequently raises the
+    /// discount further, ApplyManualDiscount re-gates it through NeedsDiscountApproval same
+    /// as any fresh discount; if they clear it, ClearManualDiscount drops this approver
+    /// same as it always has. That approver id is about who authorised a discount, not who
+    /// is selling — entirely independent of the seller gate added here, which never reads
+    /// or writes <see cref="_approvedById"/>.
+    ///
+    /// Deliberately does NOT record which seller parked the sale: the person resuming is
+    /// not necessarily the person who parked it (a sale parked at end of shift is
+    /// routinely resumed by whoever is on register next), so crediting the resumed sale to
+    /// whoever parked it would just be a different, equally silent mis-attribution — the
+    /// same failure this whole feature exists to prevent, one step removed. Re-asking who
+    /// is selling right now, same as any other start of a receipt, is the only choice that
+    /// can't misattribute the resumed sale.</summary>
+    public async Task ResumeParkedSale(string id)
     {
         // Если в корзине уже есть товары — авто-отложить текущую продажу.
         if (_cartService.Items.Any())
@@ -1030,10 +1354,22 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             _cartService.ClearCustomerDiscount();
             SelectedCustomer = null;
             ClearActivePromo();
+            _approvedById = null;
         }
 
         var snapshot = await _parkedSaleService.ResumeAsync(id);
         if (snapshot == null) return;
+
+        // Same start-of-receipt gate as AddToCart, applied here because resuming skips
+        // AddToCart entirely — see this method's own remarks for why this must run before
+        // Touch() and before the cart is populated below.
+        if (_sellerSession.IsStale)
+            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+
+        // Resuming a parked sale is genuine register activity, same as AddToCart's own
+        // Touch() call — resets the idle timer so a long-parked receipt that just got
+        // pulled back up doesn't immediately look stale again.
+        _sellerSession.Touch();
 
         var items = snapshot.Items
             .Select(i => new CartItem { Product = i.Product, Quantity = i.Quantity })
@@ -1048,6 +1384,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             snapshot.ManualDiscountPercent, snapshot.ManualDiscountAmount,
             snapshot.CustomerDiscountPercent,
             snapshot.AppliedCoupons);
+
+        _approvedById = snapshot.ApprovedById;
 
         TriggerRequote();
 
@@ -1075,6 +1413,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     var request = new DocumentRequest
                     {
                         DocumentHash = Guid.NewGuid().ToString(),
+                        SellerId = _sellerSession.Current?.Id,
+                        ApprovedBy = _approvedById,
                         ShiftId = CurrentShiftId,
                         QuoteId = _cartService.QuoteId,
                         OfflinePromotionId = _cartService.OfflinePromotion?.PromotionId,
@@ -1119,6 +1459,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;
                         ClearActivePromo();
+                        _approvedById = null;
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null)
