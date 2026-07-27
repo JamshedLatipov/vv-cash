@@ -10,13 +10,15 @@ public class MockPrinterService : IPrinterService
     public PrinterStatus Status => PrinterStatus.Ready;
     public event EventHandler<PrinterStatus>? StatusChanged;
 
-    public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons)
+    public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null)
     {
         Console.WriteLine("=== RECEIPT ===");
         foreach (var item in items)
-            Console.WriteLine($"  {item.Product.Name} x{item.Quantity}  ${item.LineTotal:F2}");
+            Console.WriteLine($"  {item.Product.Name} x{item.QuantityDisplay}  ${item.LineTotal:F2}");
         Console.WriteLine($"Subtotal: ${subtotal:F2}");
         Console.WriteLine($"Discount: -${discount:F2}");
+        if (!string.IsNullOrWhiteSpace(discountName))
+            Console.WriteLine($"  ({discountName})");
 
         Console.WriteLine($"TOTAL: ${total:F2}");
         Console.WriteLine("===============");
@@ -27,7 +29,7 @@ public class MockPrinterService : IPrinterService
     {
         Console.WriteLine("=== PRE-RECEIPT ===");
         foreach (var item in items)
-            Console.WriteLine($"  {item.Product.Name} x{item.Quantity}");
+            Console.WriteLine($"  {item.Product.Name} x{item.QuantityDisplay}");
         Console.WriteLine($"TOTAL: ${total:F2}");
         return Task.FromResult(true);
     }

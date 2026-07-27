@@ -449,7 +449,7 @@
                                                     <Button Classes="QtyButton" Width="30" Height="30" FontSize="16" CornerRadius="8"
                                                             Command="{Binding DataContext.DecreaseQuantityCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding}" Content="-"/>
-                                                    <TextBlock Text="{Binding Quantity}" Width="26" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="15"/>
+                                                    <TextBlock Text="{Binding QuantityDisplay}" Width="26" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="15"/>
                                                     <Button Classes="QtyButton" Width="30" Height="30" FontSize="16" CornerRadius="8"
                                                             Command="{Binding DataContext.IncreaseQuantityCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding}" Content="+"/>
@@ -543,6 +543,11 @@
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding TotalDiscount, StringFormat='-{0:F2}'}" Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="Bold"/>
                                 </Grid>
+                                <!-- Which discount is in force: the promotion's name, the promo code, the card. -->
+                                <StackPanel Orientation="Horizontal" Spacing="5" IsVisible="{Binding HasAppliedDiscountName}">
+                                    <material:MaterialIcon Kind="SaleOutline" Width="14" Height="14" Foreground="{StaticResource Red500Brush}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding AppliedDiscountName}" Foreground="{StaticResource Red500Brush}" FontSize="12" FontWeight="Medium" TextTrimming="CharacterEllipsis" MaxWidth="220"/>
+                                </StackPanel>
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [TotalAmount], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat='{}{0:F2}'}" FontSize="15" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}"/>

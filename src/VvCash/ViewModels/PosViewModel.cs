@@ -14,6 +14,7 @@ using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
@@ -34,6 +35,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IParkedSaleService _parkedSaleService;
     private readonly IReturnService _returnService;
     private readonly IQuoteService _quoteService;
+    private readonly IPromotionProvider _promotionProvider;
     private readonly ISessionContext _session;
     private readonly HttpClient _httpClient;
     private readonly ISellerSession _sellerSession;
@@ -109,7 +111,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         => OnPropertyChanged(nameof(HasAppliedCoupons));
 
     // Cart summary helpers for the always-visible order panel
-    public int CartItemsCount => CartItems.Sum(i => i.Quantity);
+    // Decimal: a weighted line contributes a fraction of a unit to the count.
+    public decimal CartItemsCount => CartItems.Sum(i => i.Quantity);
     public bool HasCartItems => CartItems.Count > 0;
     partial void OnCartItemsChanged(ObservableCollection<CartItem> value)
     {
@@ -120,6 +123,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     public bool HasTotalDiscount => TotalDiscount > 0;
     partial void OnTotalDiscountChanged(decimal value)
         => OnPropertyChanged(nameof(HasTotalDiscount));
+
+    /// <summary>Name of the discount source in force — the promotion, the promo
+    /// code, the card. Empty when the discount is purely the cashier's manual one.</summary>
+    [ObservableProperty] private string _appliedDiscountName = string.Empty;
+    public bool HasAppliedDiscountName => !string.IsNullOrWhiteSpace(AppliedDiscountName);
+    partial void OnAppliedDiscountNameChanged(string value)
+        => OnPropertyChanged(nameof(HasAppliedDiscountName));
 
     public bool HasProducts => Products.Count > 0;
     public bool ShowCatalogEmptyState => !IsViewingCategories && !HasProducts;
@@ -444,12 +454,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IParkedSaleService parkedSaleService,
         IReturnService returnService,
         IQuoteService quoteService,
+        IPromotionProvider promotionProvider,
         ISessionContext session,
         HttpClient httpClient,
         ISellerSession sellerSession,
         ISellerRosterService rosterService,
         IAuthService authService)
     {
+        _promotionProvider = promotionProvider;
         _productService = productService;
         _categoryService = categoryService;
         _cartService = cartService;
@@ -536,6 +548,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private async Task InitializeAsync()
     {
         await _offlineStorageService.InitializeAsync();
+
+        // Load the cached promotions before the first cart change, so an offline
+        // start still prices carts instead of waiting for the first sync.
+        await _promotionProvider.RefreshAsync();
 
         _expenseDocumentService.UnsyncedDocumentsCountChanged += OnUnsyncedDocumentsCountChanged;
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
@@ -690,6 +706,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         TotalDiscount = _cartService.TotalDiscount;
         TotalAmount = _cartService.TotalAmount;
+        AppliedDiscountName = _cartService.AppliedDiscountName ?? string.Empty;
 
         if (CustomerDisplayViewModel != null)
         {
@@ -737,9 +754,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         var ct = cts.Token;
         var cardId = SelectedCustomer?.DiscountCard?.Identifier;
-        var hasInput = !string.IsNullOrWhiteSpace(cardId) || !string.IsNullOrWhiteSpace(_activePromoCode);
 
-        if (!IsSystemOnline || !hasInput || _cartService.Items.Count == 0 || string.IsNullOrWhiteSpace(_session.WarehouseId))
+        // No card / no code is NOT a reason to skip the quote: auto-applied
+        // promotions have no cashier input at all, and the server can only put
+        // them into best-deal if it is asked to price the cart.
+        if (!IsSystemOnline || _cartService.Items.Count == 0 || string.IsNullOrWhiteSpace(_session.WarehouseId))
         {
             if (IsCurrentQuote(cts)) ApplyQuoteGuarded(() => _cartService.ClearQuote());
             return;
@@ -841,6 +860,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     private async void OnProductsSynced(object? sender, EventArgs e)
     {
+        // The sync that just finished also refreshed the promotion cache in SQLite.
+        await _promotionProvider.RefreshAsync();
+
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
         {
             await LoadCategoriesAsync();
@@ -1128,7 +1150,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         var success = await _printerService.PrintReceiptAsync(
             _cartService.Items,
             Subtotal, TotalDiscount, TotalAmount,
-            _cartService.AppliedCoupons);
+            _cartService.AppliedCoupons,
+            _cartService.AppliedDiscountName);
         StatusMessage = success ? "Receipt printed." : "Print failed.";
     }
 
@@ -1393,6 +1416,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         SellerId = _sellerSession.Current?.Id,
                         ApprovedBy = _approvedById,
                         ShiftId = CurrentShiftId,
+                        QuoteId = _cartService.QuoteId,
+                        OfflinePromotionId = _cartService.OfflinePromotion?.PromotionId,
                         SoldSource = SoldSourcesEnum.CASH,
                         Payment = new Payment
                         {
@@ -1403,9 +1428,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             Discount = TotalDiscount,
                             Remained = Math.Max(0, TotalAmount - (cashAmount + cardAmount))
                         },
-                        Products = _cartService.Items.Select(item =>
+                        Products = _cartService.Items.Select((item, lineIndex) =>
                         {
-                            var (pct, before) = QuoteLineResolver.Resolve(_cartService.Quote, item);
+                            var (pct, before) = QuoteLineResolver.Resolve(
+                                _cartService.Quote, _cartService.OfflinePromotion, item, lineIndex,
+                                _cartService.MoneyPolicy);
                             return new DocumentProduct
                             {
                                 Name = item.Product.Name,
@@ -1426,7 +1453,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         await _printerService.PrintReceiptAsync(
                             _cartService.Items,
                             Subtotal, TotalDiscount, TotalAmount,
-                            _cartService.AppliedCoupons);
+                            _cartService.AppliedCoupons,
+                            _cartService.AppliedDiscountName);
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;

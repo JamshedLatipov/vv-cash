@@ -101,12 +101,27 @@ public class ProductService : IProductService
                         string productCategory = string.Empty;
                         decimal productPrice = 0m;
                         string imagePath = string.Empty;
+                        var tagIds = new List<string>();
 
                         if (bodyElement.TryGetProperty("sell_price", out var priceElem))
                             productPrice = priceElem.ValueKind == JsonValueKind.Number ? priceElem.GetDecimal() : 0m;
 
+                        // The endpoint returns the product flat (category_id, tags at
+                        // the top level); the nested "product" object is the older
+                        // shape. Read the flat fields first, then let the nested block
+                        // below override them where it is present.
+                        if (bodyElement.TryGetProperty("id", out var flatIdElem) && flatIdElem.ValueKind == JsonValueKind.String)
+                            productId = flatIdElem.GetString() ?? productId;
+                        if (bodyElement.TryGetProperty("name", out var flatNameElem) && flatNameElem.ValueKind == JsonValueKind.String)
+                            productName = flatNameElem.GetString() ?? string.Empty;
+                        if (bodyElement.TryGetProperty("category_id", out var flatCatElem) && flatCatElem.ValueKind == JsonValueKind.String)
+                            productCategory = flatCatElem.GetString() ?? string.Empty;
+                        ReadTagIds(bodyElement, tagIds);
+
                         if (bodyElement.TryGetProperty("product", out var productElem) && productElem.ValueKind == JsonValueKind.Object)
                         {
+                            ReadTagIds(productElem, tagIds);
+
                             if (productElem.TryGetProperty("id", out var idElem))
                                 productId = idElem.GetString() ?? productId;
 
@@ -145,7 +160,8 @@ public class ProductService : IProductService
                             Sku = productSku,
                             Category = productCategory,
                             Price = productPrice,
-                            ImagePath = imagePath
+                            ImagePath = imagePath,
+                            TagIds = tagIds
                         };
 
                         await _storageService.SaveProductsAsync(new[] { product });
@@ -161,6 +177,26 @@ public class ProductService : IProductService
             Console.WriteLine($"[ProductService] Error fetching product by barcode: {ex.Message}");
             Debug.WriteLine($"[ProductService] Error fetching product by barcode: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>Collects tag ids into <paramref name="into"/>, skipping duplicates.
+    /// Tag ids decide whether a tag-targeted promotion applies to this product, so a
+    /// scanned item has to carry them just like a synced one.</summary>
+    private static void ReadTagIds(JsonElement element, List<string> into)
+    {
+        if (!element.TryGetProperty("tags", out var tagsElem) || tagsElem.ValueKind != JsonValueKind.Array)
+            return;
+
+        foreach (var tag in tagsElem.EnumerateArray())
+        {
+            string? id = tag.ValueKind switch
+            {
+                JsonValueKind.String => tag.GetString(),
+                JsonValueKind.Object => tag.TryGetProperty("id", out var idElem) ? idElem.GetString() : null,
+                _ => null,
+            };
+            if (!string.IsNullOrEmpty(id) && !into.Contains(id)) into.Add(id);
         }
     }
 
