@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -17,6 +18,7 @@ public class ExpenseDocumentService : IExpenseDocumentService
     private readonly IOfflineStorageService _offlineStorageService;
 
     public event EventHandler<int>? UnsyncedDocumentsCountChanged;
+    public event EventHandler? SessionRevoked;
 
     public ExpenseDocumentService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService offlineStorageService)
     {
@@ -48,6 +50,19 @@ public class ExpenseDocumentService : IExpenseDocumentService
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             UnsyncedDocumentsCountChanged?.Invoke(this, count);
+        });
+    }
+
+    /// <summary>SyncOfflineDocumentsAsync's loop runs on a background thread (invoked from
+    /// PosViewModel's background sync loop, off the UI SynchronizationContext), so this
+    /// mirrors NotifyUnsyncedCountChanged's own marshal to the UI thread — a subscriber
+    /// (PosViewModel.IsSessionRevoked) mutates UI-bound state and must not be touched from
+    /// a background thread.</summary>
+    private void NotifySessionRevoked()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            SessionRevoked?.Invoke(this, EventArgs.Empty);
         });
     }
 
@@ -124,6 +139,21 @@ public class ExpenseDocumentService : IExpenseDocumentService
                     if (request != null)
                     {
                         var response = await _httpClient.PostAsJsonAsync(url, request);
+
+                        if (response.StatusCode == HttpStatusCode.Unauthorized)
+                        {
+                            // The shift session was rejected server-side. Every other
+                            // queued document would fail the exact same way, so stop
+                            // hammering the server instead of looping through the rest —
+                            // break, not continue: this document (and the ones after it)
+                            // stay queued untouched, to be retried once the cashier signs
+                            // in again. Per design this must never force a logout
+                            // mid-receipt, so only a banner is raised here.
+                            Console.WriteLine($"[ExpenseDocumentService] Sync got 401 Unauthorized on document {doc.Key} — shift session revoked, stopping sync.");
+                            NotifySessionRevoked();
+                            break;
+                        }
+
                         if (response.IsSuccessStatusCode)
                         {
                             var responseContent = await response.Content.ReadAsStringAsync();

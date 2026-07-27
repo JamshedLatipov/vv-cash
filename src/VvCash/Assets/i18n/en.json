@@ -184,5 +184,6 @@
   "RepeatPin": "Repeat the PIN",
   "PinMismatch": "PINs did not match",
   "SellerPinSetupOffline": "No connection — set the PIN later",
-  "PinTooWeak": "PIN is too simple — try another"
+  "PinTooWeak": "PIN is too simple — try another",
+  "SessionRevokedBanner": "Shift session is no longer valid. Receipts are being saved — sign in again after this customer."
 }

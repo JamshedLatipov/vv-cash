@@ -184,5 +184,6 @@
   "RepeatPin": "PIN-ni takrorlang",
   "PinMismatch": "PIN mos kelmadi",
   "SellerPinSetupOffline": "Aloqa yo'q — PIN-ni keyinroq o'rnating",
-  "PinTooWeak": "PIN juda oddiy — boshqasini sinab ko'ring"
+  "PinTooWeak": "PIN juda oddiy — boshqasini sinab ko'ring",
+  "SessionRevokedBanner": "Smena sessiyasi haqiqiy emas. Cheklar saqlanmoqda — joriy mijozdan keyin qayta tizimga kiring."
 }

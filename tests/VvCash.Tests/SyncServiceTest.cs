@@ -76,6 +76,7 @@ public class SyncServiceTest
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }
+        public event EventHandler? SessionRevoked { add { } remove { } }
     }
 
     private static SyncService Build(StubHttpMessageHandler handler, FakeStorage storage)

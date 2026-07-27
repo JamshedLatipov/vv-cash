@@ -114,7 +114,21 @@
 
     <Grid RowDefinitions="Auto, *, Auto" Background="{StaticResource BackgroundBrush}">
         <!-- ======================= Top bar ======================= -->
-        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="20,10" ZIndex="10">
+        <StackPanel Grid.Row="0">
+            <!-- Task 22: the server rejected the shift session (401 on a sync attempt).
+                 Per the design, a revoked session must never throw the cashier out to the
+                 login screen mid-receipt — receipts keep queueing locally, and this banner
+                 is the only surfaced signal. It sits in the layout flow (not a floating
+                 overlay) so it pushes the catalog/cart down instead of covering the header's
+                 own controls, and it never clears itself once raised (see IsSessionRevoked's
+                 remarks in PosViewModel) — only signing in again, which starts a fresh
+                 PosViewModel, makes it go away. -->
+            <Border Background="{StaticResource DangerBrush}" Padding="20,8" IsVisible="{Binding IsSessionRevoked}">
+                <TextBlock Text="{Binding [SessionRevokedBanner], Source={x:Static services:I18nService.Instance}}"
+                           Foreground="White" FontWeight="Bold" FontSize="13"
+                           TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </Border>
+            <Border Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="20,10" ZIndex="10">
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <!-- brand -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
@@ -195,7 +209,8 @@
                     </Button>
                 </StackPanel>
             </Grid>
-        </Border>
+            </Border>
+        </StackPanel>
 
         <!-- ======================= Body: rail · catalog · order ======================= -->
         <Grid Grid.Row="1" ColumnDefinitions="Auto, *, Auto" Margin="16">

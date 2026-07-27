@@ -312,6 +312,12 @@ public class PosViewModelSellerGateTest
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged;
+        public event EventHandler? SessionRevoked;
+
+        /// <summary>Test hook standing in for SyncOfflineDocumentsAsync hitting a 401 —
+        /// raises the real event so PosViewModel's own OnSessionRevoked subscription is
+        /// what's under test, not this fake's plumbing.</summary>
+        public void RaiseSessionRevoked() => SessionRevoked?.Invoke(this, EventArgs.Empty);
     }
 
     private class FakeCounterpartyService : ICounterpartyService
@@ -1267,5 +1273,76 @@ public class PosViewModelSellerGateTest
         Assert.Equal(60m, raisedPercent); // escalated, same as any fresh over-cap discount
         Assert.Equal(callsBeforeAttempt, deps.CartService.SetManualDiscountCallCount); // not applied yet
         Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // the resumed 40% is untouched meanwhile
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Revoked shift session banner (Task 22): a 401 on a queued document must never throw
+    // the cashier out to the login screen mid-receipt — receipts keep queueing, only a
+    // banner (bound to IsSessionRevoked) appears. IExpenseDocumentService.SessionRevoked
+    // is raised from SyncOfflineDocumentsAsync's background sync loop (see
+    // ExpenseDocumentService's own remarks on NotifySessionRevoked), so — like every other
+    // background-thread event this class subscribes to (OnUnsyncedDocumentsCountChanged,
+    // OnSyncStatusChanged, ...) — the handler must marshal onto the UI thread via
+    // Dispatcher.UIThread rather than mutate IsSessionRevoked directly. Dispatcher.UIThread
+    // .Post does NOT run its callback synchronously even on a thread CheckAccess reports as
+    // the UI thread (confirmed empirically: a callback stayed unrun until the queue was
+    // drained), so these tests pump it explicitly with Dispatcher.UIThread.RunJobs() rather
+    // than assuming same-thread Post is a same-thread no-op.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void SessionRevoked_FromExpenseDocumentService_SetsIsSessionRevoked_OnUiThread()
+    {
+        using var vm = CreateViewModel(out var deps);
+        Assert.False(vm.IsSessionRevoked);
+
+        deps.ExpenseDocumentService.RaiseSessionRevoked();
+
+        // Not yet true: OnSessionRevoked only posts the mutation, it doesn't run inline —
+        // proves the handler is genuinely marshalling rather than setting the property
+        // directly from whatever thread raised the event.
+        Assert.False(vm.IsSessionRevoked);
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.True(vm.IsSessionRevoked);
+    }
+
+    [Fact]
+    public void IsSessionRevoked_OnceRaised_DoesNotSelfClear_OnUnrelatedCartActivity()
+    {
+        // Decision: the banner never clears itself. A 401 means the current auth token is
+        // bad, and a bad token doesn't heal itself — SyncOfflineDocumentsAsync stops at the
+        // very first 401 every pass (see its own remarks), so no later sync can ever
+        // succeed to justify auto-clearing while this same token is still in use. Ringing
+        // up and paying for more receipts (which is exactly what the design says must keep
+        // working) must not silently make the warning disappear — only actually signing in
+        // again does, and that constructs a brand-new PosViewModel instance.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
+        deps.ExpenseDocumentService.RaiseSessionRevoked();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsSessionRevoked);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.True(vm.IsSessionRevoked);
+    }
+
+    [Fact]
+    public void Dispose_UnsubscribesFromSessionRevoked_LaterRaiseNeverSetsIsSessionRevoked()
+    {
+        var vm = CreateViewModel(out var deps);
+        vm.Dispose();
+
+        deps.ExpenseDocumentService.RaiseSessionRevoked();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.False(vm.IsSessionRevoked);
     }
 }

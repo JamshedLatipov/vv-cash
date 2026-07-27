@@ -193,6 +193,20 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     public string SystemStatusText => IsSystemOnline ? "SYSTEM ONLINE" : "SYSTEM OFFLINE";
 
+    /// <summary>Task 22: set (on the UI thread — see <see cref="OnSessionRevoked"/>) once
+    /// <see cref="IExpenseDocumentService.SessionRevoked"/> fires, driving the banner in
+    /// PosView.axaml. Deliberately never cleared back to false by anything in this class:
+    /// the server rejecting the shift session (401) means the current auth token is bad,
+    /// and a bad token doesn't heal itself — the next queued document hits the exact same
+    /// 401 and SyncOfflineDocumentsAsync stops at the first one every time (see its own
+    /// remarks), so no sync can ever succeed afterward to justify auto-clearing the banner.
+    /// Silently hiding it on some later event the cashier didn't cause would be actively
+    /// misleading: the only thing that actually fixes a revoked session is signing in
+    /// again, and that flow constructs a brand-new PosViewModel (see Dispose's own remarks
+    /// on why this class is transient across logout/login), so the banner's true reset is
+    /// simply this instance going away.</summary>
+    [ObservableProperty] private bool _isSessionRevoked;
+
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -526,6 +540,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _expenseDocumentService.UnsyncedDocumentsCountChanged += OnUnsyncedDocumentsCountChanged;
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
 
+        _expenseDocumentService.SessionRevoked += OnSessionRevoked;
+
         _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
 
@@ -803,6 +819,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => UnsyncedDocumentsCount = count);
     }
 
+    /// <summary>SyncOfflineDocumentsAsync's loop runs on a background thread, so — same
+    /// idiom as every other handler in this file that reacts to a background-thread event
+    /// (OnUnsyncedDocumentsCountChanged right above, OnSyncStatusChanged, etc.) — this
+    /// marshals onto the UI thread via Dispatcher.UIThread before touching the
+    /// UI-bound IsSessionRevoked property.</summary>
+    private void OnSessionRevoked(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSessionRevoked = true);
+    }
+
     private void OnParkedSaleCountChanged(object? sender, int count)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
@@ -830,6 +856,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.CartChanged -= OnCartChanged;
         _printerService.StatusChanged -= OnPrinterStatusChanged;
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
+        _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
