@@ -1199,6 +1199,34 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
+    public void ParkedSaleSnapshot_DeserializesLegacyPayloadMissingApprovedById_NoCrash_ApprovedByIdIsNull()
+    {
+        // The real ParkedSaleService round-trips ParkedSaleSnapshot through
+        // System.Text.Json (see its Payload field). This proves the actual backward-
+        // compatibility claim at that boundary — not just "the fake behaves this way" —
+        // by deserializing a JSON string shaped exactly like what a build that predates
+        // this task would have already written into a real ParkedSale row in SQLite: no
+        // "ApprovedById" property at all, not merely a null-valued one.
+        const string legacyPayload = """
+        {
+          "Items": [],
+          "ManualDiscountPercent": 40,
+          "ManualDiscountAmount": 0,
+          "CustomerDiscountPercent": 0,
+          "AppliedCoupons": [],
+          "Customer": null,
+          "Label": null
+        }
+        """;
+
+        var snapshot = System.Text.Json.JsonSerializer.Deserialize<ParkedSaleSnapshot>(legacyPayload);
+
+        Assert.NotNull(snapshot);
+        Assert.Null(snapshot!.ApprovedById);
+        Assert.Equal(40m, snapshot.ManualDiscountPercent); // rest of the shape still restores normally
+    }
+
+    [Fact]
     public async Task ResumeParkedSale_SnapshotWithoutApproverField_ResumesCleanly_NoApproverAttached()
     {
         // Stands in for a parked sale saved by a build that predates ApprovedById: the
