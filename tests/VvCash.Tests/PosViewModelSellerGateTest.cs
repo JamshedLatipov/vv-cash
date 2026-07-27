@@ -309,10 +309,29 @@ public class PosViewModelSellerGateTest
         public string? WarehouseId { get; set; }
     }
 
+    /// <summary>Stands in for the real SellerRosterService: RefreshAsync never throws
+    /// (per its documented contract) and this fake just hands back whatever roster the
+    /// test configured, defaulting to empty — an empty roster is a legitimate state,
+    /// not an error, per Task 17's spec.</summary>
+    private class FakeSellerRosterService : ISellerRosterService
+    {
+        public List<SellerInfo> Roster { get; set; } = new();
+        public int RefreshCallCount { get; private set; }
+
+        public Task<IEnumerable<SellerInfo>> RefreshAsync()
+        {
+            RefreshCallCount++;
+            return Task.FromResult<IEnumerable<SellerInfo>>(Roster);
+        }
+
+        public Task<IEnumerable<SellerInfo>> GetCachedAsync() => Task.FromResult<IEnumerable<SellerInfo>>(Roster);
+    }
+
     private sealed class Deps
     {
         public FakeSellerSession SellerSession { get; } = new();
         public FakeExpenseDocumentService ExpenseDocumentService { get; } = new();
+        public FakeSellerRosterService RosterService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -336,7 +355,8 @@ public class PosViewModelSellerGateTest
             new FakeQuoteService(),
             new FakeSessionContext(),
             deps.HttpClient,
-            deps.SellerSession);
+            deps.SellerSession,
+            deps.RosterService);
     }
 
     private static Product MakeProduct(string id, decimal price) => new()
@@ -539,5 +559,63 @@ public class PosViewModelSellerGateTest
 
         Assert.Contains("\"seller\":\"seller-42\"", json);
         Assert.DoesNotContain("seller_id", json);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Roster loading (Task 17): a shift starting or being restored must actually fetch
+    // and hand off the roster, or everything built in Task 16 stays inert (nobody to
+    // switch to). FakeSellerSession.LoadRosterAsync has no UI-thread assertion, so these
+    // tests exercise the wiring (was RefreshAsync called, did the result reach the
+    // session) rather than the threading requirement itself, which is not observable
+    // through this fake — see the real SellerSession's own AssertUiThread instead.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Construction_RestoresOpenShift_LoadsRosterOntoSession()
+    {
+        // FakeShiftService.GetShiftStateAsync always returns a non-null shift id, so
+        // every construction below restores an "already open" shift on startup —
+        // exactly the scenario Task 17 requires: a register that restarts mid-shift
+        // must still get its roster before the cashier can ring up a first receipt.
+        //
+        // Asserting ">= 1" rather than "== 1": InitializeAsync's own restore branch
+        // runs synchronously to completion before the constructor returns (see the
+        // class-level comment on why the fakes make that true), so it alone guarantees
+        // at least one call deterministically. StartBackgroundSync's loop (kicked off
+        // moments earlier in the same method, via Task.Run) starts lastSyncTime at
+        // DateTime.MinValue, so its very first iteration *also* fires an immediate
+        // roster refresh on a background thread — the same pre-existing "sync
+        // immediately on startup" pattern this task extended from products to the
+        // roster. That second call lands on its own schedule, so whether it has already
+        // completed by the time this assertion runs is a genuine, harmless race; only
+        // the lower bound is deterministic.
+        using var vm = CreateViewModel(out var deps);
+
+        Assert.True(deps.RosterService.RefreshCallCount >= 1,
+            $"expected at least one roster refresh from the startup restore path, got {deps.RosterService.RefreshCallCount}");
+    }
+
+    [Fact]
+    public void OpenShiftCommand_OnSuccess_LoadsFreshRosterOntoSession()
+    {
+        using var vm = CreateViewModel(out var deps);
+        var callsBeforeOpen = deps.RosterService.RefreshCallCount;
+        deps.RosterService.Roster = new List<SellerInfo>
+        {
+            new SellerInfo { Id = "s9", FirstName = "Nina", CanSell = true }
+        };
+
+        vm.OpenShiftCommand.Execute(null);
+
+        // ">" rather than "== +1": see Construction_RestoresOpenShift_LoadsRosterOntoSession
+        // above for why the background sync loop's own first-iteration roster refresh can
+        // (harmlessly) land anywhere around startup, including this narrow window. What
+        // OpenShiftCommand's own synchronous, non-backgrounded call path guarantees
+        // deterministically is at least one more refresh, and — the real proof this is
+        // OpenShiftAsync's own call, not just the background loop's — that the roster the
+        // session ends up holding is the one only OpenShiftCommand could have fetched
+        // (populated with "s9" only after construction finished).
+        Assert.True(deps.RosterService.RefreshCallCount > callsBeforeOpen);
+        Assert.Single(deps.SellerSession.Roster, s => s.Id == "s9");
     }
 }

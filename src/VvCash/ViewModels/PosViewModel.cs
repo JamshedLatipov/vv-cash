@@ -37,6 +37,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ISessionContext _session;
     private readonly HttpClient _httpClient;
     private readonly ISellerSession _sellerSession;
+    private readonly ISellerRosterService _rosterService;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private bool _applyingQuoteResult;
@@ -221,6 +222,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             IsShiftOpen = true;
             IsShiftModalVisible = false;
+
+            // OpenShiftAsync is a [RelayCommand], invoked from a UI-triggered Execute()
+            // and — since this codebase never uses ConfigureAwait(false) — every await
+            // above resumes back on the UI thread via the captured Avalonia
+            // SynchronizationContext, so we're still on the UI thread here.
+            // LoadRosterAsync mutates SellerSession state and requires that; no extra
+            // Dispatcher marshalling is needed.
+            await _sellerSession.LoadRosterAsync(await _rosterService.RefreshAsync());
         }
     }
 
@@ -329,7 +338,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IQuoteService quoteService,
         ISessionContext session,
         HttpClient httpClient,
-        ISellerSession sellerSession)
+        ISellerSession sellerSession,
+        ISellerRosterService rosterService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -348,6 +358,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _session = session;
         _httpClient = httpClient;
         _sellerSession = sellerSession;
+        _rosterService = rosterService;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
@@ -382,6 +393,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 if (DateTime.Now - lastSyncTime >= TimeSpan.FromMinutes(intervalMinutes))
                 {
                     await _syncService.SyncProductsAsync();
+
+                    // Roster changes (new hire, revoked seller, changed PIN) should reach
+                    // the register on the same cadence as the product catalogue. This
+                    // whole loop runs on a background thread (started via Task.Run above,
+                    // no captured UI SynchronizationContext), so RefreshAsync — which only
+                    // touches HTTP and SQLite — is safe to call directly here. It never
+                    // throws (falls back to the cache, worst case an empty roster), so a
+                    // roster-refresh problem can't take down the product sync around it.
+                    // LoadRosterAsync mutates SellerSession state and asserts UI-thread
+                    // access, so it must be marshalled via Dispatcher.UIThread — the same
+                    // idiom OnProductsSynced below uses for the same reason.
+                    var roster = await _rosterService.RefreshAsync();
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                        async () => await _sellerSession.LoadRosterAsync(roster));
+
                     lastSyncTime = DateTime.Now;
                 }
 
@@ -429,6 +455,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Console.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         System.Diagnostics.Debug.WriteLine($"[PosViewModel] GetShiftStateAsync result: {IsShiftOpen} (ID: {CurrentShiftId})");
         IsShiftModalVisible = !IsShiftOpen;
+
+        if (IsShiftOpen)
+        {
+            // A register that restarts mid-shift must still get its roster before the
+            // cashier can ring up a first receipt. InitializeAsync is kicked off
+            // fire-and-forget from the constructor, which App.axaml.cs always calls on
+            // the UI thread (NavigateToPos runs from UI-thread event handlers); with no
+            // ConfigureAwait(false) anywhere in this codebase, every await above resumes
+            // on that captured UI SynchronizationContext, so this is still the UI thread.
+            await _sellerSession.LoadRosterAsync(await _rosterService.RefreshAsync());
+        }
 
         // Initial view is just all categories
         Products.Clear();
