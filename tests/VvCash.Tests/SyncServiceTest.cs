@@ -65,6 +65,8 @@ public class SyncServiceTest
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult<IEnumerable<ParkedSale>>(Array.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);
         public Task DeleteParkedSaleAsync(string id) => Task.CompletedTask;
+        public Task SaveSellersAsync(IEnumerable<SellerInfo> sellers) => Task.CompletedTask;
+        public Task<IEnumerable<SellerInfo>> GetSellersAsync() => Task.FromResult<IEnumerable<SellerInfo>>(Array.Empty<SellerInfo>());
         public Task InitializeAsync() => Task.CompletedTask;
     }
 

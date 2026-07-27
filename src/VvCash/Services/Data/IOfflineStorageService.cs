@@ -33,5 +33,9 @@ public interface IOfflineStorageService
     Task<ParkedSale?> GetParkedSaleAsync(string id);
     Task DeleteParkedSaleAsync(string id);
 
+    // Seller roster cache (продавцы кассы)
+    Task SaveSellersAsync(IEnumerable<SellerInfo> sellers);
+    Task<IEnumerable<SellerInfo>> GetSellersAsync();
+
     Task InitializeAsync();
 }

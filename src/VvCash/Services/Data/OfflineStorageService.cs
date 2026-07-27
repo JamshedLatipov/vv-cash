@@ -12,12 +12,18 @@ public class OfflineStorageService : IOfflineStorageService
     private readonly string _connectionString;
     private bool _isInitialized = false;
 
-    public OfflineStorageService()
+    /// <summary>Creates the service against the standard per-user database file.
+    /// Pass <paramref name="dbPath"/> to point at a different file (e.g. a temp file in tests);
+    /// left null/empty, DI and production code get the usual LocalApplicationData path unchanged.</summary>
+    public OfflineStorageService(string? dbPath = null)
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var appDir = Path.Combine(appDataPath, "VvCash");
-        Directory.CreateDirectory(appDir);
-        var dbPath = Path.Combine(appDir, "offline_data.db");
+        if (string.IsNullOrEmpty(dbPath))
+        {
+            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var appDir = Path.Combine(appDataPath, "VvCash");
+            Directory.CreateDirectory(appDir);
+            dbPath = Path.Combine(appDir, "offline_data.db");
+        }
         _connectionString = $"Data Source={dbPath}";
     }
 
@@ -69,6 +75,17 @@ public class OfflineStorageService : IOfflineStorageService
                 ItemCount INTEGER NOT NULL,
                 CreatedAt TEXT NOT NULL,
                 Payload TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS Sellers (
+                Id TEXT PRIMARY KEY,
+                FirstName TEXT NOT NULL,
+                LastName TEXT,
+                PinHash TEXT,
+                CanSell INTEGER NOT NULL DEFAULT 1,
+                CanRefund INTEGER NOT NULL DEFAULT 0,
+                CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                MaxDiscount REAL NOT NULL DEFAULT 0
             );
 
             -- Create indices for performance
@@ -513,5 +530,83 @@ public class OfflineStorageService : IOfflineStorageService
         command.Parameters.AddWithValue("$Id", id);
 
         await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task SaveSellersAsync(IEnumerable<SellerInfo> sellers)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var transaction = connection.BeginTransaction();
+
+        using var deleteCommand = connection.CreateCommand();
+        deleteCommand.Transaction = transaction;
+        deleteCommand.CommandText = "DELETE FROM Sellers";
+        await deleteCommand.ExecuteNonQueryAsync();
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+            INSERT INTO Sellers (Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount)
+            VALUES ($Id, $FirstName, $LastName, $PinHash, $CanSell, $CanRefund, $CanCloseShift, $MaxDiscount);
+        ";
+
+        var idParam = command.Parameters.Add("$Id", SqliteType.Text);
+        var firstNameParam = command.Parameters.Add("$FirstName", SqliteType.Text);
+        var lastNameParam = command.Parameters.Add("$LastName", SqliteType.Text);
+        var pinHashParam = command.Parameters.Add("$PinHash", SqliteType.Text);
+        var canSellParam = command.Parameters.Add("$CanSell", SqliteType.Integer);
+        var canRefundParam = command.Parameters.Add("$CanRefund", SqliteType.Integer);
+        var canCloseShiftParam = command.Parameters.Add("$CanCloseShift", SqliteType.Integer);
+        var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Real);
+
+        foreach (var s in sellers)
+        {
+            idParam.Value = s.Id ?? string.Empty;
+            firstNameParam.Value = s.FirstName ?? string.Empty;
+            lastNameParam.Value = s.LastName ?? string.Empty;
+            pinHashParam.Value = s.PinHash ?? string.Empty;
+            canSellParam.Value = s.CanSell ? 1 : 0;
+            canRefundParam.Value = s.CanRefund ? 1 : 0;
+            canCloseShiftParam.Value = s.CanCloseShift ? 1 : 0;
+            maxDiscountParam.Value = s.MaxDiscount;
+
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private SellerInfo ReadSeller(SqliteDataReader reader)
+    {
+        return new SellerInfo
+        {
+            Id = reader.GetString(0),
+            FirstName = reader.GetString(1),
+            LastName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+            PinHash = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+            CanSell = reader.GetInt32(4) != 0,
+            CanRefund = reader.GetInt32(5) != 0,
+            CanCloseShift = reader.GetInt32(6) != 0,
+            MaxDiscount = reader.GetDecimal(7)
+        };
+    }
+
+    public async Task<IEnumerable<SellerInfo>> GetSellersAsync()
+    {
+        var sellers = new List<SellerInfo>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount FROM Sellers";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            sellers.Add(ReadSeller(reader));
+        }
+
+        return sellers;
     }
 }
