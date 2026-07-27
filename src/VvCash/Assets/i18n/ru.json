@@ -148,5 +148,21 @@
   "WelcomeSignIn": "С возвращением! Войдите, чтобы открыть смену и начать продажи.",
   "FeatureTwoTaps": "Продажа в два касания",
   "FeatureScan": "Мгновенный поиск и сканирование штрихкода",
-  "FeatureOffline": "Работает офлайн, синхронизируется позже"
+  "FeatureOffline": "Работает офлайн, синхронизируется позже",
+  "SelectSeller": "Кто продаёт?",
+  "EnterPin": "Введите PIN",
+  "SellerPinWrong": "Неверный PIN",
+  "SellerLocked": "Заблокировано на минуту",
+  "SellerPinNotSet": "PIN не задан",
+  "SellerHashCorrupt": "Данные продавца повреждены — обновите список",
+  "SellerNotOnRoster": "Продавец не найден в списке — обновите список",
+  "ConfirmWithPin": "Подтвердите PIN",
+  "CurrentSeller": "Продавец",
+  "SellerVerificationFailed": "Не удалось проверить PIN. Попробуйте снова",
+  "CreatePin": "Придумайте PIN",
+  "RepeatPin": "Повторите PIN",
+  "PinMismatch": "PIN не совпал",
+  "SellerPinSetupOffline": "Нет связи — задайте PIN позже",
+  "PinTooWeak": "Слишком простой PIN — попробуйте другой",
+  "SessionRevokedBanner": "Сессия смены недействительна. Чеки сохраняются, войдите заново после текущего клиента."
 }

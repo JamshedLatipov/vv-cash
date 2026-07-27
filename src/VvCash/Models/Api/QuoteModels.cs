@@ -51,8 +51,14 @@ public class QuoteLineResult
 
 public class QuoteSource
 {
+    /// <summary>"card" | "code" | "promotion".</summary>
     [JsonPropertyName("kind")] public string Kind { get; set; } = string.Empty;
+
     [JsonPropertyName("ref")] public string Ref { get; set; } = string.Empty;
+
+    /// <summary>Display label: the promotion's name, or the promo code itself.
+    /// Empty for cards, whose Ref is an opaque id.</summary>
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
 }
 
 public class QuoteApplied
@@ -60,6 +66,7 @@ public class QuoteApplied
     [JsonPropertyName("kind")] public string Kind { get; set; } = string.Empty;
     [JsonPropertyName("amount")] public decimal Amount { get; set; }
     [JsonPropertyName("ref")] public string Ref { get; set; } = string.Empty;
+    [JsonPropertyName("name")] public string Name { get; set; } = string.Empty;
 }
 
 public class QuoteRejected

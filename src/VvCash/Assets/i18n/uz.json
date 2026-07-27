@@ -169,5 +169,21 @@
   "WelcomeSignIn": "Xush kelibsiz! Smenani ochish va savdoni boshlash uchun tizimga kiring.",
   "FeatureTwoTaps": "Ikki bosishda savdo",
   "FeatureScan": "Tezkor qidiruv va shtrix-kod skaneri",
-  "FeatureOffline": "Oflayn ishlaydi, keyin sinxronlanadi"
+  "FeatureOffline": "Oflayn ishlaydi, keyin sinxronlanadi",
+  "SelectSeller": "Kim sotmoqda?",
+  "EnterPin": "PIN kiriting",
+  "SellerPinWrong": "PIN xato",
+  "SellerLocked": "Bir daqiqaga bloklandi",
+  "SellerPinNotSet": "PIN o'rnatilmagan",
+  "SellerHashCorrupt": "Sotuvchi ma'lumotlari buzilgan — ro'yxatni yangilang",
+  "SellerNotOnRoster": "Sotuvchi ro'yxatda topilmadi — ro'yxatni yangilang",
+  "ConfirmWithPin": "PIN bilan tasdiqlang",
+  "CurrentSeller": "Sotuvchi",
+  "SellerVerificationFailed": "PIN-ni tekshirib bo'lmadi. Qayta urinib ko'ring",
+  "CreatePin": "PIN o'ylab toping",
+  "RepeatPin": "PIN-ni takrorlang",
+  "PinMismatch": "PIN mos kelmadi",
+  "SellerPinSetupOffline": "Aloqa yo'q — PIN-ni keyinroq o'rnating",
+  "PinTooWeak": "PIN juda oddiy — boshqasini sinab ko'ring",
+  "SessionRevokedBanner": "Smena sessiyasi haqiqiy emas. Cheklar saqlanmoqda — joriy mijozdan keyin qayta tizimga kiring."
 }

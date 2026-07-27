@@ -8,9 +8,18 @@ public class DocumentRequest
     [JsonPropertyName("document_hash")]
     public string DocumentHash { get; set; } = string.Empty;
 
-    [JsonPropertyName("seller_id")]
+    [JsonPropertyName("seller")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SellerId { get; set; }
+
+    /// <summary>Id of the seller who approved this sale's manual discount when it
+    /// exceeded the ringing seller's own cap (see PosViewModel.NeedsDiscountApproval).
+    /// Absent for ordinary sales. The backend validates the id and, if the approver no
+    /// longer exists, drops it to null and flags the document rather than rejecting the
+    /// sale.</summary>
+    [JsonPropertyName("approved_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApprovedBy { get; set; }
 
     [JsonPropertyName("counterparty")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -22,6 +31,22 @@ public class DocumentRequest
 
     [JsonPropertyName("shift_id")]
     public string ShiftId { get; set; } = string.Empty;
+
+    /// <summary>Id of the server quote this sale was priced from. Makes the backend
+    /// run FinalizeForSale: price-drift audit plus consuming the winning promo code
+    /// or promotion. Null for offline-priced sales, which have no server quote.</summary>
+    [JsonPropertyName("quote_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? QuoteId { get; set; }
+
+    /// <summary>Promotion this register applied on its own while offline. Sent
+    /// instead of <see cref="QuoteId"/> so the backend can still charge the
+    /// promotion's usage — otherwise max_uses is ignored for every sale rung up
+    /// while disconnected. There is no price-drift audit for such a sale: the
+    /// prices were never locked server-side.</summary>
+    [JsonPropertyName("offline_promotion_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OfflinePromotionId { get; set; }
 
     [JsonPropertyName("payment")]
     public Payment Payment { get; set; } = new();
@@ -42,8 +67,10 @@ public class DocumentProduct
     [JsonPropertyName("product_id")]
     public string ProductId { get; set; } = string.Empty;
 
+    /// <summary>Decimal to match the server, which has always taken a float here.
+    /// An int truncated weighted goods: 1.4 kg was billed and stock-deducted as 1.</summary>
     [JsonPropertyName("quantity")]
-    public int Quantity { get; set; }
+    public decimal Quantity { get; set; }
 
     [JsonPropertyName("invoice_price")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

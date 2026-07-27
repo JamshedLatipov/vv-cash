@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
@@ -7,13 +8,26 @@ namespace VvCash.Tests;
 
 public class CartServiceQuoteTest
 {
-    private static CartService CartWith(decimal price, int qty)
+    private static CartService CartWith(decimal price, int qty, params Promotion[] promotions)
     {
-        var c = new CartService();
+        var c = new CartService(new StubPromotionProvider(promotions));
         var p = new Product { Id = "p1", Name = "X", Price = price };
         for (int i = 0; i < qty; i++) c.AddProduct(p);
         return c;
     }
+
+    private static Promotion PercentOff(string id, string name, decimal percent) => new()
+    {
+        Id = id,
+        Name = name,
+        Enabled = true,
+        AutoApply = true,
+        ApplyScope = "cart",
+        Rules = new List<PromotionRule>
+        {
+            new() { QtyOp = "min", QtyFrom = 1, Effect = "percent", Value = percent },
+        },
+    };
 
     [Fact]
     public void TotalDiscount_UsesQuoteDiscountTotal_WhenApplied()
@@ -78,5 +92,127 @@ public class CartServiceQuoteTest
 
         Assert.Null(c.Quote);
         Assert.Null(c.QuoteId);
+    }
+
+    [Fact]
+    public void OfflinePromotion_AppliesWhenThereIsNoQuote()
+    {
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+
+        Assert.Equal(15m, c.TotalDiscount);
+        Assert.Equal(85m, c.TotalAmount);
+        Assert.Equal("Летняя акция", c.AppliedDiscountName);
+    }
+
+    [Fact]
+    public void OfflinePromotion_IsIgnoredWhileAQuoteIsApplied()
+    {
+        // The server already weighed promotions into its best-deal; applying the
+        // local one on top would double-discount the cart.
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+        c.ApplyQuote(new QuoteResult { QuoteId = "q1", DiscountTotal = 5m });
+
+        Assert.Equal(5m, c.TotalDiscount);
+        Assert.Null(c.OfflinePromotion);
+    }
+
+    [Fact]
+    public void OfflinePromotion_CompetesWithFlatCustomerPercent_BestWins()
+    {
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+        c.SetCustomerDiscount(10m); // flat 10 < promotion 15
+
+        Assert.Equal(15m, c.TotalDiscount);
+
+        c.SetCustomerDiscount(25m); // flat 25 > promotion 15
+        Assert.Equal(25m, c.TotalDiscount);
+    }
+
+    [Fact]
+    public void AppliedDiscountName_PrefersQuoteNameOverRef()
+    {
+        var c = CartWith(100m, 1);
+        c.ApplyQuote(new QuoteResult
+        {
+            QuoteId = "q1",
+            DiscountTotal = 20m,
+            Applied = { new QuoteApplied { Kind = "promotion", Ref = "uuid-1", Name = "3 по цене 2" } },
+        });
+
+        Assert.Equal("3 по цене 2", c.AppliedDiscountName);
+    }
+
+    [Fact]
+    public void OfflinePromotion_IsNotReported_WhenTheFlatPathWins()
+    {
+        // The sale reports OfflinePromotion's id to the server, which charges a use
+        // against max_uses. A promotion that lost to the flat customer percent
+        // granted nothing and must not be billed for it.
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+        c.SetCustomerDiscount(25m);
+
+        Assert.Equal(25m, c.TotalDiscount);
+        Assert.Null(c.OfflinePromotion);
+        Assert.Null(c.AppliedDiscountName);
+    }
+
+    [Fact]
+    public void OfflinePromotion_IsReported_WhenItBeatsTheFlatPath()
+    {
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+        c.SetCustomerDiscount(10m);
+
+        Assert.Equal("promo1", c.OfflinePromotion?.PromotionId);
+    }
+
+    [Fact]
+    public void SetQuantity_AcceptsFractionalWeight()
+    {
+        var c = CartWith(100m, 1);
+
+        c.SetQuantity(c.Items[0], 1.4m);
+
+        Assert.Equal(1.4m, c.Items[0].Quantity);
+        Assert.Equal(140m, c.Subtotal);
+    }
+
+    [Fact]
+    public void SetQuantity_RemovesTheLineAtZero()
+    {
+        var c = CartWith(100m, 1);
+
+        c.SetQuantity(c.Items[0], 0m);
+
+        Assert.Empty(c.Items);
+    }
+
+    [Fact]
+    public void OfflinePromotion_UsesTheStoreRoundingPolicy()
+    {
+        // 33.33% of 100 is 33.33 half-up but 33.34 rounding away from zero on any
+        // remainder — proof the policy reaches the calculator instead of a
+        // hardcoded 2-place half-up.
+        var provider = new StubPromotionProvider(PercentOff("promo1", "Акция", 33.333m))
+        {
+            MoneyPolicy = new MoneyPolicy { Scale = 2, Mode = "UP" },
+        };
+        var c = new CartService(provider);
+        c.AddProduct(new Product { Id = "p1", Name = "X", Price = 100m });
+
+        Assert.Equal(33.34m, c.TotalDiscount);
+    }
+
+    [Fact]
+    public void AppliedDiscountName_FallsBackToRef_WhenServerSendsNoName()
+    {
+        var c = CartWith(100m, 1);
+        c.ApplyQuote(new QuoteResult
+        {
+            QuoteId = "q1",
+            DiscountTotal = 20m,
+            Applied = { new QuoteApplied { Kind = "card", Ref = "card-42" } },
+        });
+
+        Assert.Equal("card-42", c.AppliedDiscountName);
     }
 }

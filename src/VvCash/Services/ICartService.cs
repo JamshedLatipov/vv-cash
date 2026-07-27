@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using VvCash.Models;
 using VvCash.Models.Api;
+using VvCash.Services.Discounts;
 
 namespace VvCash.Services;
 
@@ -28,10 +29,20 @@ public interface ICartService
     void ApplyQuote(QuoteResult result);
     void ClearQuote();
 
+    // Locally computed promotion, used only while there is no server quote.
+    PromotionOutcome? OfflinePromotion { get; }
+
+    // Display label of the discount source currently in force (null if none).
+    string? AppliedDiscountName { get; }
+
+    // Store money rounding, used wherever the register computes money itself.
+    MoneyPolicy MoneyPolicy { get; }
+
     void AddProduct(Product product);
     void RemoveItem(CartItem item);
     void IncreaseQuantity(CartItem item);
     void DecreaseQuantity(CartItem item);
+    void SetQuantity(CartItem item, decimal quantity);
     void ClearCart();
     void ApplyCoupon(Coupon coupon);
     void RemoveCoupon(string code);

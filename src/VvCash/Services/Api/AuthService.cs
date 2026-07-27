@@ -71,8 +71,21 @@ public class AuthService : IAuthService
                         if (root.TryGetProperty("access_token", out var authTokenElement))
                         {
                             _settingsService.AuthToken = authTokenElement.GetString() ?? string.Empty;
+
+                            // The token's real lifetime is the shift now, not a fixed
+                            // duration: PosViewModel wipes it on a successful shift close
+                            // (see DoCloseShiftAsync), so nothing here needs to expire it
+                            // mid-shift. AuthTokenExpiresAt exists purely to answer one
+                            // question the next time the app launches — should the register
+                            // skip the login screen and resume straight in? — which is
+                            // exactly what "remember me" means. rememberMe == false stamps
+                            // null so that check always fails and a fresh login is required;
+                            // rememberMe == true stamps MaxShiftHours out as a backstop
+                            // against a register whose shift never actually gets closed
+                            // (crash, power loss, forgotten till) staying auto-authenticated
+                            // forever — not an expiry a cashier should ever actually hit.
                             _settingsService.AuthTokenExpiresAt = rememberMe
-                                ? DateTime.UtcNow.AddHours(Constants.AuthConstants.RememberLoginHours)
+                                ? DateTime.UtcNow.AddHours(Constants.AuthConstants.MaxShiftHours)
                                 : null;
                             _settingsService.Save();
                         }
@@ -115,5 +128,12 @@ public class AuthService : IAuthService
             Debug.WriteLine($"[AuthService] Unexpected error during login: {ex.Message}");
             return false;
         }
+    }
+
+    public void ClearSession()
+    {
+        _settingsService.AuthToken = string.Empty;
+        _settingsService.AuthTokenExpiresAt = null;
+        _settingsService.Save();
     }
 }

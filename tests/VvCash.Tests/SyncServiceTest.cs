@@ -33,6 +33,33 @@ public class SyncServiceTest
     {
         public int LastSyncVersion;
         public List<Product> SavedProducts = new();
+        public List<Promotion>? SavedPromotions;
+
+        public Task SavePromotionsAsync(IEnumerable<Promotion> promotions)
+        {
+            SavedPromotions = promotions.ToList();
+            return Task.CompletedTask;
+        }
+
+        public Task<IEnumerable<Promotion>> GetPromotionsAsync()
+            => Task.FromResult<IEnumerable<Promotion>>(SavedPromotions ?? new List<Promotion>());
+
+        public Task ClearPromotionsAsync()
+        {
+            SavedPromotions = new List<Promotion>();
+            return Task.CompletedTask;
+        }
+
+        public MoneyPolicy? SavedMoneyPolicy;
+
+        public Task SaveMoneyPolicyAsync(MoneyPolicy policy)
+        {
+            SavedMoneyPolicy = policy;
+            return Task.CompletedTask;
+        }
+
+        public Task<MoneyPolicy> GetMoneyPolicyAsync()
+            => Task.FromResult(SavedMoneyPolicy ?? MoneyPolicy.Default);
 
         public Task SaveProductsAsync(IEnumerable<Product> products)
         {
@@ -65,6 +92,8 @@ public class SyncServiceTest
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult<IEnumerable<ParkedSale>>(Array.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);
         public Task DeleteParkedSaleAsync(string id) => Task.CompletedTask;
+        public Task SaveSellersAsync(IEnumerable<SellerInfo> sellers) => Task.CompletedTask;
+        public Task<IEnumerable<SellerInfo>> GetSellersAsync() => Task.FromResult<IEnumerable<SellerInfo>>(Array.Empty<SellerInfo>());
         public Task InitializeAsync() => Task.CompletedTask;
     }
 
@@ -74,6 +103,7 @@ public class SyncServiceTest
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }
+        public event EventHandler? SessionRevoked { add { } remove { } }
     }
 
     private static SyncService Build(StubHttpMessageHandler handler, FakeStorage storage)
@@ -126,5 +156,129 @@ public class SyncServiceTest
 
         Assert.Equal(1, storage.LastSyncVersion);
         Assert.Empty(storage.SavedProducts);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_ParsesTagIds()
+    {
+        // Tag ids drive tag-targeted promotions offline; dropping them silently
+        // would make those promotions apply to nothing on a disconnected register.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[1],"status":0}""");
+            if (url.Contains("product/update/1/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[{"id":"p1","name":"Товар","sell_price":10,"tags":["t1","t2"]}],"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        var product = Assert.Single(storage.SavedProducts);
+        Assert.Equal(new[] { "t1", "t2" }, product.TagIds);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_CachesPromotions()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            if (url.Contains("cashes/promotion/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[{"id":"promo1","name":"Летняя акция","enabled":true,"auto_apply":true,"apply_scope":"cart","priority":0,"max_uses":0,"used_count":0,"targets":[],"rules":[{"id":"r1","qty_op":"min","qty_from":2,"effect":"percent","value":15,"repeat":false}]}],"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        var promo = Assert.Single(storage.SavedPromotions!);
+        Assert.Equal("promo1", promo.Id);
+        Assert.Equal("Летняя акция", promo.Name);
+        var rule = Assert.Single(promo.Rules);
+        Assert.Equal("min", rule.QtyOp);
+        Assert.Equal(2m, rule.QtyFrom);
+        Assert.Equal(15m, rule.Value);
+    }
+
+    [Fact]
+    public async Task SyncPromotions_HttpFailure_KeepsPreviousCache()
+    {
+        // Losing the promotion endpoint must not blank the cache: pricing with
+        // yesterday's promotions beats pricing with none.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            return (HttpStatusCode.InternalServerError, """{"message":"boom","body":null,"status":1}""");
+        });
+        var storage = new FakeStorage { SavedPromotions = new List<Promotion> { new() { Id = "old" } } };
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        var promo = Assert.Single(storage.SavedPromotions!);
+        Assert.Equal("old", promo.Id);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_CachesMoneyPolicy()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            if (url.Contains("cashes/money/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":{"scale":3,"mode":"BANK"},"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.Equal(3, storage.SavedMoneyPolicy!.Scale);
+        Assert.Equal("BANK", storage.SavedMoneyPolicy.Mode);
+    }
+
+    [Fact]
+    public async Task SyncMoneyPolicy_HttpFailure_KeepsCachedValue()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            return (HttpStatusCode.InternalServerError, """{"message":"boom","body":null,"status":1}""");
+        });
+        var storage = new FakeStorage { SavedMoneyPolicy = new MoneyPolicy { Scale = 0, Mode = "FLOOR" } };
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.Equal(0, storage.SavedMoneyPolicy!.Scale);
+        Assert.Equal("FLOOR", storage.SavedMoneyPolicy.Mode);
+    }
+
+    [Fact]
+    public async Task SyncPromotions_EmptyBody_ClearsCache()
+    {
+        // The endpoint returning nothing means every promotion was disabled or
+        // deleted; keeping the old set would discount carts for a dead campaign.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage { SavedPromotions = new List<Promotion> { new() { Id = "old" } } };
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.Empty(storage.SavedPromotions!);
     }
 }

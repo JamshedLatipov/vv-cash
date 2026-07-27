@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.IO;
 using Microsoft.Data.Sqlite;
@@ -12,12 +13,18 @@ public class OfflineStorageService : IOfflineStorageService
     private readonly string _connectionString;
     private bool _isInitialized = false;
 
-    public OfflineStorageService()
+    /// <summary>Creates the service against the standard per-user database file.
+    /// Pass <paramref name="dbPath"/> to point at a different file (e.g. a temp file in tests);
+    /// left null/empty, DI and production code get the usual LocalApplicationData path unchanged.</summary>
+    public OfflineStorageService(string? dbPath = null)
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var appDir = Path.Combine(appDataPath, "VvCash");
-        Directory.CreateDirectory(appDir);
-        var dbPath = Path.Combine(appDir, "offline_data.db");
+        if (string.IsNullOrEmpty(dbPath))
+        {
+            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var appDir = Path.Combine(appDataPath, "VvCash");
+            Directory.CreateDirectory(appDir);
+            dbPath = Path.Combine(appDir, "offline_data.db");
+        }
         _connectionString = $"Data Source={dbPath}";
     }
 
@@ -58,7 +65,16 @@ public class OfflineStorageService : IOfflineStorageService
                 OriginalPrice REAL,
                 DiscountPercent REAL,
                 ImagePath TEXT,
-                Barcode TEXT
+                Barcode TEXT,
+                Tags TEXT
+            );
+
+            -- Auto-applied promotions, stored as the raw server payload: the rules
+            -- and targets are nested lists that would need two more tables and a
+            -- join to reassemble, and nothing here ever queries into them.
+            CREATE TABLE IF NOT EXISTS Promotions (
+                Id TEXT PRIMARY KEY,
+                Payload TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS ParkedSales (
@@ -66,9 +82,22 @@ public class OfflineStorageService : IOfflineStorageService
                 Label TEXT,
                 CustomerName TEXT,
                 Total REAL NOT NULL,
-                ItemCount INTEGER NOT NULL,
+                -- REAL, not INTEGER: a weighted line contributes a fraction of a unit.
+                -- SQLite's dynamic typing keeps rows written under the old declaration readable.
+                ItemCount REAL NOT NULL,
                 CreatedAt TEXT NOT NULL,
                 Payload TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS Sellers (
+                Id TEXT PRIMARY KEY,
+                FirstName TEXT NOT NULL,
+                LastName TEXT,
+                PinHash TEXT,
+                CanSell INTEGER NOT NULL DEFAULT 1,
+                CanRefund INTEGER NOT NULL DEFAULT 0,
+                CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                MaxDiscount REAL NOT NULL DEFAULT 0
             );
 
             -- Create indices for performance
@@ -98,6 +127,14 @@ public class OfflineStorageService : IOfflineStorageService
         }
         catch { /* column already exists */ }
 
+        // Migration: add Tags to Products if upgrading from older DB
+        try
+        {
+            command.CommandText = "ALTER TABLE Products ADD COLUMN Tags TEXT;";
+            await command.ExecuteNonQueryAsync();
+        }
+        catch { /* column already exists */ }
+
         _isInitialized = true;
     }
 
@@ -111,8 +148,8 @@ public class OfflineStorageService : IOfflineStorageService
         command.Transaction = transaction;
 
         command.CommandText = @"
-            INSERT INTO Products (Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode)
-            VALUES ($Id, $Name, $Sku, $Category, $Price, $OriginalPrice, $DiscountPercent, $ImagePath, $Barcode)
+            INSERT INTO Products (Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags)
+            VALUES ($Id, $Name, $Sku, $Category, $Price, $OriginalPrice, $DiscountPercent, $ImagePath, $Barcode, $Tags)
             ON CONFLICT(Id) DO UPDATE SET
                 Name=excluded.Name,
                 Sku=excluded.Sku,
@@ -121,7 +158,8 @@ public class OfflineStorageService : IOfflineStorageService
                 OriginalPrice=excluded.OriginalPrice,
                 DiscountPercent=excluded.DiscountPercent,
                 ImagePath=excluded.ImagePath,
-                Barcode=excluded.Barcode;
+                Barcode=excluded.Barcode,
+                Tags=excluded.Tags;
         ";
 
         var idParam = command.Parameters.Add("$Id", SqliteType.Text);
@@ -133,6 +171,7 @@ public class OfflineStorageService : IOfflineStorageService
         var discountParam = command.Parameters.Add("$DiscountPercent", SqliteType.Real);
         var imageParam = command.Parameters.Add("$ImagePath", SqliteType.Text);
         var barcodeParam = command.Parameters.Add("$Barcode", SqliteType.Text);
+        var tagsParam = command.Parameters.Add("$Tags", SqliteType.Text);
 
         foreach (var p in products)
         {
@@ -145,6 +184,7 @@ public class OfflineStorageService : IOfflineStorageService
             discountParam.Value = p.DiscountPercent ?? (object)DBNull.Value;
             imageParam.Value = p.ImagePath ?? string.Empty;
             barcodeParam.Value = p.Barcode ?? string.Empty;
+            tagsParam.Value = JsonSerializer.Serialize(p.TagIds ?? new List<string>());
 
             await command.ExecuteNonQueryAsync();
         }
@@ -164,8 +204,27 @@ public class OfflineStorageService : IOfflineStorageService
             OriginalPrice = reader.IsDBNull(5) ? null : reader.GetDecimal(5),
             DiscountPercent = reader.IsDBNull(6) ? null : reader.GetDecimal(6),
             ImagePath = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-            Barcode = reader.IsDBNull(8) ? string.Empty : reader.GetString(8)
+            Barcode = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+            TagIds = ReadTags(reader, 9)
         };
+    }
+
+    /// <summary>Tags are a JSON array in one column. A row written before the Tags
+    /// migration, or a malformed payload, reads as "no tags" rather than throwing —
+    /// a broken tag list must not take the whole product catalog down.</summary>
+    private static List<string> ReadTags(SqliteDataReader reader, int ordinal)
+    {
+        if (reader.IsDBNull(ordinal)) return new List<string>();
+        var raw = reader.GetString(ordinal);
+        if (string.IsNullOrWhiteSpace(raw)) return new List<string>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(raw) ?? new List<string>();
+        }
+        catch (JsonException)
+        {
+            return new List<string>();
+        }
     }
 
     public async Task<IEnumerable<Product>> GetAllProductsAsync()
@@ -175,7 +234,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode FROM Products";
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags FROM Products";
 
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -193,7 +252,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode FROM Products WHERE Category = $Category";
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags FROM Products WHERE Category = $Category";
         command.Parameters.AddWithValue("$Category", categoryId);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -211,7 +270,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode FROM Products WHERE Barcode = $Barcode LIMIT 1";
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags FROM Products WHERE Barcode = $Barcode LIMIT 1";
         command.Parameters.AddWithValue("$Barcode", barcode);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -314,6 +373,48 @@ public class OfflineStorageService : IOfflineStorageService
         return GetCategoriesInternalAsync(1);
     }
 
+    /// <summary>Stored as a Settings row rather than its own table: it is one
+    /// value per register, and offline pricing must find it without a sync.</summary>
+    public async Task SaveMoneyPolicyAsync(MoneyPolicy policy)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO Settings (Key, Value) VALUES ('MoneyPolicy', $Value)
+            ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value;
+        ";
+        command.Parameters.AddWithValue("$Value", JsonSerializer.Serialize(policy));
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>The cached policy, or the server's default when nothing was ever
+    /// synced — same fallback the backend applies for an unconfigured store.</summary>
+    public async Task<MoneyPolicy> GetMoneyPolicyAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM Settings WHERE Key = 'MoneyPolicy'";
+
+        var result = await command.ExecuteScalarAsync();
+        if (result is string raw && !string.IsNullOrWhiteSpace(raw))
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<MoneyPolicy>(raw) ?? MoneyPolicy.Default;
+            }
+            catch (JsonException)
+            {
+                return MoneyPolicy.Default;
+            }
+        }
+        return MoneyPolicy.Default;
+    }
+
     public async Task SetLastSyncVersionAsync(int version)
     {
         using var connection = new SqliteConnection(_connectionString);
@@ -395,6 +496,71 @@ public class OfflineStorageService : IOfflineStorageService
         await command.ExecuteNonQueryAsync();
     }
 
+    /// <summary>Replaces the promotion cache wholesale. The endpoint returns the
+    /// complete set, so an upsert would leave promotions that were disabled or
+    /// deleted server-side still discounting carts on this register.</summary>
+    public async Task SavePromotionsAsync(IEnumerable<Promotion> promotions)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+
+        command.CommandText = "DELETE FROM Promotions";
+        await command.ExecuteNonQueryAsync();
+
+        command.CommandText = "INSERT INTO Promotions (Id, Payload) VALUES ($Id, $Payload)";
+        var idParam = command.Parameters.Add("$Id", SqliteType.Text);
+        var payloadParam = command.Parameters.Add("$Payload", SqliteType.Text);
+
+        foreach (var p in promotions)
+        {
+            if (string.IsNullOrWhiteSpace(p.Id)) continue;
+            idParam.Value = p.Id;
+            payloadParam.Value = JsonSerializer.Serialize(p);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    public async Task<IEnumerable<Promotion>> GetPromotionsAsync()
+    {
+        var promotions = new List<Promotion>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Payload FROM Promotions";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            try
+            {
+                var p = JsonSerializer.Deserialize<Promotion>(reader.GetString(0));
+                if (p != null) promotions.Add(p);
+            }
+            catch (JsonException)
+            {
+                // One unreadable row must not blank out every other promotion.
+            }
+        }
+        return promotions;
+    }
+
+    public async Task ClearPromotionsAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM Promotions";
+        await command.ExecuteNonQueryAsync();
+    }
+
     public async Task ClearCategoriesAsync()
     {
         using var connection = new SqliteConnection(_connectionString);
@@ -461,7 +627,7 @@ public class OfflineStorageService : IOfflineStorageService
             Label = reader.IsDBNull(1) ? null : reader.GetString(1),
             CustomerName = reader.IsDBNull(2) ? null : reader.GetString(2),
             Total = reader.GetDecimal(3),
-            ItemCount = reader.GetInt32(4),
+            ItemCount = reader.GetDecimal(4),
             CreatedAt = DateTime.Parse(reader.GetString(5), null, System.Globalization.DateTimeStyles.RoundtripKind),
             Payload = reader.GetString(6)
         };
@@ -513,5 +679,83 @@ public class OfflineStorageService : IOfflineStorageService
         command.Parameters.AddWithValue("$Id", id);
 
         await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task SaveSellersAsync(IEnumerable<SellerInfo> sellers)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var transaction = connection.BeginTransaction();
+
+        using var deleteCommand = connection.CreateCommand();
+        deleteCommand.Transaction = transaction;
+        deleteCommand.CommandText = "DELETE FROM Sellers";
+        await deleteCommand.ExecuteNonQueryAsync();
+
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = @"
+            INSERT INTO Sellers (Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount)
+            VALUES ($Id, $FirstName, $LastName, $PinHash, $CanSell, $CanRefund, $CanCloseShift, $MaxDiscount);
+        ";
+
+        var idParam = command.Parameters.Add("$Id", SqliteType.Text);
+        var firstNameParam = command.Parameters.Add("$FirstName", SqliteType.Text);
+        var lastNameParam = command.Parameters.Add("$LastName", SqliteType.Text);
+        var pinHashParam = command.Parameters.Add("$PinHash", SqliteType.Text);
+        var canSellParam = command.Parameters.Add("$CanSell", SqliteType.Integer);
+        var canRefundParam = command.Parameters.Add("$CanRefund", SqliteType.Integer);
+        var canCloseShiftParam = command.Parameters.Add("$CanCloseShift", SqliteType.Integer);
+        var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Real);
+
+        foreach (var s in sellers)
+        {
+            idParam.Value = s.Id ?? string.Empty;
+            firstNameParam.Value = s.FirstName ?? string.Empty;
+            lastNameParam.Value = s.LastName ?? string.Empty;
+            pinHashParam.Value = s.PinHash ?? string.Empty;
+            canSellParam.Value = s.CanSell ? 1 : 0;
+            canRefundParam.Value = s.CanRefund ? 1 : 0;
+            canCloseShiftParam.Value = s.CanCloseShift ? 1 : 0;
+            maxDiscountParam.Value = s.MaxDiscount;
+
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    private SellerInfo ReadSeller(SqliteDataReader reader)
+    {
+        return new SellerInfo
+        {
+            Id = reader.GetString(0),
+            FirstName = reader.GetString(1),
+            LastName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+            PinHash = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+            CanSell = reader.GetInt32(4) != 0,
+            CanRefund = reader.GetInt32(5) != 0,
+            CanCloseShift = reader.GetInt32(6) != 0,
+            MaxDiscount = reader.GetDecimal(7)
+        };
+    }
+
+    public async Task<IEnumerable<SellerInfo>> GetSellersAsync()
+    {
+        var sellers = new List<SellerInfo>();
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount FROM Sellers";
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            sellers.Add(ReadSeller(reader));
+        }
+
+        return sellers;
     }
 }

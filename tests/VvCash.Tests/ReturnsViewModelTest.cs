@@ -32,7 +32,7 @@ public class ReturnsViewModelTest
         public int Drawer; public int Receipt;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged;
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d) { Receipt++; return Task.FromResult(true); }

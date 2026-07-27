@@ -5,6 +5,7 @@
         xmlns:models="using:VvCash.Models"
         xmlns:material="using:Material.Icons.Avalonia"
         xmlns:converters="using:VvCash.Converters"
+        xmlns:views="using:VvCash.Views"
         x:Class="VvCash.Views.PosView"
         Background="{StaticResource BackgroundBrush}">
 
@@ -113,12 +114,39 @@
 
     <Grid RowDefinitions="Auto, *, Auto" Background="{StaticResource BackgroundBrush}">
         <!-- ======================= Top bar ======================= -->
-        <Border Grid.Row="0" Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="20,10" ZIndex="10">
+        <StackPanel Grid.Row="0">
+            <!-- Task 22: the server rejected the shift session (401 on a sync attempt).
+                 Per the design, a revoked session must never throw the cashier out to the
+                 login screen mid-receipt — receipts keep queueing locally, and this banner
+                 is the only surfaced signal. It sits in the layout flow (not a floating
+                 overlay) so it pushes the catalog/cart down instead of covering the header's
+                 own controls, and it never clears itself once raised (see IsSessionRevoked's
+                 remarks in PosViewModel) — only signing in again, which starts a fresh
+                 PosViewModel, makes it go away. -->
+            <Border Background="{StaticResource DangerBrush}" Padding="20,8" IsVisible="{Binding IsSessionRevoked}">
+                <TextBlock Text="{Binding [SessionRevokedBanner], Source={x:Static services:I18nService.Instance}}"
+                           Foreground="White" FontWeight="Bold" FontSize="13"
+                           TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
+            </Border>
+            <Border Background="{StaticResource HeaderBackgroundBrush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="0,0,0,1" Padding="20,10" ZIndex="10">
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <!-- brand -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                    <Image Source="avares://VvCash/Assets/logo.png" Width="30" Height="30" Stretch="Uniform"/>
-                    <TextBlock Text="{Binding [LuxeThreadsPOS], Source={x:Static services:I18nService.Instance}}" FontSize="17" FontWeight="ExtraBold" LetterSpacing="-0.3" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <Image Source="avares://VvCash/Assets/logo.png" Width="30" Height="30" Stretch="Uniform"/>
+                        <TextBlock Text="{Binding [LuxeThreadsPOS], Source={x:Static services:I18nService.Instance}}" FontSize="17" FontWeight="ExtraBold" LetterSpacing="-0.3" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- current seller chip: tap to switch who is selling -->
+                    <Button Classes="Transparent" Padding="0" Command="{Binding OpenSellerSwitchCommand}" VerticalAlignment="Center"
+                            ToolTip.Tip="{Binding [SelectSeller], Source={x:Static services:I18nService.Instance}}">
+                        <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="99" Padding="12,6">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <material:MaterialIcon Kind="AccountCircle" Width="16" Height="16" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding SellerChipText}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </Button>
                 </StackPanel>
 
                 <!-- wide search / scan bar -->
@@ -181,7 +209,8 @@
                     </Button>
                 </StackPanel>
             </Grid>
-        </Border>
+            </Border>
+        </StackPanel>
 
         <!-- ======================= Body: rail · catalog · order ======================= -->
         <Grid Grid.Row="1" ColumnDefinitions="Auto, *, Auto" Margin="16">
@@ -420,7 +449,7 @@
                                                     <Button Classes="QtyButton" Width="30" Height="30" FontSize="16" CornerRadius="8"
                                                             Command="{Binding DataContext.DecreaseQuantityCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding}" Content="-"/>
-                                                    <TextBlock Text="{Binding Quantity}" Width="26" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="15"/>
+                                                    <TextBlock Text="{Binding QuantityDisplay}" Width="26" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="15"/>
                                                     <Button Classes="QtyButton" Width="30" Height="30" FontSize="16" CornerRadius="8"
                                                             Command="{Binding DataContext.IncreaseQuantityCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding}" Content="+"/>
@@ -514,6 +543,11 @@
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding TotalDiscount, StringFormat='-{0:F2}'}" Foreground="{StaticResource Red500Brush}" FontSize="14" FontWeight="Bold"/>
                                 </Grid>
+                                <!-- Which discount is in force: the promotion's name, the promo code, the card. -->
+                                <StackPanel Orientation="Horizontal" Spacing="5" IsVisible="{Binding HasAppliedDiscountName}">
+                                    <material:MaterialIcon Kind="SaleOutline" Width="14" Height="14" Foreground="{StaticResource Red500Brush}" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding AppliedDiscountName}" Foreground="{StaticResource Red500Brush}" FontSize="12" FontWeight="Medium" TextTrimming="CharacterEllipsis" MaxWidth="220"/>
+                                </StackPanel>
                                 <Grid ColumnDefinitions="*, Auto">
                                     <TextBlock Grid.Column="0" Text="{Binding [TotalAmount], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="1" Text="{Binding TotalAmount, StringFormat='{}{0:F2}'}" FontSize="15" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}"/>
@@ -863,5 +897,9 @@
                 </StackPanel>
             </Border>
         </Border>
+
+        <!-- Seller Switch Overlay: highest ZIndex of everything in this view, since
+             confirming who is selling must never be hidden behind another modal. -->
+        <views:SellerSwitchView Grid.RowSpan="3" DataContext="{Binding SellerSwitchViewModel}" ZIndex="4000"/>
     </Grid>
 </UserControl>
