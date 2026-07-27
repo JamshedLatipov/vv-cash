@@ -173,6 +173,7 @@ public partial class App : Application
         services.AddTransient<LoginViewModel>();
         services.AddTransient<PosViewModel>();
         services.AddTransient<CustomerDisplayViewModel>();
+        services.AddTransient<SellerSwitchViewModel>();
         services.AddSingleton<MainViewModel>();
     }
 }

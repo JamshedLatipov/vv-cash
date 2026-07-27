@@ -123,6 +123,57 @@ public class SellerSwitchViewModelTest
     }
 
     [Fact]
+    public async Task Approval_AgainstLockedSupervisor_ShowsLockedMessage_NotWrongPin()
+    {
+        var session = await SessionWithRoster();
+        // Lock u-2 out via five wrong attempts (SwitchAsync and ApproveAsync share
+        // one lockout counter per seller — see SellerSession's remarks).
+        for (var i = 0; i < 5; i++)
+            await session.SwitchAsync("u-2", "0000");
+
+        var vm = new SellerSwitchViewModel(session);
+        SellerInfo? approver = null;
+        vm.Approved += (_, s) => approver = s;
+        vm.OpenForApproval(s => s.CanCloseShift);
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+
+        // Correct PIN, but u-2 is locked — no PIN, not even the right one, is
+        // checked while locked.
+        foreach (var d in "9073")
+            await vm.AppendDigitCommand.ExecuteAsync(d.ToString());
+
+        Assert.True(vm.HasError);
+        Assert.True(vm.IsVisible);
+        Assert.Null(approver);
+        Assert.Equal(I18nService.Instance["SellerLocked"], vm.ErrorMessage);
+        Assert.NotEqual(I18nService.Instance["SellerPinWrong"], vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Approval_AgainstCorruptHash_ShowsHashCorruptMessage_NotWrongPin()
+    {
+        var session = new SellerSession(() => new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc), TimeSpan.FromSeconds(90));
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-4", FirstName = "Битый", PinHash = "not-a-valid-hash", CanSell = true, CanCloseShift = true }
+        });
+        var vm = new SellerSwitchViewModel(session);
+        SellerInfo? approver = null;
+        vm.Approved += (_, s) => approver = s;
+        vm.OpenForApproval(s => s.CanCloseShift);
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+
+        foreach (var d in "4821")
+            await vm.AppendDigitCommand.ExecuteAsync(d.ToString());
+
+        Assert.True(vm.HasError);
+        Assert.True(vm.IsVisible);
+        Assert.Null(approver);
+        Assert.Equal(I18nService.Instance["SellerHashCorrupt"], vm.ErrorMessage);
+        Assert.NotEqual(I18nService.Instance["SellerPinWrong"], vm.ErrorMessage);
+    }
+
+    [Fact]
     public async Task CorruptHash_ProducesItsOwnMessage_DistinctFromWrongPin()
     {
         var session = new SellerSession(() => new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc), TimeSpan.FromSeconds(90));

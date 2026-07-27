@@ -121,62 +121,50 @@ public partial class SellerSwitchViewModel : ViewModelBase
 
         if (_approvalMode)
         {
-            var approver = await _session.ApproveAsync(sellerId, Pin);
-            if (approver == null)
+            // ApproveAsync now surfaces the same SwitchResult vocabulary as
+            // SwitchAsync (see ApprovalResult), so both modes share one
+            // result-to-message mapping instead of the approval path
+            // collapsing every failure into a generic "wrong PIN".
+            var approval = await _session.ApproveAsync(sellerId, Pin);
+            if (approval.Result != SwitchResult.Ok)
             {
-                // ISellerSession.ApproveAsync deliberately collapses every failure
-                // reason (wrong PIN, lockout, no PIN set, unknown seller, corrupt
-                // hash) into a single null — unlike SwitchAsync it does not surface
-                // a SwitchResult. "Wrong PIN" is the most common cause and the best
-                // generic message available without changing that interface.
-                Fail(I18nService.Instance["SellerPinWrong"]);
+                Fail(MessageFor(approval.Result));
                 return;
             }
 
             IsVisible = false;
-            Approved?.Invoke(this, approver);
+            // Result == Ok guarantees Approver is set — see ApprovalResult.Success.
+            Approved?.Invoke(this, approval.Approver!);
             return;
         }
 
         var result = await _session.SwitchAsync(sellerId, Pin);
-        switch (result)
+        if (result != SwitchResult.Ok)
         {
-            case SwitchResult.Ok:
-                IsVisible = false;
-                break;
-
-            case SwitchResult.WrongPin:
-                Fail(I18nService.Instance["SellerPinWrong"]);
-                break;
-
-            case SwitchResult.Locked:
-                Fail(I18nService.Instance["SellerLocked"]);
-                break;
-
-            case SwitchResult.PinNotSet:
-                Fail(I18nService.Instance["SellerPinNotSet"]);
-                break;
-
-            case SwitchResult.UnknownSeller:
-                // The tapped tile came from this VM's own Sellers snapshot, taken
-                // when the overlay opened, so this only fires if the roster was
-                // reloaded out from under an open overlay (e.g. a background sync
-                // removed this seller) between the tap and the fourth digit.
-                // "Wrong PIN" would be just as misleading here as it would for
-                // CorruptHash below: no PIN for this id can succeed until the
-                // roster is reloaded.
-                Fail(I18nService.Instance["SellerNotOnRoster"]);
-                break;
-
-            case SwitchResult.CorruptHash:
-                // The cached hash itself is unusable — no PIN, not even the right
-                // one, can ever succeed until the roster refreshes. Reusing the
-                // wrong-PIN message would send the cashier into a pointless retry
-                // loop, so this gets its own.
-                Fail(I18nService.Instance["SellerHashCorrupt"]);
-                break;
+            Fail(MessageFor(result));
+            return;
         }
+
+        IsVisible = false;
     }
+
+    /// <summary>Maps a failure <see cref="SwitchResult"/> (never <see cref="SwitchResult.Ok"/>,
+    /// which both callers handle before reaching here) to a user-facing message. Shared by both
+    /// modes: an escalation approval is a PIN check against the same roster with the same
+    /// failure reasons as switching, so it deserves the same accurate wording — in particular
+    /// <see cref="SwitchResult.CorruptHash"/> and <see cref="SwitchResult.UnknownSeller"/> must
+    /// not say "wrong PIN", since retrying can never succeed for either until the roster
+    /// refreshes.</summary>
+    private static string MessageFor(SwitchResult result) => result switch
+    {
+        SwitchResult.WrongPin => I18nService.Instance["SellerPinWrong"],
+        SwitchResult.Locked => I18nService.Instance["SellerLocked"],
+        SwitchResult.PinNotSet => I18nService.Instance["SellerPinNotSet"],
+        SwitchResult.UnknownSeller => I18nService.Instance["SellerNotOnRoster"],
+        SwitchResult.CorruptHash => I18nService.Instance["SellerHashCorrupt"],
+        _ => throw new ArgumentOutOfRangeException(nameof(result), result,
+            $"{nameof(MessageFor)} is only for failure results, not {SwitchResult.Ok}.")
+    };
 
     private void Fail(string message)
     {

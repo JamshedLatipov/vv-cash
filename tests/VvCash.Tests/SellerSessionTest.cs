@@ -218,25 +218,87 @@ public class SellerSessionTest
         var raised = 0;
         session.CurrentChanged += (_, _) => raised++;
 
-        var approver = await session.ApproveAsync("u-2", "9073");
+        var approval = await session.ApproveAsync("u-2", "9073");
 
-        Assert.NotNull(approver);
-        Assert.Equal("u-2", approver!.Id);
+        Assert.Equal(SwitchResult.Ok, approval.Result);
+        Assert.Equal("u-2", approval.Approver?.Id);
         // The acting seller (u-1) is unchanged by an escalation approval from u-2.
         Assert.Equal("u-1", session.Current?.Id);
         Assert.Equal(0, raised);
     }
 
     [Fact]
-    public async Task ApproveAsync_WithWrongPin_ReturnsNull()
+    public async Task ApproveAsync_WithWrongPin_ReturnsWrongPinResult_AndNoApprover()
     {
         var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
         var session = NewSession(() => now);
         await session.LoadRosterAsync(Roster());
 
-        var approver = await session.ApproveAsync("u-2", "0000");
+        var approval = await session.ApproveAsync("u-2", "0000");
 
-        Assert.Null(approver);
+        Assert.Equal(SwitchResult.WrongPin, approval.Result);
+        Assert.Null(approval.Approver);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_WhenLocked_ReturnsLockedResult_AndNoApprover()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+
+        for (var i = 0; i < 5; i++)
+            await session.ApproveAsync("u-1", "0000");
+
+        var approval = await session.ApproveAsync("u-1", "4821");
+
+        Assert.Equal(SwitchResult.Locked, approval.Result);
+        Assert.Null(approval.Approver);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_ForSellerWithoutPin_ReturnsPinNotSetResult()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-3", FirstName = "Новичок", PinHash = "", CanSell = true }
+        });
+
+        var approval = await session.ApproveAsync("u-3", "4821");
+
+        Assert.Equal(SwitchResult.PinNotSet, approval.Result);
+        Assert.Null(approval.Approver);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_ForUnknownSeller_ReturnsUnknownSellerResult()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+
+        var approval = await session.ApproveAsync("ghost", "4821");
+
+        Assert.Equal(SwitchResult.UnknownSeller, approval.Result);
+        Assert.Null(approval.Approver);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_WithCorruptHash_ReturnsCorruptHashResult_AndNoApprover()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-4", FirstName = "Битый", PinHash = "not-a-valid-hash", CanSell = true }
+        });
+
+        var approval = await session.ApproveAsync("u-4", "4821");
+
+        Assert.Equal(SwitchResult.CorruptHash, approval.Result);
+        Assert.Null(approval.Approver);
     }
 
     // --- LoadRosterAsync reconciliation (removed/disabled current seller) ---
@@ -384,6 +446,8 @@ public class SellerSessionTest
 
         // Correct PIN, but the counter is shared: still locked from the
         // SwitchAsync failures above, so ApproveAsync must also refuse it.
-        Assert.Null(await session.ApproveAsync("u-1", "4821"));
+        var approval = await session.ApproveAsync("u-1", "4821");
+        Assert.Equal(SwitchResult.Locked, approval.Result);
+        Assert.Null(approval.Approver);
     }
 }

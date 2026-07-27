@@ -33,6 +33,32 @@ public enum SwitchResult
     CorruptHash
 }
 
+/// <summary>The outcome of an escalation PIN check via <see cref="ISellerSession.ApproveAsync"/>,
+/// carrying both the reason (same vocabulary as <see cref="SwitchAsync"/>'s <see cref="SwitchResult"/>)
+/// and, on success, the approving seller. Exists so a failed approval can be told apart from a
+/// failed switch by <em>why</em> it failed — a bare <c>SellerInfo?</c> collapsed every failure reason
+/// into a single null, which meant every failure had to be reported to the cashier as "wrong PIN"
+/// even when the true cause (e.g. <see cref="SwitchResult.Locked"/> or <see cref="SwitchResult.CorruptHash"/>)
+/// made that message a lie.</summary>
+public readonly struct ApprovalResult
+{
+    public SwitchResult Result { get; }
+
+    /// <summary>The approving seller when <see cref="Result"/> is <see cref="SwitchResult.Ok"/>;
+    /// null for every failure reason.</summary>
+    public SellerInfo? Approver { get; }
+
+    private ApprovalResult(SwitchResult result, SellerInfo? approver)
+    {
+        Result = result;
+        Approver = approver;
+    }
+
+    public static ApprovalResult Success(SellerInfo approver) => new(SwitchResult.Ok, approver);
+
+    public static ApprovalResult Failure(SwitchResult result) => new(result, null);
+}
+
 /// <summary>Tracks who is currently selling at this register. See <see cref="SellerSession"/>
 /// for the implementation and the reasoning behind its lockout rules.</summary>
 public interface ISellerSession
@@ -50,8 +76,8 @@ public interface ISellerSession
     Task<SwitchResult> SwitchAsync(string sellerId, string pin);
 
     /// <summary>Verifies a PIN for an escalation without changing the current seller.
-    /// Returns the approving seller on success, null otherwise.</summary>
-    Task<SellerInfo?> ApproveAsync(string sellerId, string pin);
+    /// Returns the outcome and, on success, the approving seller — see <see cref="ApprovalResult"/>.</summary>
+    Task<ApprovalResult> ApproveAsync(string sellerId, string pin);
 
     /// <summary>Resets the idle timer — called on any register activity.</summary>
     void Touch();

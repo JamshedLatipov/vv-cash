@@ -152,11 +152,11 @@ public class SellerSession : ISellerSession
     // shortly after approving, so a shared cool-down isn't a surprising outcome.
     // Revisit with a per-flow counter if that combined lockout proves disruptive
     // in practice.
-    public Task<SellerInfo?> ApproveAsync(string sellerId, string pin)
+    public Task<ApprovalResult> ApproveAsync(string sellerId, string pin)
     {
         AssertUiThread();
         var (result, seller) = Check(sellerId, pin);
-        if (result != SwitchResult.Ok) return Task.FromResult<SellerInfo?>(null);
+        if (result != SwitchResult.Ok) return Task.FromResult(ApprovalResult.Failure(result));
 
         // A successful approval is unambiguous terminal activity — someone just
         // typed a correct PIN at this register — so it resets the idle timer
@@ -166,7 +166,8 @@ public class SellerSession : ISellerSession
         // keep an otherwise-idle session alive indefinitely, defeating the point
         // of the idle timeout.
         _lastActivity = _clock();
-        return Task.FromResult<SellerInfo?>(seller);
+        // Check() only returns SwitchResult.Ok together with a non-null seller.
+        return Task.FromResult(ApprovalResult.Success(seller!));
     }
 
     public void Touch()
