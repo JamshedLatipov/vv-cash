@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -80,6 +81,17 @@ public partial class App : Application
                 posVm.RefundApprovalRequested += (s, e) => sellerSwitchVm.OpenForApproval(
                     x => x.CanRefund,
                     _ => posVm.ShowReturnsDialogAsync());
+
+                // A manual discount above the ringing seller's own cap escalates the same
+                // way, but with two twists: only a seller whose *own* cap covers the
+                // requested percent may approve (a supervisor with no cap configured, or
+                // too small a cap, cannot rubber-stamp this one), and the approved percent
+                // travels with the event itself (EventHandler<decimal>) rather than through
+                // a stored PosViewModel property — avoiding a field that could go stale
+                // between the request and its approval.
+                posVm.DiscountApprovalRequested += (s, percent) => sellerSwitchVm.OpenForApproval(
+                    x => x.MaxDiscount > 0m && x.MaxDiscount >= percent,
+                    approver => { posVm.ApplyApprovedDiscount(approver.Id, percent); return Task.CompletedTask; });
 
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)

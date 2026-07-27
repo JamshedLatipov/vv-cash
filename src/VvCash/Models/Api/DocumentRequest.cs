@@ -12,6 +12,15 @@ public class DocumentRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SellerId { get; set; }
 
+    /// <summary>Id of the seller who approved this sale's manual discount when it
+    /// exceeded the ringing seller's own cap (see PosViewModel.NeedsDiscountApproval).
+    /// Absent for ordinary sales. The backend validates the id and, if the approver no
+    /// longer exists, drops it to null and flags the document rather than rejecting the
+    /// sale.</summary>
+    [JsonPropertyName("approved_by")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApprovedBy { get; set; }
+
     [JsonPropertyName("counterparty")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Counterparty { get; set; }

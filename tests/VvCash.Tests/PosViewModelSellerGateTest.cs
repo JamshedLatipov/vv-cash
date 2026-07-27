@@ -106,8 +106,9 @@ public class PosViewModelSellerGateTest
         public decimal TotalDiscount => 0m;
         public decimal TotalAmount => Subtotal;
         public IReadOnlyList<Coupon> AppliedCoupons => Array.Empty<Coupon>();
-        public decimal ManualDiscountPercent => 0m;
-        public decimal ManualDiscountAmount => 0m;
+        public decimal ManualDiscountPercent { get; private set; }
+        public decimal ManualDiscountAmount { get; private set; }
+        public int SetManualDiscountCallCount { get; private set; }
         public decimal CustomerDiscountPercent => 0m;
         public QuoteResult? Quote => null;
         public string? QuoteId => null;
@@ -143,13 +144,27 @@ public class PosViewModelSellerGateTest
         public void ClearCart()
         {
             _items.Clear();
+            // Mirrors the real CartService.ClearCart(), which also resets the manual
+            // discount — relevant now that Task 21's tests check ManualDiscountPercent
+            // across a clear/re-add cycle.
+            ManualDiscountPercent = 0;
+            ManualDiscountAmount = 0;
             CartChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public void ApplyCoupon(Coupon coupon) { }
         public void RemoveCoupon(string code) { }
-        public void SetManualDiscount(decimal percent, decimal amount) { }
-        public void ClearManualDiscount() { }
+        public void SetManualDiscount(decimal percent, decimal amount)
+        {
+            SetManualDiscountCallCount++;
+            ManualDiscountPercent = percent;
+            ManualDiscountAmount = amount;
+        }
+        public void ClearManualDiscount()
+        {
+            ManualDiscountPercent = 0;
+            ManualDiscountAmount = 0;
+        }
         public void SetCustomerDiscount(decimal percent) { }
         public void ClearCustomerDiscount() { }
 
@@ -357,6 +372,7 @@ public class PosViewModelSellerGateTest
         public FakeSettingsService SettingsService { get; } = new();
         public FakeShiftService ShiftService { get; } = new();
         public FakeAuthService AuthService { get; } = new();
+        public FakeCartService CartService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -366,7 +382,7 @@ public class PosViewModelSellerGateTest
         return new PosViewModel(
             new FakeProductService(),
             new FakeCategoryService(),
-            new FakeCartService(),
+            deps.CartService,
             new FakePrinterService(),
             new FakeCustomerDisplayService(),
             deps.ShiftService,
@@ -849,5 +865,229 @@ public class PosViewModelSellerGateTest
         using var vm = CreateViewModel(out var deps);
 
         await vm.ShowReturnsDialogAsync();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Manual discount escalation (Task 21a): a percent discount above the current
+    // seller's own MaxDiscount cap requires approval. MaxDiscount == 0 means "no
+    // personal cap configured", not "no discounts allowed" — every seller has this right
+    // after the seller-PIN migration, so it must never gate (see NeedsDiscountApproval).
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ApplyManualDiscount_PercentUnderCap_AppliesDirectly_NoApprovalRaised()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 15m));
+        var raisedCount = 0;
+        vm.DiscountApprovalRequested += (s, percent) => raisedCount++;
+        vm.DiscountInputValue = "10";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(1, deps.CartService.SetManualDiscountCallCount);
+        Assert.Equal(10m, deps.CartService.ManualDiscountPercent);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_PercentAboveCap_RaisesApprovalRequest_DoesNotApplyYet()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 15m));
+        decimal? raisedPercent = null;
+        vm.DiscountApprovalRequested += (s, percent) => raisedPercent = percent;
+        vm.DiscountInputValue = "20";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(20m, raisedPercent);
+        Assert.Equal(0, deps.CartService.SetManualDiscountCallCount); // not applied until approved
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_ZeroCap_NeverGated_AppliesAnyPercent()
+    {
+        // The critical zero-cap rule: MaxDiscount == 0 means "no personal cap
+        // configured", not "no discounts allowed". A seller with no cap must be able to
+        // apply any manual discount without a supervisor PIN.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 0m));
+        var raisedCount = 0;
+        vm.DiscountApprovalRequested += (s, percent) => raisedCount++;
+        vm.DiscountInputValue = "90";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(90m, deps.CartService.ManualDiscountPercent);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_NoCurrentSeller_TreatedAsZeroCap_NeverGated()
+    {
+        using var vm = CreateViewModel(out var deps);
+        // No SetCurrent call: Current stays null — same "no cap configured" outcome as
+        // MaxDiscount == 0, not a reason to fail closed the way CloseShift/OpenReturns do.
+        var raisedCount = 0;
+        vm.DiscountApprovalRequested += (s, percent) => raisedCount++;
+        vm.DiscountInputValue = "50";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(50m, deps.CartService.ManualDiscountPercent);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountMode_NeverGated_RegardlessOfCap()
+    {
+        // Amount-mode discounts aren't compared against a percent cap — out of scope for
+        // NeedsDiscountApproval, same as before this task.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 5m));
+        var raisedCount = 0;
+        vm.DiscountApprovalRequested += (s, percent) => raisedCount++;
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(500m, deps.CartService.ManualDiscountAmount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // approved_by lifetime (Task 21b): set on approval, sent with the sale, cleared
+    // wherever the cart (or the discount it was approved for) is cleared, so it can
+    // never leak into a receipt — or a discount — it wasn't actually approved for.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ApplyApprovedDiscount_AppliesPercentAndRecordsApprover_ReflectedInPay()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        Assert.Equal(40m, deps.CartService.ManualDiscountPercent);
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Equal("supervisor-9", deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_FreshDiscountAfterApproval_ClearsStaleApprover()
+    {
+        // A later discount that didn't itself need escalation must not inherit an
+        // approver id recorded for a previous, different discount on the same receipt.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        vm.DiscountInputValue = "5"; // under cap, no approval needed this time
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public void ClearManualDiscountCommand_ClearsStaleApprover()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        vm.ClearManualDiscountCommand.Execute(null);
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public void Pay_WithNoApprovedDiscount_OmitsApprovedByFromRequestAndJson()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        var request = deps.ExpenseDocumentService.LastRequest;
+        Assert.NotNull(request);
+        Assert.Null(request!.ApprovedBy);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(request);
+        Assert.DoesNotContain("approved_by", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Pay_OnSuccess_ClearsApprovedBy_DoesNotLeakIntoNextReceipt()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        MixedPaymentViewModel? firstPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) firstPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        firstPaymentVm!.CashAmount = firstPaymentVm.TotalAmount;
+        firstPaymentVm.ConfirmPaymentCommand.Execute(null);
+        Assert.Equal("supervisor-9", deps.ExpenseDocumentService.LastRequest!.ApprovedBy); // sanity check
+
+        // A second, unrelated receipt: nobody approved anything for it.
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+        MixedPaymentViewModel? secondPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) secondPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        secondPaymentVm!.CashAmount = secondPaymentVm.TotalAmount;
+        secondPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public void ClearCartCommand_ClearsApprovedById_DoesNotLeakIntoNextReceipt()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        vm.ClearCartCommand.Execute(null);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
     }
 }

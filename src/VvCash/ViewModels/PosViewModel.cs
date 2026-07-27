@@ -44,6 +44,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
 
+    /// <summary>Id of the seller who approved the current receipt's manual discount when
+    /// it exceeded the ringing seller's own cap (see <see cref="NeedsDiscountApproval"/>
+    /// / <see cref="ApplyApprovedDiscount"/>) — stamped onto <see cref="DocumentRequest.ApprovedBy"/>
+    /// in <see cref="Pay"/>. Lives only for the current receipt: cleared everywhere the
+    /// cart itself is cleared (<see cref="ClearCart"/>, park, resume's auto-park, and
+    /// Pay's own success branch) and whenever the manual discount is replaced or removed
+    /// without a fresh approval (<see cref="ApplyManualDiscount"/>,
+    /// <see cref="ClearManualDiscount"/>), so it can never leak into a receipt — or a
+    /// discount — it wasn't actually approved for.</summary>
+    private string? _approvedById;
+
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
     [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
@@ -209,6 +220,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// approval mode because the current seller lacks <c>CanRefund</c> — see
     /// <see cref="OpenReturns"/>. Same role as <see cref="CloseShiftApprovalRequested"/>.</summary>
     public event EventHandler? RefundApprovalRequested;
+
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay in
+    /// approval mode because a manual discount (see <see cref="ApplyManualDiscount"/>)
+    /// exceeds the current seller's <c>MaxDiscount</c> cap — see
+    /// <see cref="NeedsDiscountApproval"/> for exactly when. Carries the requested percent
+    /// so the host can both filter approvers by it (only a seller whose own cap covers
+    /// this percent may approve) and hand the same value back to
+    /// <see cref="ApplyApprovedDiscount"/> once approved.</summary>
+    public event EventHandler<decimal>? DiscountApprovalRequested;
 
     /// <summary>Current seller's name for the header chip, or — when none is selected — the
     /// same action-shaped invitation ("Who is selling?") already used by this button's
@@ -927,6 +947,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
         ClearActivePromo();
+        _approvedById = null;
         _ = _customerDisplayService.ClearAsync();
     }
 
@@ -1003,26 +1024,67 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>A manual discount above the current seller's own cap needs a supervisor's
+    /// approval. <c>MaxDiscount == 0</c> means "no personal cap configured", not "no
+    /// discounts allowed" — right after the seller-PIN migration every seller has no cap
+    /// (see the max_discount column's own remarks in the design spec), so treating 0 as a
+    /// limit would demand a supervisor PIN for every manual discount from day one. Only
+    /// gates when a cap is actually set. <paramref name="percent"/>-only: amount-mode
+    /// discounts (see <see cref="IsDiscountAmountMode"/>) aren't compared against a
+    /// percent cap and are out of scope here, same as before this task.</summary>
+    private bool NeedsDiscountApproval(decimal percent)
+    {
+        var cap = _sellerSession.Current?.MaxDiscount ?? 0m;
+        return cap > 0m && percent > cap;
+    }
+
     [RelayCommand]
     private void ApplyManualDiscount()
     {
-        if (decimal.TryParse(DiscountInputValue, out var value))
+        if (!decimal.TryParse(DiscountInputValue, out var value))
         {
-            if (IsDiscountPercentMode)
-            {
-                _cartService.SetManualDiscount(value, 0);
-            }
-            else
-            {
-                _cartService.SetManualDiscount(0, value);
-            }
+            CloseDiscountModal();
+            return;
+        }
+
+        if (IsDiscountPercentMode && NeedsDiscountApproval(value))
+        {
+            CloseDiscountModal();
+            DiscountApprovalRequested?.Invoke(this, value);
+            return;
+        }
+
+        // A fresh discount that didn't need escalation invalidates whatever approval
+        // was recorded for a previous one on this same receipt (see _approvedById) —
+        // otherwise a stale approver id could end up attached to a discount nobody
+        // with a covering cap ever actually signed off on.
+        _approvedById = null;
+
+        if (IsDiscountPercentMode)
+        {
+            _cartService.SetManualDiscount(value, 0);
+        }
+        else
+        {
+            _cartService.SetManualDiscount(0, value);
         }
         CloseDiscountModal();
+    }
+
+    /// <summary>Continuation for <see cref="DiscountApprovalRequested"/> — applies the
+    /// percent discount that triggered the escalation and records who approved it, so
+    /// <see cref="Pay"/> can stamp it onto the outgoing <see cref="DocumentRequest.ApprovedBy"/>.
+    /// See <see cref="_approvedById"/> for how its lifetime is kept scoped to this receipt.</summary>
+    public void ApplyApprovedDiscount(string approverId, decimal percent)
+    {
+        _approvedById = approverId;
+        _cartService.SetManualDiscount(percent, 0);
     }
 
     [RelayCommand]
     private void ClearManualDiscount()
     {
+        _approvedById = null;
         _cartService.ClearManualDiscount();
         CloseDiscountModal();
     }
@@ -1120,6 +1182,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _cartService.ClearCustomerDiscount();
         SelectedCustomer = null;
         ClearActivePromo();
+        _approvedById = null;
         _ = _customerDisplayService.ClearAsync();
 
         IsParkLabelModalVisible = false;
@@ -1191,6 +1254,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             _cartService.ClearCustomerDiscount();
             SelectedCustomer = null;
             ClearActivePromo();
+            _approvedById = null;
         }
 
         var snapshot = await _parkedSaleService.ResumeAsync(id);
@@ -1237,6 +1301,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     {
                         DocumentHash = Guid.NewGuid().ToString(),
                         SellerId = _sellerSession.Current?.Id,
+                        ApprovedBy = _approvedById,
                         ShiftId = CurrentShiftId,
                         SoldSource = SoldSourcesEnum.CASH,
                         Payment = new Payment
@@ -1276,6 +1341,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;
                         ClearActivePromo();
+                        _approvedById = null;
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null)
