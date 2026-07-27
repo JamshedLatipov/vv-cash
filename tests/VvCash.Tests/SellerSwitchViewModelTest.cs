@@ -103,6 +103,23 @@ public class SellerSwitchViewModelTest
     }
 
     [Fact]
+    public async Task IsApprovalMode_ReflectsWhichOpenMethodWasCalled()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster());
+
+        vm.Open();
+        Assert.False(vm.IsApprovalMode);
+
+        vm.OpenForApproval(s => s.CanCloseShift);
+        Assert.True(vm.IsApprovalMode);
+
+        // A later plain Open() (e.g. an ordinary seller switch) must clear it again —
+        // this is what drives the view back to the "Who is selling?" heading.
+        vm.Open();
+        Assert.False(vm.IsApprovalMode);
+    }
+
+    [Fact]
     public async Task Approval_RaisesApproved_AndDoesNotChangeCurrentSeller()
     {
         var session = await SessionWithRoster();

@@ -25,7 +25,6 @@ public partial class SellerSwitchViewModel : ViewModelBase
     private const int PinLength = 4;
 
     private readonly ISellerSession _session;
-    private bool _approvalMode;
 
     // Set for the duration of SubmitAsync and checked by every other entry point
     // that mutates overlay state (SelectSeller, Back, a fresh Show via Open/
@@ -44,6 +43,14 @@ public partial class SellerSwitchViewModel : ViewModelBase
     [ObservableProperty] private string _pin = string.Empty;
     [ObservableProperty] private bool _hasError;
     [ObservableProperty] private string _errorMessage = string.Empty;
+
+    /// <summary>True while the overlay is verifying a PIN to approve an operation on
+    /// behalf of the current seller (see <see cref="OpenForApproval"/>); false while it
+    /// is switching who the current seller is (see <see cref="Open"/>). The view binds
+    /// this to choose its heading — "Confirm with PIN" for approval vs. "Who is
+    /// selling?" for switching — since asking a supervisor who is authorising someone
+    /// else's operation "who is selling?" is the wrong question.</summary>
+    [ObservableProperty] private bool _isApprovalMode;
 
     public ObservableCollection<SellerInfo> Sellers { get; } = new();
 
@@ -73,7 +80,7 @@ public partial class SellerSwitchViewModel : ViewModelBase
         // the caller can open again afterwards if still needed.
         if (_isBusy) return;
 
-        _approvalMode = approvalMode;
+        IsApprovalMode = approvalMode;
 
         Sellers.Clear();
         foreach (var seller in _session.Roster.Where(filter))
@@ -147,7 +154,7 @@ public partial class SellerSwitchViewModel : ViewModelBase
         _isBusy = true;
         try
         {
-            if (_approvalMode)
+            if (IsApprovalMode)
             {
                 // ApproveAsync now surfaces the same SwitchResult vocabulary as
                 // SwitchAsync (see ApprovalResult), so both modes share one
