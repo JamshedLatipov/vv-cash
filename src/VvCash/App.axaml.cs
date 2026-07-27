@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
+using VvCash.Constants;
 using VvCash.Services;
 using System.Net.Http;
 using VvCash.Services.Api;
@@ -117,6 +118,14 @@ public partial class App : Application
         services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
         services.AddSingleton<ISessionContext, SessionContext>();
 
+        // SellerSession's parameterless constructor is a test/manual-usage
+        // convenience that hardcodes a 90s idle timeout; production must pass
+        // the timeout explicitly (see the constructor's XML comment), so we
+        // use a factory with the named constant instead of letting DI resolve
+        // the parameterless ctor.
+        services.AddSingleton<ISellerSession>(
+            _ => new SellerSession(() => DateTime.UtcNow, SellerSessionConstants.IdleTimeout));
+
         services.AddTransient<AuthHeaderHandler>();
 
         // Force IPv4 on all HttpClients to avoid macOS SocketException
@@ -144,6 +153,7 @@ public partial class App : Application
         services.AddHttpClient<ICategoryService, CategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ICounterpartyService, CounterpartyService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<IShiftService, ShiftService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<ISellerRosterService, SellerRosterService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ExpenseDocumentService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<IExpenseDocumentService>(sp => sp.GetRequiredService<ExpenseDocumentService>());
         services.AddHttpClient<IReturnService, ReturnService>().AddHttpMessageHandler<AuthHeaderHandler>();
