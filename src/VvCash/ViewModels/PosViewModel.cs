@@ -36,6 +36,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IQuoteService _quoteService;
     private readonly ISessionContext _session;
     private readonly HttpClient _httpClient;
+    private readonly ISellerSession _sellerSession;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private bool _applyingQuoteResult;
@@ -180,6 +181,29 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     public IAsyncRelayCommand OpenCustomerRegistrationCommand { get; }
     public IRelayCommand CloseApplicationCommand { get; }
 
+    /// <summary>Set by App.axaml.cs (mirrors <see cref="CustomerDisplayViewModel"/>): the
+    /// overlay view model PosView hosts and binds its DataContext to. PosViewModel doesn't
+    /// own its lifecycle, only asks for it to open via <see cref="SellerSwitchRequested"/>.</summary>
+    public SellerSwitchViewModel? SellerSwitchViewModel { get; set; }
+
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay —
+    /// either because the register requires a fresh seller confirmation at the start of a
+    /// receipt (see <see cref="AddToCart"/>) or because the cashier tapped the seller chip
+    /// (see <see cref="OpenSellerSwitch"/>). Same shape as <see cref="NavigationRequest"/>:
+    /// PosViewModel raises intent, the host wires it to the actual overlay.</summary>
+    public event EventHandler? SellerSwitchRequested;
+
+    /// <summary>Current seller's name for the header chip, or a "no seller" placeholder
+    /// when none is selected. Recomputed whenever <see cref="ISellerSession.CurrentChanged"/>
+    /// fires (see <see cref="OnSellerChanged"/>).</summary>
+    public string SellerChipText => _sellerSession.Current?.FullName ?? I18nService.Instance["CurrentSeller"];
+
+    private void OnSellerChanged(object? sender, EventArgs e)
+        => OnPropertyChanged(nameof(SellerChipText));
+
+    [RelayCommand]
+    private void OpenSellerSwitch() => SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+
     [RelayCommand]
     private async Task OpenShiftAsync()
     {
@@ -299,7 +323,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IReturnService returnService,
         IQuoteService quoteService,
         ISessionContext session,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        ISellerSession sellerSession)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -317,12 +342,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _quoteService = quoteService;
         _session = session;
         _httpClient = httpClient;
+        _sellerSession = sellerSession;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
 
         _cartService.CartChanged += OnCartChanged;
         _printerService.StatusChanged += OnPrinterStatusChanged;
+        _sellerSession.CurrentChanged += OnSellerChanged;
 
         _ = InitializeAsync();
     }
@@ -658,6 +685,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
+        _sellerSession.CurrentChanged -= OnSellerChanged;
 
         _syncCancellationTokenSource?.Cancel();
         _syncCancellationTokenSource?.Dispose();
@@ -735,6 +763,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void AddToCart(Product product)
     {
+        // Ask who is selling only at the start of a receipt: an empty cart plus a stale
+        // session means nobody has confirmed identity since the idle timeout, so raise the
+        // overlay request before this item lands. Once the cart has an item, the receipt is
+        // in progress and must never be interrupted for this — same reasoning as Touch()
+        // below keeping the session alive through the rest of the sale.
+        if (!_cartService.Items.Any() && _sellerSession.IsStale)
+            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+
+        // Any add is genuine register activity, not just the first one — resets the idle
+        // timer so a long receipt never goes stale mid-sale.
+        _sellerSession.Touch();
+
         _cartService.AddProduct(product);
         _ = _customerDisplayService.ShowItemAsync(product.Name, product.Price);
     }
@@ -1052,6 +1092,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     var request = new DocumentRequest
                     {
                         DocumentHash = Guid.NewGuid().ToString(),
+                        SellerId = _sellerSession.Current?.Id,
                         ShiftId = CurrentShiftId,
                         SoldSource = SoldSourcesEnum.CASH,
                         Payment = new Payment

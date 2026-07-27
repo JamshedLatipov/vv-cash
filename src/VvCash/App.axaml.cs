@@ -54,6 +54,15 @@ public partial class App : Application
                 activePosVm = posVm;
                 posVm.NavigationRequest = mainVm.NavigateTo;
 
+                // SellerSwitchViewModel is transient (like PosViewModel itself), so a fresh
+                // one is resolved per NavigateToPos and handed to PosView via the
+                // SellerSwitchViewModel property; PosViewModel only ever raises
+                // SellerSwitchRequested to ask for it to open, matching how NavigationRequest
+                // decouples PosViewModel from the mechanics of navigation.
+                var sellerSwitchVm = Services.GetRequiredService<SellerSwitchViewModel>();
+                posVm.SellerSwitchViewModel = sellerSwitchVm;
+                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open();
+
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)
                 {

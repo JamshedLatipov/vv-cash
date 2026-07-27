@@ -8,7 +8,7 @@ public class DocumentRequest
     [JsonPropertyName("document_hash")]
     public string DocumentHash { get; set; } = string.Empty;
 
-    [JsonPropertyName("seller_id")]
+    [JsonPropertyName("seller")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SellerId { get; set; }
 
