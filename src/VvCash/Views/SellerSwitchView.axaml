@@ -96,6 +96,16 @@
                     </ItemsControl>
                 </StackPanel>
 
+                <!-- Dismiss control for State 1 only: the PIN pad already has its own way
+                     back (BackCommand demotes it to the tile grid, then this button — or
+                     Escape from either state, see PosView.axaml.cs — closes the rest of the
+                     way). Same IconButton + Close icon convention as every other modal in
+                     this app (e.g. the discount/coupon modals in PosView.axaml). -->
+                <Button HorizontalAlignment="Right" VerticalAlignment="Top" Classes="IconButton"
+                        Command="{Binding CancelCommand}" IsVisible="{Binding !IsPinEntry}">
+                    <material:MaterialIcon Kind="Close" Width="28" Height="28" Foreground="{StaticResource Slate600Brush}"/>
+                </Button>
+
                 <!-- ======================= State 2: PIN pad ======================= -->
                 <StackPanel Spacing="20" Width="360" IsVisible="{Binding IsPinEntry}">
                     <!-- header: back-to-tiles on the left, seller + prompt centred.

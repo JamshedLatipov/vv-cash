@@ -129,4 +129,11 @@ public class AuthService : IAuthService
             return false;
         }
     }
+
+    public void ClearSession()
+    {
+        _settingsService.AuthToken = string.Empty;
+        _settingsService.AuthTokenExpiresAt = null;
+        _settingsService.Save();
+    }
 }

@@ -252,6 +252,17 @@ public class PosViewModelSellerGateTest
         public Task<bool> CheckSystemOnlineAsync() => Task.FromResult(true);
     }
 
+    /// <summary>Stands in for the real AuthService: records whether/how many times
+    /// ClearSession was called, without touching any settings storage of its own — Part
+    /// 0b moved that wiping behind this interface specifically so PosViewModel no longer
+    /// needs to know AuthToken/AuthTokenExpiresAt exist at all.</summary>
+    private class FakeAuthService : IAuthService
+    {
+        public int ClearSessionCallCount { get; private set; }
+        public Task<bool> LoginAsync(string email, string password, bool rememberMe) => Task.FromResult(true);
+        public void ClearSession() => ClearSessionCallCount++;
+    }
+
     private class FakeSettingsService : ISettingsService
     {
         public string BackendUrl { get; set; } = string.Empty;
@@ -345,6 +356,7 @@ public class PosViewModelSellerGateTest
         public FakeSellerRosterService RosterService { get; } = new();
         public FakeSettingsService SettingsService { get; } = new();
         public FakeShiftService ShiftService { get; } = new();
+        public FakeAuthService AuthService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -369,7 +381,8 @@ public class PosViewModelSellerGateTest
             new FakeSessionContext(),
             deps.HttpClient,
             deps.SellerSession,
-            deps.RosterService);
+            deps.RosterService,
+            deps.AuthService);
     }
 
     private static Product MakeProduct(string id, decimal price) => new()
@@ -701,7 +714,7 @@ public class PosViewModelSellerGateTest
         // finish the close PosViewModel originally asked for.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: false));
-        vm.CloseShiftCommand.Execute(null); // raises CloseShiftApprovalRequested, sets pending
+        vm.CloseShiftCommand.Execute(null); // raises CloseShiftApprovalRequested
 
         await vm.OnCloseShiftApproved();
 
@@ -710,50 +723,44 @@ public class PosViewModelSellerGateTest
         Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
     }
 
-    [Fact]
-    public async Task OnCloseShiftApproved_WithoutAPriorRequest_IsNoOp()
-    {
-        // A stray Approved event (e.g. from some unrelated future approval flow)
-        // must never be mistaken for permission to close this shift.
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
-
-        await vm.OnCloseShiftApproved();
-
-        Assert.True(vm.IsShiftOpen);
-        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
-    }
+    // NOTE: this file used to have an OnCloseShiftApproved_WithoutAPriorRequest_IsNoOp
+    // test here, guarding against a stray Approved event closing the shift with no prior
+    // CloseShiftApprovalRequested. Part 0/Task 21 removed the boolean pending-flag that
+    // guard depended on: SellerSwitchViewModel now owns a per-open-call continuation
+    // instead of a shared Approved event (see its class remarks), so OnCloseShiftApproved
+    // is only ever invoked as that continuation, when this specific approval succeeded —
+    // there is no "stray" case left to guard against here. The equivalent invariant (a
+    // cancelled or unrelated approval never runs an abandoned continuation) is now proven
+    // at the SellerSwitchViewModel level — see
+    // SellerSwitchViewModelTest.Cancel_DuringApprovalMode_DiscardsContinuation_LaterUnrelatedApprovalDoesNotRunIt.
 
     [Fact]
-    public async Task CloseShift_OnSuccess_WipesAuthTokenAndClearsSellerSession()
+    public async Task CloseShift_OnSuccess_ClearsAuthSessionAndSellerSession()
     {
+        // Part 0b: wiping AuthToken/AuthTokenExpiresAt moved behind IAuthService.ClearSession
+        // (AuthService.LoginAsync's own fields — see FakeAuthService's remarks), so this only
+        // checks that PosViewModel calls it, not that settings storage got mutated directly.
         using var vm = CreateViewModel(out var deps);
-        deps.SettingsService.AuthToken = "some-token";
-        deps.SettingsService.AuthTokenExpiresAt = DateTime.UtcNow.AddHours(5);
         deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
 
         await vm.CloseShiftCommand.ExecuteAsync(null);
 
-        Assert.Equal(string.Empty, deps.SettingsService.AuthToken);
-        Assert.Null(deps.SettingsService.AuthTokenExpiresAt);
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
         Assert.Null(deps.SellerSession.Current);
     }
 
     [Fact]
-    public async Task CloseShift_WhenCloseShiftAsyncFails_LeavesTokenAndSellerSessionUntouched()
+    public async Task CloseShift_WhenCloseShiftAsyncFails_LeavesAuthSessionAndSellerSessionUntouched()
     {
         using var vm = CreateViewModel(out var deps);
         deps.ShiftService.CloseShiftResult = false;
-        deps.SettingsService.AuthToken = "some-token";
-        deps.SettingsService.AuthTokenExpiresAt = DateTime.UtcNow.AddHours(5);
         var seller = MakeSeller("s1", canCloseShift: true);
         deps.SellerSession.SetCurrent(seller);
 
         await vm.CloseShiftCommand.ExecuteAsync(null);
 
         Assert.True(vm.IsShiftOpen); // the shift itself never actually closed
-        Assert.Equal("some-token", deps.SettingsService.AuthToken);
-        Assert.NotNull(deps.SettingsService.AuthTokenExpiresAt);
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
         Assert.Same(seller, deps.SellerSession.Current);
     }
 

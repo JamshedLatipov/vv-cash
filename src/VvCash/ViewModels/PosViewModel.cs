@@ -38,17 +38,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly HttpClient _httpClient;
     private readonly ISellerSession _sellerSession;
     private readonly ISellerRosterService _rosterService;
+    private readonly IAuthService _authService;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
-
-    // Set right before raising CloseShiftApprovalRequested and consumed by
-    // OnCloseShiftApproved (see both below) — this is what lets a later
-    // SellerSwitchViewModel.Approved event be recognised as "yes, this was for
-    // closing the shift" rather than acted on unconditionally, which would be
-    // wrong the moment a second reason to open the approval overlay exists.
-    private bool _closeShiftApprovalPending;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
@@ -269,7 +263,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // AddToCart's SellerSwitchRequested) and let the host open the overlay.
         if (!(_sellerSession.Current?.CanCloseShift ?? false))
         {
-            _closeShiftApprovalPending = true;
             CloseShiftApprovalRequested?.Invoke(this, EventArgs.Empty);
             return;
         }
@@ -288,18 +281,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         await DoCloseShiftAsync();
     }
 
-    /// <summary>Called by the host (App.axaml.cs) when SellerSwitchViewModel's
-    /// Approved event fires. Only actually proceeds with closing the shift when
-    /// that approval was raised in response to this view model's own
-    /// <see cref="CloseShiftApprovalRequested"/> (<see cref="_closeShiftApprovalPending"/>) —
-    /// a no-op otherwise, so an Approved event raised for some unrelated future
-    /// approval flow can never be mistaken for permission to close this shift. This
-    /// is the continuation the approval flow needs: without it, a successful PIN
-    /// would only dismiss the overlay and never actually finish closing.</summary>
+    /// <summary>The continuation App.axaml.cs hands to
+    /// <c>SellerSwitchViewModel.OpenForApproval</c> when wiring up
+    /// <see cref="CloseShiftApprovalRequested"/>. SellerSwitchViewModel invokes this only
+    /// when the specific approval it was opened for succeeds (each <c>OpenForApproval</c>
+    /// call owns its own continuation slot — see that class's remarks), so unlike the
+    /// pending-flag this used to need, a cancelled or unrelated approval can never reach
+    /// here: without a real completion there is nothing for App.axaml.cs to have wired.
+    /// This is what makes the approval flow actually finish closing the shift rather than
+    /// just dismissing the overlay.</summary>
     public async Task OnCloseShiftApproved()
     {
-        if (!_closeShiftApprovalPending) return;
-        _closeShiftApprovalPending = false;
         await ProceedToCloseShiftAsync();
     }
 
@@ -339,10 +331,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             // ended. Deliberately only on this success branch: a cancelled confirm
             // dialog or a failed CloseShiftAsync call must leave both untouched, so
             // the shift (and whoever is signed in) is genuinely still open.
+            //
+            // Wiping AuthToken/AuthTokenExpiresAt is IAuthService's job, not this
+            // view model's — AuthService.LoginAsync is the only other writer of those
+            // fields, and duplicating that logic here (reaching into ISettingsService
+            // directly) would let the two drift apart.
             _sellerSession.Clear();
-            _settingsService.AuthToken = string.Empty;
-            _settingsService.AuthTokenExpiresAt = null;
-            _settingsService.Save();
+            _authService.ClearSession();
         }
     }
 
@@ -408,7 +403,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ISessionContext session,
         HttpClient httpClient,
         ISellerSession sellerSession,
-        ISellerRosterService rosterService)
+        ISellerRosterService rosterService,
+        IAuthService authService)
     {
         _productService = productService;
         _categoryService = categoryService;
@@ -428,6 +424,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _httpClient = httpClient;
         _sellerSession = sellerSession;
         _rosterService = rosterService;
+        _authService = authService;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);

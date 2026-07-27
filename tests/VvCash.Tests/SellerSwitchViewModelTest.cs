@@ -212,6 +212,114 @@ public class SellerSwitchViewModelTest
         Assert.NotEqual(I18nService.Instance["SellerPinWrong"], vm.ErrorMessage);
     }
 
+    // ---------------------------------------------------------------------------------
+    // Cancel (Part 0a): the overlay must always be dismissable, from either mode
+    // (switch/approval) and either state (tile grid/PIN entry) — previously Back() only
+    // demoted from the PIN pad to the tile grid, and nothing at all closed the overlay
+    // short of finishing a PIN attempt.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Cancel_FromTileGrid_HidesOverlay()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+        vm.Open();
+
+        vm.CancelCommand.Execute(null);
+
+        Assert.False(vm.IsVisible);
+    }
+
+    [Fact]
+    public async Task Cancel_FromPinEntry_HidesOverlayDirectly_NotJustBackToTileGrid()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        Assert.True(vm.IsPinEntry); // sanity check on the premise
+
+        vm.CancelCommand.Execute(null);
+
+        Assert.False(vm.IsVisible);
+    }
+
+    [Fact]
+    public async Task Cancel_InSwitchMode_LeavesCurrentSellerUnchanged()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open(); // e.g. the cashier tapped the header chip out of curiosity
+        vm.SelectSellerCommand.Execute(vm.Sellers[1]);
+        vm.CancelCommand.Execute(null);
+
+        Assert.Equal("u-1", session.Current?.Id); // still whoever was selected before
+    }
+
+    [Fact]
+    public async Task Cancel_DuringApprovalMode_AbandonsTheOperation_ContinuationNeverRuns()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+        var ran = false;
+
+        vm.OpenForApproval(s => s.CanCloseShift, _ => { ran = true; return Task.CompletedTask; });
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        vm.CancelCommand.Execute(null);
+
+        Assert.False(vm.IsVisible);
+        Assert.False(ran);
+    }
+
+    [Fact]
+    public async Task Cancel_DuringApprovalMode_DiscardsContinuation_LaterUnrelatedApprovalDoesNotRunIt()
+    {
+        // The scenario the old shared-Approved-event + boolean-pending-flag design could
+        // not rule out: cancel an approval, then complete a *different* one — the
+        // abandoned operation's continuation must never fire just because some approval
+        // eventually succeeded.
+        var session = await SessionWithRoster();
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        var abandonedRan = false;
+        var laterRan = false;
+
+        vm.OpenForApproval(s => s.CanCloseShift, _ => { abandonedRan = true; return Task.CompletedTask; });
+        vm.CancelCommand.Execute(null);
+
+        vm.OpenForApproval(s => s.CanCloseShift, _ => { laterRan = true; return Task.CompletedTask; });
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        foreach (var d in "9073")
+            await vm.AppendDigitCommand.ExecuteAsync(d.ToString());
+
+        Assert.False(abandonedRan);
+        Assert.True(laterRan);
+    }
+
+    [Fact]
+    public async Task Cancel_WhileSubmitIsPending_IsANoOp()
+    {
+        var roster = new List<SellerInfo>
+        {
+            new() { Id = "u-1", FirstName = "Азиз", CanSell = true }
+        };
+        var session = new SlowSession(roster);
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        await vm.AppendDigitCommand.ExecuteAsync("1");
+        await vm.AppendDigitCommand.ExecuteAsync("2");
+        await vm.AppendDigitCommand.ExecuteAsync("3");
+        var submitting = vm.AppendDigitCommand.ExecuteAsync("4"); // now mid-submit (_isBusy == true)
+
+        vm.CancelCommand.Execute(null);
+        Assert.True(vm.IsVisible); // Cancel is a no-op while busy, same as Back/Open
+
+        session.CompleteSwitch(SwitchResult.Ok, vm.Sellers[0]);
+        await submitting;
+
+        Assert.False(vm.IsVisible); // the pending submit still resolves normally afterwards
+    }
+
     [Fact]
     public async Task Open_AfterAPreviousFailedAttempt_ClearsErrorAndPin()
     {

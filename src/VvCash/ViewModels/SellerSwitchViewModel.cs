@@ -33,6 +33,20 @@ public partial class SellerSwitchViewModel : ViewModelBase
     private readonly ISellerSession _session;
     private readonly ISellerRosterService _rosterService;
 
+    /// <summary>The continuation for the approval currently in flight (or about to be),
+    /// set by <see cref="OpenForApproval"/> and consumed exactly once — by a successful
+    /// PIN in <see cref="SubmitAsync"/>, or discarded by <see cref="Cancel"/>. Every call
+    /// to <see cref="Show"/> (both <see cref="Open"/> and <see cref="OpenForApproval"/>)
+    /// overwrites this, so each approval owns only its own follow-up: a cancelled or
+    /// superseded approval can never cause a later, unrelated one to run the wrong
+    /// operation — there is only ever one slot, and it always reflects the most recent
+    /// open call. This replaces an earlier design where every caller shared one
+    /// <see cref="Approved"/> event and guarded it with its own boolean "is this approval
+    /// for me" flag, which does not scale past a single flow (two flags can both end up
+    /// armed at once) and cannot be cleared by a cancel that this class didn't know had
+    /// happened.</summary>
+    private Func<SellerInfo, Task>? _onApproved;
+
     // Set for the duration of SubmitAsync (and, for the PIN-setup flow, its own
     // network round-trip) and checked by every other entry point that mutates
     // overlay state (SelectSeller, Back, a fresh Show via Open/OpenForApproval).
@@ -110,10 +124,14 @@ public partial class SellerSwitchViewModel : ViewModelBase
     /// <summary>Opens the overlay to approve an operation the current seller lacks
     /// <paramref name="hasRight"/> for. Lists only sellers holding that right, and a
     /// successful PIN here never changes <see cref="ISellerSession.Current"/> — it
-    /// raises <see cref="Approved"/> instead.</summary>
-    public void OpenForApproval(Func<SellerInfo, bool> hasRight) => Show(hasRight, approvalMode: true);
+    /// raises <see cref="Approved"/> and, if given, invokes <paramref name="onApproved"/>
+    /// with the approving seller. <paramref name="onApproved"/> is how the caller's own
+    /// operation actually resumes — see <see cref="_onApproved"/> for why each call owns
+    /// its own continuation instead of every caller sharing one event.</summary>
+    public void OpenForApproval(Func<SellerInfo, bool> hasRight, Func<SellerInfo, Task>? onApproved = null)
+        => Show(hasRight, approvalMode: true, onApproved);
 
-    private void Show(Func<SellerInfo, bool> filter, bool approvalMode)
+    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onApproved = null)
     {
         // A fresh Open()/OpenForApproval() while a submit is in flight would
         // reset SelectedSeller/Pin/Sellers out from under SubmitAsync's still-
@@ -121,6 +139,15 @@ public partial class SellerSwitchViewModel : ViewModelBase
         // overlay itself (hides on success, shows an error on failure) shortly;
         // the caller can open again afterwards if still needed.
         if (_isBusy) return;
+
+        // Assigned here, inside the same busy guard as everything else Show() resets,
+        // rather than by the public Open()/OpenForApproval() methods before calling
+        // Show(): otherwise a call that arrives while a submit is genuinely in flight
+        // would overwrite _onApproved for that still-pending submit even though Show()
+        // itself goes on to no-op. Open() always passes null, which is what clears a
+        // stale continuation left behind by an approval that opened but was then
+        // cancelled or superseded rather than completed.
+        _onApproved = onApproved;
 
         IsApprovalMode = approvalMode;
 
@@ -201,6 +228,30 @@ public partial class SellerSwitchViewModel : ViewModelBase
         _pendingNewPin = null;
     }
 
+    /// <summary>Dismisses the overlay entirely without completing whatever it was opened
+    /// for — reachable from the tile grid (a visible close control, see
+    /// SellerSwitchView.axaml) and, via Escape, from either state. What "cancel" means
+    /// depends on the mode it interrupts:
+    ///  - Approval (<see cref="IsApprovalMode"/>): abandons the operation that requested
+    ///    it. <see cref="_onApproved"/> is discarded before hiding, so nothing runs — and
+    ///    because each approval owns its own continuation slot (see its remarks), a later,
+    ///    unrelated approval can never be mistaken for permission to run this one.
+    ///  - Switch: leaves <see cref="ISellerSession.Current"/> exactly as it was. If nobody
+    ///    was ever selected, the register keeps working and sales fall back to the shift
+    ///    owner (see <see cref="ISellerSession"/>'s offline-degradation remarks) — that is
+    ///    the designed behaviour, not an error this needs to prevent.
+    /// A no-op while <see cref="_isBusy"/>, same as every other entry point that mutates
+    /// overlay state: an in-flight PIN check or PIN-setup network call must resolve on its
+    /// own rather than be yanked out from under by a cancel tap.</summary>
+    [RelayCommand]
+    private void Cancel()
+    {
+        if (_isBusy) return;
+
+        _onApproved = null;
+        HideAndReset();
+    }
+
     private async Task SubmitAsync()
     {
         if (SelectedSeller == null) return;
@@ -232,8 +283,17 @@ public partial class SellerSwitchViewModel : ViewModelBase
 
                 // Result == Ok guarantees Approver is set — see ApprovalResult.Success.
                 var approver = approval.Approver!;
+
+                // Consumed (and cleared) here, before Succeed()/Approved fire: a
+                // continuation that itself opens another approval (unlikely today, but
+                // not this class's job to rule out) must not find its own call still
+                // sitting in _onApproved.
+                var continuation = _onApproved;
+                _onApproved = null;
+
                 Succeed();
                 Approved?.Invoke(this, approver);
+                if (continuation != null) await continuation(approver);
                 return;
             }
 
@@ -430,13 +490,12 @@ public partial class SellerSwitchViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Closes the overlay and resets all of its state on a successful PIN
-    /// check, mirroring the care <see cref="Show"/>/<see cref="Back"/> already take
-    /// on entry/exit — leaving <see cref="SelectedSeller"/>/<see cref="Pin"/>/
-    /// <see cref="IsPinEntry"/> populated after success was harmless while every
-    /// consumer gates on <see cref="IsVisible"/>, but inconsistent with the rest
-    /// of the class.</summary>
-    private void Succeed()
+    /// <summary>Hides the overlay and clears all of its per-attempt state — shared by
+    /// every exit path that doesn't need to leave an error message showing (
+    /// <see cref="Succeed"/> and <see cref="Cancel"/>; <see cref="CloseWithoutSelecting"/>
+    /// needs the same fields cleared but an error message left up, so it keeps its own
+    /// copy rather than folding into this).</summary>
+    private void HideAndReset()
     {
         IsVisible = false;
         IsPinEntry = false;
@@ -448,6 +507,13 @@ public partial class SellerSwitchViewModel : ViewModelBase
         HasError = false;
         ErrorMessage = string.Empty;
     }
+
+    /// <summary>Closes the overlay on a successful PIN check, mirroring the care
+    /// <see cref="Show"/>/<see cref="Back"/> already take on entry/exit — leaving
+    /// <see cref="SelectedSeller"/>/<see cref="Pin"/>/<see cref="IsPinEntry"/> populated
+    /// after success was harmless while every consumer gates on <see cref="IsVisible"/>,
+    /// but inconsistent with the rest of the class.</summary>
+    private void Succeed() => HideAndReset();
 
     private void Fail(string message)
     {

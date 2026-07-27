@@ -142,10 +142,26 @@ public partial class PosView : UserControl
         }
         if (e.Key == Key.Escape)
         {
-            if (DataContext is PosViewModel escVm && !string.IsNullOrEmpty(escVm.SearchQuery))
+            if (DataContext is PosViewModel escVm)
             {
-                escVm.SearchQuery = string.Empty;
-                e.Handled = true;
+                // The seller-switch overlay is modal and covers the whole screen (see
+                // PosView.axaml's ZIndex 4000) — while it's up, Escape dismisses it
+                // (mirrors SellerSwitchView's own close button, reachable from either
+                // overlay state, not just the tile grid) rather than falling through to
+                // clear the search box underneath it.
+                var overlay = escVm.SellerSwitchViewModel;
+                if (overlay != null && overlay.IsVisible)
+                {
+                    overlay.CancelCommand.Execute(null);
+                    e.Handled = true;
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(escVm.SearchQuery))
+                {
+                    escVm.SearchQuery = string.Empty;
+                    e.Handled = true;
+                }
             }
             return;
         }
