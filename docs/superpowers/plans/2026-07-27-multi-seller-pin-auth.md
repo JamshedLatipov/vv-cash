@@ -36,7 +36,7 @@ dotnet test tests/VvCash.Tests/VvCash.Tests.csproj
 
 | Файл | Ответственность |
 |---|---|
-| `migrations/20260727000000_seller_pin.up.sql` / `.down.sql` | `users.pin_hash`, `users.pin_updated_at`, `cash_users.max_discount`, `document_expenses.approved_by` |
+| `migrations/20260727000000_seller_pin.up.sql` / `.down.sql` | `users.pin_hash`, `users.pin_updated_at`, `cash_users.max_discount`, `document_expenses.approved_by_id` |
 | `migrations/20260727000100_shift_close_permission.up.sql` / `.down.sql` | permission-строка `cashes.shift_close` |
 | `users/pin.go` | хэширование/проверка/валидация PIN (PBKDF2) |
 | `users/pin_test.go` | тесты PIN-хелперов |
@@ -101,15 +101,15 @@ dotnet test tests/VvCash.Tests/VvCash.Tests.csproj
 ```sql
 ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_updated_at timestamptz;
-ALTER TABLE cash_users ADD COLUMN IF NOT EXISTS max_discount numeric NULL;
-ALTER TABLE document_expenses ADD COLUMN IF NOT EXISTS approved_by uuid NULL REFERENCES users(id);
+ALTER TABLE cash_users ADD COLUMN IF NOT EXISTS max_discount numeric;
+ALTER TABLE document_expenses ADD COLUMN IF NOT EXISTS approved_by_id uuid REFERENCES users(id);
 ```
 
 - [ ] **Step 2: Написать down-миграцию**
 
 `migrations/20260727000000_seller_pin.down.sql`:
 ```sql
-ALTER TABLE document_expenses DROP COLUMN IF EXISTS approved_by;
+ALTER TABLE document_expenses DROP COLUMN IF EXISTS approved_by_id;
 ALTER TABLE cash_users DROP COLUMN IF EXISTS max_discount;
 ALTER TABLE users DROP COLUMN IF EXISTS pin_updated_at;
 ALTER TABLE users DROP COLUMN IF EXISTS pin_hash;
@@ -856,7 +856,7 @@ git commit -m "feat: credit sale to seller from request body, flagging disallowe
 func (r *DocumentRepo) InsertDocumentExpense(ctx context.Context, db base.PGXDB, docBaseID, warehouseID, cashID, sellerID string, shiftID *string, soldSource expenseSoldSource, quoteID, approvedBy string) (string, error) {
 	var id string
 	err := db.QueryRow(ctx,
-		`INSERT INTO document_expenses (document_base_id, warehouse_id, cash_id, seller_id, shift_id, sold_source, quote_id, approved_by)
+		`INSERT INTO document_expenses (document_base_id, warehouse_id, cash_id, seller_id, shift_id, sold_source, quote_id, approved_by_id)
 		 VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,'')::uuid,NULLIF($8,'')::uuid) RETURNING id`,
 		docBaseID, warehouseID, cashID, sellerID, shiftID, soldSource, quoteID, approvedBy,
 	).Scan(&id)

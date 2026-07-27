@@ -84,8 +84,8 @@
 ```sql
 ALTER TABLE users ADD COLUMN pin_hash text;
 ALTER TABLE users ADD COLUMN pin_updated_at timestamptz;
-ALTER TABLE cash_users ADD COLUMN max_discount numeric NULL;
-ALTER TABLE document_expense ADD COLUMN approved_by uuid NULL REFERENCES users(id);
+ALTER TABLE cash_users ADD COLUMN max_discount numeric;
+ALTER TABLE document_expenses ADD COLUMN approved_by_id uuid REFERENCES users(id);
 ```
 
 PIN хранится на пользователе, а не на `cash_users`: один человек работает на нескольких
@@ -103,7 +103,10 @@ PIN хранится на пользователе, а не на `cash_users`: �
 магазина» (`stores.GetMaxAllowedDiscount`, который per-store и персонального измерения не
 имеет). Заполняется там же, где `is_seller`/`can_sell` — в `POST /cash/users/assign/`.
 
-`approved_by` фиксирует, кто подтвердил операцию сверх прав продавца (см. «Эскалация»).
+`approved_by_id` фиксирует, кто подтвердил операцию сверх прав продавца (см. «Эскалация»).
+Суффикс `_id` — конвенция всех audit-FK колонок этой базы (`created_by_id`, `completed_by_id`,
+`shipped_by_id` и прочие). В JSON поле остаётся `approved_by`: имя колонки и имя поля API
+здесь независимы.
 
 ### 2. `GET /cashes/seller/` расширяется
 
@@ -224,7 +227,7 @@ PIN сверяется локально с кэшем, сеть не задей�
 
 Тот же оверлей в режиме подтверждения, но в списке только пользователи с требуемым правом.
 После ввода PIN операция выполняется, **текущий продавец не меняется**. Подтвердивший
-пишется в `document_expense.approved_by`.
+пишется в `document_expenses.approved_by_id`.
 
 ## Офлайн: крайние случаи
 
