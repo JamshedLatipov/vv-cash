@@ -30,9 +30,19 @@ public class SellerRosterService : ISellerRosterService
     //
     // Guarded by a real lock rather than a UI-thread assumption (unlike
     // SellerSession, see its own remarks) — this type's whole point is to be safe
-    // off the UI thread. The lock is only ever held for a synchronous field
-    // read/write, never across an await, so it cannot deadlock or block a caller
-    // on network I/O.
+    // off the UI thread. The lock's own critical sections (checking/assigning
+    // _inFlightRefresh in RefreshAsync, checking/clearing it in
+    // ClearInFlightIfCurrent) really are just a field read/write. But RunFetchAsync
+    // is kicked off as a fire-and-forget call from *inside* RefreshAsync's lock
+    // block, so C# runs it synchronously up to its first genuine suspension point
+    // before that lock block returns — and when BackendUrl is blank, that path runs
+    // straight into SafeGetCachedAsync's SQLite read via IOfflineStorageService.
+    // ADO.NET's async calls typically complete synchronously for local SQLite (no
+    // real thread switch), so in that case the lock is, in practice, still held
+    // across that database round-trip, not just a field assignment. Re-entrant
+    // Monitor locking means this can never deadlock the thread that already holds
+    // it, but it does mean a second caller arriving on another thread can genuinely
+    // block on the lock for the duration of that DB read.
     private readonly object _refreshLock = new();
     private Task<IEnumerable<SellerInfo>>? _inFlightRefresh;
 
@@ -86,30 +96,41 @@ public class SellerRosterService : ISellerRosterService
         }
     }
 
-    // Drives the real fetch and always clears the in-flight slot before completing
-    // `tcs` — success or failure — so that by the time any awaiter of RefreshAsync()'s
-    // returned task observes completion, the next call is already free to start a
-    // fresh fetch rather than reuse this one. FetchRosterAsync itself never throws by
-    // design (see its own try/catch), so the catch below is defensive: it exists so
-    // that even an unanticipated failure (e.g. a settings accessor throwing before
-    // FetchRosterAsync's own try block, as covered by
+    // Drives the real fetch and always clears the in-flight slot once `tcs` is
+    // completing — success or failure — so that by the time any awaiter of
+    // RefreshAsync()'s returned task observes completion, the next call is already
+    // free to start a fresh fetch rather than reuse this one. FetchRosterAsync
+    // itself never throws by design (see its own try/catch), so the catch below is
+    // defensive: it exists so that even an unanticipated failure (e.g. a settings
+    // accessor throwing before FetchRosterAsync's own try block, as covered by
     // RefreshAsync_FailedSharedInFlightTask_DoesNotPoisonNextCall in the test suite)
     // cannot leave a faulted task cached for every subsequent caller to keep observing.
     // Whoever was awaiting this particular tcs.Task still sees that one failure — this
     // cannot un-fail a call already handed out — but the next call after it gets a
     // genuinely fresh attempt instead of a cached exception.
+    //
+    // Resolves `tcs` *before* clearing `_inFlightRefresh`, not after: clearing first
+    // would open a window where a new caller takes `_refreshLock`, finds the slot
+    // already empty, and starts a redundant fetch of its own instead of joining the
+    // one that is about to finish anyway. Resolving first closes that window — any
+    // caller that acquires the lock in between sees a task that is already complete
+    // and simply awaits it instead of racing a fresh HTTP round-trip. This is safe
+    // against re-entrant completion because the constructor uses
+    // TaskCreationOptions.RunContinuationsAsynchronously: SetResult/SetException
+    // never runs awaiters' continuations inline, so nothing downstream can observe
+    // completion and re-enter this type before ClearInFlightIfCurrent below runs.
     private async Task RunFetchAsync(TaskCompletionSource<IEnumerable<SellerInfo>> tcs)
     {
         try
         {
             var result = await FetchRosterAsync();
-            ClearInFlightIfCurrent(tcs.Task);
             tcs.SetResult(result);
+            ClearInFlightIfCurrent(tcs.Task);
         }
         catch (Exception ex)
         {
-            ClearInFlightIfCurrent(tcs.Task);
             tcs.SetException(ex);
+            ClearInFlightIfCurrent(tcs.Task);
         }
     }
 
