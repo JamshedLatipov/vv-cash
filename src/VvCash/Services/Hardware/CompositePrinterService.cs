@@ -93,14 +93,14 @@ public class CompositePrinterService : IPrinterService
         }
     }
 
-    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons)
+    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null)
     {
         if (!_printers.Any())
         {
             return false; // Or true if we consider "no printers configured" as success?
         }
 
-        var tasks = _printers.Select(p => p.PrintReceiptAsync(items, subtotal, discount, total, coupons)).ToList();
+        var tasks = _printers.Select(p => p.PrintReceiptAsync(items, subtotal, discount, total, coupons, discountName)).ToList();
         await Task.WhenAll(tasks);
 
         // Return true if at least one printer succeeded

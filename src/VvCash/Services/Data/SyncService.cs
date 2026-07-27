@@ -198,6 +198,17 @@ public class SyncService : ISyncService
                                                         if (string.IsNullOrEmpty(imagePath) && item.TryGetProperty("thumb", out var thumbElem) && thumbElem.ValueKind == JsonValueKind.String)
                                                             imagePath = thumbElem.GetString() ?? string.Empty;
 
+                                                        var tagIds = new List<string>();
+                                                        if (item.TryGetProperty("tags", out var tagsElem) && tagsElem.ValueKind == JsonValueKind.Array)
+                                                        {
+                                                            foreach (var tag in tagsElem.EnumerateArray())
+                                                            {
+                                                                if (tag.ValueKind != JsonValueKind.String) continue;
+                                                                var tagId = tag.GetString();
+                                                                if (!string.IsNullOrEmpty(tagId)) tagIds.Add(tagId);
+                                                            }
+                                                        }
+
                                                         Console.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
                                                         updatedProducts.Add(new Product
                                                         {
@@ -207,7 +218,8 @@ public class SyncService : ISyncService
                                                             Category = productCategory,
                                                             Price = productPrice,
                                                             Barcode = barcode,
-                                                            ImagePath = imagePath
+                                                            ImagePath = imagePath,
+                                                            TagIds = tagIds
                                                         });
                                                     }
                                                     catch (Exception ex)
@@ -260,6 +272,9 @@ public class SyncService : ISyncService
             {
                 Console.WriteLine($"[SyncService] versions endpoint HTTP error {(int)versionsResponse.StatusCode}");
             }
+            await SyncPromotionsAsync(baseUrl);
+            await SyncMoneyPolicyAsync(baseUrl);
+
             SyncStatusChanged?.Invoke(this, true);
             ProductsSynced?.Invoke(this, EventArgs.Empty);
         }
@@ -267,6 +282,96 @@ public class SyncService : ISyncService
         {
             Console.WriteLine($"[SyncService] Sync error: {ex.Message}");
             SyncStatusChanged?.Invoke(this, false);
+        }
+    }
+
+    /// <summary>Refreshes the offline promotion cache. Unlike products there is no
+    /// version walk: the set is small and the endpoint always returns it whole, so
+    /// the cache is replaced outright. A failure here leaves the previous cache in
+    /// place — stale promotions price a cart better than none at all — and never
+    /// fails the product sync that just succeeded.</summary>
+    private async Task SyncPromotionsAsync(string baseUrl)
+    {
+        try
+        {
+            var url = $"{baseUrl}cashes/promotion/";
+            Console.WriteLine($"[SyncService] GET {url}");
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[SyncService] promotions: HTTP {(int)response.StatusCode}, keeping cached set");
+                return;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("status", out var status) || status.GetInt32() != 0)
+            {
+                Console.WriteLine("[SyncService] promotions: backend status != 0, keeping cached set");
+                return;
+            }
+
+            // A null body is a legitimate "no promotions configured" and must clear
+            // the cache, otherwise a deleted campaign keeps discounting forever.
+            if (!root.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.Array)
+            {
+                await _storageService.SavePromotionsAsync(new List<Promotion>());
+                Console.WriteLine("[SyncService] promotions: empty body, cache cleared");
+                return;
+            }
+
+            var promotions = JsonSerializer.Deserialize<List<Promotion>>(body.GetRawText()) ?? new List<Promotion>();
+            await _storageService.SavePromotionsAsync(promotions);
+            Console.WriteLine($"[SyncService] promotions: cached {promotions.Count}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncService] promotions sync error: {ex.Message}");
+        }
+    }
+
+    /// <summary>Refreshes the cached money rounding policy. Any failure keeps the
+    /// previously cached value (or the default): rounding with a stale policy is a
+    /// last-minor-unit difference, while having none would be a hard stop.</summary>
+    private async Task SyncMoneyPolicyAsync(string baseUrl)
+    {
+        try
+        {
+            var url = $"{baseUrl}cashes/money/";
+            Console.WriteLine($"[SyncService] GET {url}");
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[SyncService] money policy: HTTP {(int)response.StatusCode}, keeping cached value");
+                return;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("status", out var status) || status.GetInt32() != 0)
+            {
+                Console.WriteLine("[SyncService] money policy: backend status != 0, keeping cached value");
+                return;
+            }
+            if (!root.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.Object)
+            {
+                Console.WriteLine("[SyncService] money policy: no body, keeping cached value");
+                return;
+            }
+
+            var policy = JsonSerializer.Deserialize<MoneyPolicy>(body.GetRawText());
+            if (policy == null) return;
+
+            await _storageService.SaveMoneyPolicyAsync(policy);
+            Console.WriteLine($"[SyncService] money policy: scale={policy.Scale} mode={policy.Mode}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncService] money policy sync error: {ex.Message}");
         }
     }
 }
