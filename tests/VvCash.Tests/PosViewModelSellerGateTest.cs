@@ -1090,4 +1090,27 @@ public class PosViewModelSellerGateTest
 
         Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
     }
+
+    [Fact]
+    public async Task ConfirmParkSaleCommand_ClearsApprovedById_DoesNotLeakIntoNextReceipt()
+    {
+        // Parking is a cart reset too (see ConfirmParkSale), just not a completed sale —
+        // an approver id recorded for the parked receipt's discount must not attach to
+        // whatever gets rung up next.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
 }
