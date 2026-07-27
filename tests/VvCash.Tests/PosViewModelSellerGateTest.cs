@@ -176,6 +176,12 @@ public class PosViewModelSellerGateTest
         {
             _items.Clear();
             _items.AddRange(items);
+            // Mirrors the real CartService.LoadSnapshot, which does set the discount
+            // fields directly (bypassing SetManualDiscount) — that bypass is exactly what
+            // let the park/resume approved_by bug through, so this fake must reproduce it
+            // rather than silently keep the old discount around from before the resume.
+            ManualDiscountPercent = manualDiscountPercent;
+            ManualDiscountAmount = manualDiscountAmount;
             CartChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -314,11 +320,45 @@ public class PosViewModelSellerGateTest
         public Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query) => Task.FromResult<List<CounterpartyResponse>?>(new List<CounterpartyResponse>());
     }
 
+    /// <summary>Mirrors the real ParkedSaleService's own park/resume round trip (park
+    /// stores under a fresh id, resume looks it up and removes it, an unknown id resumes
+    /// to null) closely enough that
+    /// ResumeParkedSale_ApprovedOverCapDiscount_SurvivesParkThenResume below is a genuine
+    /// round trip through this fake's BuildSnapshot -> ParkAsync -> ResumeAsync path,
+    /// rather than a canned snapshot handed straight to ResumeAsync.</summary>
     private class FakeParkedSaleService : IParkedSaleService
     {
-        public Task<ParkedSale> ParkAsync(ParkedSaleSnapshot snapshot, decimal total) => Task.FromResult(new ParkedSale());
+        private readonly Dictionary<string, ParkedSaleSnapshot> _parked = new();
+        public ParkedSaleSnapshot? LastParkedSnapshot { get; private set; }
+        public string? LastParkedId { get; private set; }
+
+        public Task<ParkedSale> ParkAsync(ParkedSaleSnapshot snapshot, decimal total)
+        {
+            var id = Guid.NewGuid().ToString();
+            _parked[id] = snapshot;
+            LastParkedSnapshot = snapshot;
+            LastParkedId = id;
+            return Task.FromResult(new ParkedSale { Id = id, Total = total });
+        }
+
         public Task<IReadOnlyList<ParkedSale>> GetAllAsync() => Task.FromResult<IReadOnlyList<ParkedSale>>(Array.Empty<ParkedSale>());
-        public Task<ParkedSaleSnapshot?> ResumeAsync(string id) => Task.FromResult<ParkedSaleSnapshot?>(null);
+
+        public Task<ParkedSaleSnapshot?> ResumeAsync(string id)
+        {
+            if (_parked.TryGetValue(id, out var snapshot))
+            {
+                _parked.Remove(id);
+                return Task.FromResult<ParkedSaleSnapshot?>(snapshot);
+            }
+            return Task.FromResult<ParkedSaleSnapshot?>(null);
+        }
+
+        /// <summary>Test hook standing in for a parked sale saved by an older build:
+        /// stores a snapshot directly under a given id, bypassing ParkAsync (which always
+        /// stamps the current ApprovedById) so the snapshot can omit it entirely, exactly
+        /// as System.Text.Json would deserialize a payload that predates the field.</summary>
+        public void SeedParkedSnapshot(string id, ParkedSaleSnapshot snapshot) => _parked[id] = snapshot;
+
         public Task DeleteAsync(string id) => Task.CompletedTask;
         public Task<int> GetCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? CountChanged;
@@ -373,6 +413,7 @@ public class PosViewModelSellerGateTest
         public FakeShiftService ShiftService { get; } = new();
         public FakeAuthService AuthService { get; } = new();
         public FakeCartService CartService { get; } = new();
+        public FakeParkedSaleService ParkedSaleService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -391,7 +432,7 @@ public class PosViewModelSellerGateTest
             deps.SettingsService,
             deps.ExpenseDocumentService,
             new FakeCounterpartyService(),
-            new FakeParkedSaleService(),
+            deps.ParkedSaleService,
             new FakeReturnService(),
             new FakeQuoteService(),
             new FakeSessionContext(),
@@ -1112,5 +1153,119 @@ public class PosViewModelSellerGateTest
         mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
 
         Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Park/resume carries the discount approval (review follow-up to Task 21): resuming
+    // a parked sale used to restore the manual discount straight through
+    // CartService.LoadSnapshot, bypassing ApplyManualDiscount/NeedsDiscountApproval
+    // entirely, while ParkedSaleSnapshot had nowhere to keep the approver id — so a
+    // properly-approved over-cap discount rode through to Pay() with approved_by silently
+    // null. The fix carries the approval with the discount it authorised instead of
+    // re-prompting (re-asking a supervisor to re-approve their own earlier decision would
+    // be wrong, and would fail once that supervisor has gone home).
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ResumeParkedSale_ApprovedOverCapDiscount_SurvivesParkThenResume()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+
+        // BuildSnapshot must have carried the approver into the parked payload.
+        Assert.Equal("supervisor-9", deps.ParkedSaleService.LastParkedSnapshot?.ApprovedById);
+
+        await vm.ResumeParkedSale(deps.ParkedSaleService.LastParkedId!);
+
+        Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // the discount itself came back
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Equal("supervisor-9", deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_SnapshotWithoutApproverField_ResumesCleanly_NoApproverAttached()
+    {
+        // Stands in for a parked sale saved by a build that predates ApprovedById: the
+        // property is left at its default (null), exactly what System.Text.Json produces
+        // deserializing a payload that never had this field. Resuming it must not crash
+        // and must not fabricate an approver for a discount nobody re-confirmed.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 0m)); // no cap: 40% never needed approval anyway
+        var oldSnapshot = new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } },
+            ManualDiscountPercent = 40m
+            // ApprovedById intentionally left unset (null) — the pre-migration shape.
+        };
+        deps.ParkedSaleService.SeedParkedSnapshot("old-id", oldSnapshot);
+
+        var exception = await Record.ExceptionAsync(() => vm.ResumeParkedSale("old-id"));
+
+        Assert.Null(exception);
+        Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // discount itself still restored
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_ThenClearDiscount_DropsRestoredApprover()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+        await vm.ResumeParkedSale(deps.ParkedSaleService.LastParkedId!);
+
+        vm.ClearManualDiscountCommand.Execute(null);
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.ApprovedBy);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_ThenRaiseDiscountFurther_RequiresFreshApproval_DoesNotApplyRestoredApprover()
+    {
+        // The restored approval only ever covered the discount it was granted for (40%).
+        // Asking for more on the same receipt must re-gate through NeedsDiscountApproval
+        // exactly like a brand-new discount would — not silently ride on the approver
+        // carried in from the resumed snapshot.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.ApplyApprovedDiscount("supervisor-9", 40m);
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+        await vm.ResumeParkedSale(deps.ParkedSaleService.LastParkedId!);
+
+        decimal? raisedPercent = null;
+        vm.DiscountApprovalRequested += (s, percent) => raisedPercent = percent;
+        var callsBeforeAttempt = deps.CartService.SetManualDiscountCallCount;
+        vm.DiscountInputValue = "60"; // above the 15% cap
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(60m, raisedPercent); // escalated, same as any fresh over-cap discount
+        Assert.Equal(callsBeforeAttempt, deps.CartService.SetManualDiscountCallCount); // not applied yet
+        Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // the resumed 40% is untouched meanwhile
     }
 }

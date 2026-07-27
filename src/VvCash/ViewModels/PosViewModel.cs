@@ -48,11 +48,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// it exceeded the ringing seller's own cap (see <see cref="NeedsDiscountApproval"/>
     /// / <see cref="ApplyApprovedDiscount"/>) — stamped onto <see cref="DocumentRequest.ApprovedBy"/>
     /// in <see cref="Pay"/>. Lives only for the current receipt: cleared everywhere the
-    /// cart itself is cleared (<see cref="ClearCart"/>, park, resume's auto-park, and
-    /// Pay's own success branch) and whenever the manual discount is replaced or removed
-    /// without a fresh approval (<see cref="ApplyManualDiscount"/>,
-    /// <see cref="ClearManualDiscount"/>), so it can never leak into a receipt — or a
-    /// discount — it wasn't actually approved for.</summary>
+    /// cart itself is cleared (<see cref="ClearCart"/>, Pay's own success branch) and
+    /// whenever the manual discount is replaced or removed without a fresh approval
+    /// (<see cref="ApplyManualDiscount"/>, <see cref="ClearManualDiscount"/>), so it can
+    /// never leak into a receipt — or a discount — it wasn't actually approved for.
+    /// Parking is the one exception to "cleared": the approval genuinely happened, so
+    /// <see cref="BuildSnapshot"/> carries this value into
+    /// <see cref="ParkedSaleSnapshot.ApprovedById"/> before the field is reset for the
+    /// next receipt, and <see cref="ResumeParkedSale"/> restores it — re-prompting a
+    /// supervisor to re-approve their own earlier decision would be wrong, and would fail
+    /// outright once that supervisor has gone home.</summary>
     private string? _approvedById;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
@@ -1154,7 +1159,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         CustomerDiscountPercent = _cartService.CustomerDiscountPercent,
         AppliedCoupons = _cartService.AppliedCoupons.ToList(),
         Customer = SelectedCustomer,
-        Label = label
+        Label = label,
+        // Carry any approval that already happened along with the discount it authorised
+        // — see _approvedById's remarks on why this is the one place it is not reset.
+        ApprovedById = _approvedById
     };
 
     [RelayCommand]
@@ -1244,7 +1252,22 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task ResumeParkedSale(string id)
+    /// <summary>The direct target of <see cref="OpenParkedSales"/> once a parked sale is
+    /// picked from the dialog — public (like <see cref="ShowReturnsDialogAsync"/> and
+    /// <see cref="OnCloseShiftApproved"/>) so it is reachable from a unit test without a
+    /// running Avalonia application, since that dialog itself is not.
+    ///
+    /// Restores <see cref="ParkedSaleSnapshot.ApprovedById"/> into <see cref="_approvedById"/>
+    /// after the rest of the snapshot loads, so an over-cap discount that was already
+    /// approved before parking keeps its approver on resume instead of riding through with
+    /// approved_by silently null. A snapshot parked by a build that predates this field
+    /// deserializes ApprovedById as null (System.Text.Json's default for a missing
+    /// property), which this assigns through unchanged — no approver, same as a discount
+    /// that never needed one; never a crash. If the cashier subsequently raises the
+    /// discount further, ApplyManualDiscount re-gates it through NeedsDiscountApproval same
+    /// as any fresh discount; if they clear it, ClearManualDiscount drops this approver
+    /// same as it always has.</summary>
+    public async Task ResumeParkedSale(string id)
     {
         // Если в корзине уже есть товары — авто-отложить текущую продажу.
         if (_cartService.Items.Any())
@@ -1273,6 +1296,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             snapshot.ManualDiscountPercent, snapshot.ManualDiscountAmount,
             snapshot.CustomerDiscountPercent,
             snapshot.AppliedCoupons);
+
+        _approvedById = snapshot.ApprovedById;
 
         TriggerRequote();
 
