@@ -587,8 +587,13 @@ public class PosViewModelSellerGateTest
         // roster refresh on a background thread — the same pre-existing "sync
         // immediately on startup" pattern this task extended from products to the
         // roster. That second call lands on its own schedule, so whether it has already
-        // completed by the time this assertion runs is a genuine, harmless race; only
-        // the lower bound is deterministic.
+        // completed by the time this assertion runs is a race in how many times this
+        // *fake* records a call — the fake has no coalescing, unlike the real
+        // SellerRosterService (see SellerRosterServiceTest's
+        // RefreshAsync_TwoOverlappingCallers_CoalesceIntoOneFetch_BothGetSameRoster),
+        // so in production these two call sites overlapping is not a bug: they'd share
+        // one in-flight fetch and get the identical result. Here it only means the
+        // lower bound is what's deterministic.
         using var vm = CreateViewModel(out var deps);
 
         Assert.True(deps.RosterService.RefreshCallCount >= 1,

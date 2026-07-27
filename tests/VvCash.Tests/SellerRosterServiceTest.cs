@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Services;
@@ -317,5 +318,134 @@ public class SellerRosterServiceTest
 
         Assert.Single(result);
         Assert.Equal("old-cached", result[0].Id);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Coalescing (post-Task-17 fix): the background sync loop and the UI-thread
+    // shift-open/restore paths can legitimately call RefreshAsync around the same
+    // moment. Without coalescing, two overlapping HTTP round-trips race to write
+    // SellerSession's roster last, so whichever happens to resolve later wins
+    // regardless of which was actually more recent. StubHttpMessageHandler's responder
+    // completes synchronously and so cannot demonstrate two calls genuinely
+    // overlapping — SuspendableHttpMessageHandler below provides a real suspension
+    // point, same idea as SellerSwitchViewModelTest's TaskCompletionSource-backed
+    // SlowSession.
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>Unlike StubHttpMessageHandler, SendAsync here genuinely suspends until
+    /// the test calls Complete — the only way to make two RefreshAsync callers actually
+    /// overlap instead of each completing before the next one starts.</summary>
+    private sealed class SuspendableHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly TaskCompletionSource<(HttpStatusCode Code, string Body)> _tcs = new();
+        public int SendCount { get; private set; }
+
+        public void Complete(HttpStatusCode code, string body) => _tcs.SetResult((code, body));
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            SendCount++;
+            var (code, body) = await _tcs.Task;
+            return new HttpResponseMessage(code)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
+    private sealed class ThrowingBackendUrlSettings : ISettingsService
+    {
+        public bool ThrowOnAccess { get; set; }
+        public string BackendUrl
+        {
+            get => ThrowOnAccess
+                ? throw new InvalidOperationException("simulated settings failure")
+                : "https://example.test/api/v1/";
+            set { }
+        }
+        public string CashRegisterToken { get; set; } = "";
+        public string AuthToken { get; set; } = "";
+        public DateTime? AuthTokenExpiresAt { get; set; }
+        public int SyncIntervalMinutes { get; set; } = 10;
+        public string Language { get; set; } = "ru";
+        public List<PrinterConfig> Printers { get; set; } = new();
+        public bool ReturnOpenCashDrawer { get; set; } = true;
+        public bool ReturnPrintReceipt { get; set; } = true;
+        public event EventHandler? SettingsChanged;
+        public void Save() => SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_TwoOverlappingCallers_CoalesceIntoOneFetch_BothGetSameRoster()
+    {
+        var handler = new SuspendableHttpMessageHandler();
+        var storage = new FakeStorage();
+        var svc = new SellerRosterService(new HttpClient(handler), new FakeSettings(), storage);
+
+        // Neither call awaits yet, so both RefreshAsync() invocations run synchronously
+        // up to (and including) the point where the HTTP call genuinely suspends. The
+        // second call must observe the first's in-flight task rather than starting its
+        // own HTTP round-trip.
+        var first = svc.RefreshAsync();
+        var second = svc.RefreshAsync();
+
+        Assert.Same(first, second); // literally the same Task — proof of coalescing, not just equal results
+        Assert.Equal(1, handler.SendCount); // only one HTTP call was actually issued
+
+        handler.Complete(HttpStatusCode.OK, SuccessBody);
+
+        var firstResult = (await first).ToList();
+        var secondResult = (await second).ToList();
+
+        Assert.Equal(1, handler.SendCount); // still just the one fetch after both awaits resolve
+        Assert.Equal(2, firstResult.Count);
+        Assert.Equal(2, secondResult.Count);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_CallerAfterCompletedRefresh_StartsFreshFetch()
+    {
+        var callCount = 0;
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            callCount++;
+            return (HttpStatusCode.OK, SuccessBody);
+        });
+        var storage = new FakeStorage();
+        var svc = Build(handler, storage);
+
+        await svc.RefreshAsync();
+        Assert.Equal(1, callCount);
+
+        // The in-flight slot must have been cleared once the first call completed, so
+        // this second call — arriving well after, not overlapping — issues its own
+        // fresh HTTP request rather than replaying a stale completed task.
+        await svc.RefreshAsync();
+        Assert.Equal(2, callCount);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_FailedSharedInFlightTask_DoesNotPoisonNextCall()
+    {
+        // BackendUrl throwing happens before FetchRosterAsync's own try/catch even
+        // starts, so this is a genuine fault propagating out of the in-flight task —
+        // the scenario the coalescing wrapper's finally-based cleanup exists for. This
+        // does NOT contradict RefreshAsync's documented "never throws" contract for
+        // FetchRosterAsync itself (which is unchanged and still fully defensive); it
+        // proves the coalescing layer added on top doesn't cache a failure forever even
+        // when something upstream of that contract goes wrong.
+        var settings = new ThrowingBackendUrlSettings { ThrowOnAccess = true };
+        var handler = new StubHttpMessageHandler(req => (HttpStatusCode.OK, SuccessBody));
+        var storage = new FakeStorage();
+        var svc = new SellerRosterService(new HttpClient(handler), settings, storage);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => svc.RefreshAsync());
+
+        // The next caller after the failure must get a fresh attempt, not a cached
+        // exception replayed from the same faulted in-flight task.
+        settings.ThrowOnAccess = false;
+        var result = (await svc.RefreshAsync()).ToList();
+
+        Assert.Equal(2, result.Count);
     }
 }

@@ -223,6 +223,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             IsShiftOpen = true;
             IsShiftModalVisible = false;
 
+            // This can land moments after (or overlap with) StartBackgroundSync's own
+            // roster refresh on startup (see InitializeAsync below and the periodic
+            // loop) — that's fine, not a duplicate-fetch bug: SellerRosterService
+            // coalesces overlapping RefreshAsync callers onto a single in-flight fetch,
+            // so both call sites end up with the identical result instead of racing two
+            // independent HTTP round-trips where a stale one could resolve last and
+            // overwrite a fresh one. Kept deliberately per Task 17's spec (load on
+            // shift open) rather than removed to avoid the overlap.
+            //
             // OpenShiftAsync is a [RelayCommand], invoked from a UI-triggered Execute()
             // and — since this codebase never uses ConfigureAwait(false) — every await
             // above resumes back on the UI thread via the captured Avalonia
@@ -464,6 +473,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             // the UI thread (NavigateToPos runs from UI-thread event handlers); with no
             // ConfigureAwait(false) anywhere in this codebase, every await above resumes
             // on that captured UI SynchronizationContext, so this is still the UI thread.
+            //
+            // StartBackgroundSync (called earlier in this same method) starts its loop
+            // with lastSyncTime = DateTime.MinValue, so it also fires an immediate
+            // roster refresh on a background thread around now. That overlap is
+            // deliberately left in place, not coalesced away at the call site:
+            // SellerRosterService.RefreshAsync itself coalesces concurrent callers onto
+            // one in-flight fetch, so this and the background loop's call either share a
+            // single HTTP round-trip (if they overlap) or each make their own
+            // consistent one (if they don't) — never two racing round-trips where a
+            // stale response could resolve later and overwrite a fresh one.
             await _sellerSession.LoadRosterAsync(await _rosterService.RefreshAsync());
         }
 

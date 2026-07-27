@@ -17,6 +17,25 @@ public class SellerRosterService : ISellerRosterService
     private readonly ISettingsService _settingsService;
     private readonly IOfflineStorageService _storage;
 
+    // Coalesces concurrent RefreshAsync callers onto a single in-flight fetch.
+    // RefreshAsync is genuinely called from more than one thread by design (the
+    // Task 17 background sync loop calls it from a pool thread on its own cadence,
+    // while the UI-thread shift-open/restore paths can call it around the same
+    // moment), so without this, two overlapping HTTP round-trips race to write
+    // SellerSession's roster last: whichever happens to resolve later wins,
+    // regardless of which was actually more recent or more successful — a stale
+    // cached-fallback response can silently overwrite a fresher server response.
+    // Coalescing removes the ordering dependency for every caller instead of
+    // requiring each call site to avoid overlapping on its own.
+    //
+    // Guarded by a real lock rather than a UI-thread assumption (unlike
+    // SellerSession, see its own remarks) — this type's whole point is to be safe
+    // off the UI thread. The lock is only ever held for a synchronous field
+    // read/write, never across an await, so it cannot deadlock or block a caller
+    // on network I/O.
+    private readonly object _refreshLock = new();
+    private Task<IEnumerable<SellerInfo>>? _inFlightRefresh;
+
     public SellerRosterService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService storage)
     {
         _httpClient = httpClient;
@@ -36,7 +55,74 @@ public class SellerRosterService : ISellerRosterService
     // requirement does not extend to this method.
     public Task<IEnumerable<SellerInfo>> GetCachedAsync() => _storage.GetSellersAsync();
 
-    public async Task<IEnumerable<SellerInfo>> RefreshAsync()
+    /// <summary>Fetches the roster from the server and caches it. On any network or
+    /// parse failure returns the cached roster instead, so the register keeps working.
+    /// A caller arriving while a refresh is already in flight is handed that same
+    /// in-flight task instead of starting a competing fetch (see <see cref="_inFlightRefresh"/>);
+    /// a caller arriving after the previous refresh finished — successfully or not —
+    /// always starts a fresh one.</summary>
+    public Task<IEnumerable<SellerInfo>> RefreshAsync()
+    {
+        lock (_refreshLock)
+        {
+            if (_inFlightRefresh != null)
+                return _inFlightRefresh;
+
+            // Register the in-flight task via a TaskCompletionSource *before* starting
+            // the actual fetch below, specifically so `_inFlightRefresh` is assigned
+            // first and the fetch second. FetchRosterAsync can complete entirely
+            // synchronously — an immediate throw (e.g. a settings accessor faulting) or
+            // simply a handler that never truly suspends both count — and if the fetch
+            // were started first with its result assigned to the field afterwards, a
+            // synchronous completion would run RunFetchAsync's own cleanup (see
+            // ClearInFlightIfCurrent below) before that later assignment executed,
+            // leaving a stale reference cached forever. Setting the field to tcs.Task up
+            // front means any cleanup that happens to run synchronously is clearing
+            // exactly what was just set, never something written after it.
+            var tcs = new TaskCompletionSource<IEnumerable<SellerInfo>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _inFlightRefresh = tcs.Task;
+            _ = RunFetchAsync(tcs);
+            return tcs.Task;
+        }
+    }
+
+    // Drives the real fetch and always clears the in-flight slot before completing
+    // `tcs` — success or failure — so that by the time any awaiter of RefreshAsync()'s
+    // returned task observes completion, the next call is already free to start a
+    // fresh fetch rather than reuse this one. FetchRosterAsync itself never throws by
+    // design (see its own try/catch), so the catch below is defensive: it exists so
+    // that even an unanticipated failure (e.g. a settings accessor throwing before
+    // FetchRosterAsync's own try block, as covered by
+    // RefreshAsync_FailedSharedInFlightTask_DoesNotPoisonNextCall in the test suite)
+    // cannot leave a faulted task cached for every subsequent caller to keep observing.
+    // Whoever was awaiting this particular tcs.Task still sees that one failure — this
+    // cannot un-fail a call already handed out — but the next call after it gets a
+    // genuinely fresh attempt instead of a cached exception.
+    private async Task RunFetchAsync(TaskCompletionSource<IEnumerable<SellerInfo>> tcs)
+    {
+        try
+        {
+            var result = await FetchRosterAsync();
+            ClearInFlightIfCurrent(tcs.Task);
+            tcs.SetResult(result);
+        }
+        catch (Exception ex)
+        {
+            ClearInFlightIfCurrent(tcs.Task);
+            tcs.SetException(ex);
+        }
+    }
+
+    private void ClearInFlightIfCurrent(Task<IEnumerable<SellerInfo>> task)
+    {
+        lock (_refreshLock)
+        {
+            if (ReferenceEquals(_inFlightRefresh, task))
+                _inFlightRefresh = null;
+        }
+    }
+
+    private async Task<IEnumerable<SellerInfo>> FetchRosterAsync()
     {
         Debug.WriteLine("[SellerRosterService] RefreshAsync called.");
 
