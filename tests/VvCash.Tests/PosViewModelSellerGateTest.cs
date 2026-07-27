@@ -202,8 +202,17 @@ public class PosViewModelSellerGateTest
 
     private class FakeShiftService : IShiftService
     {
+        /// <summary>What CloseShiftAsync reports back — defaults to success (matching
+        /// prior behaviour); tests exercising the failed-close path (Task 18) flip it.</summary>
+        public bool CloseShiftResult { get; set; } = true;
+        public int CloseShiftCallCount { get; private set; }
+
         public Task<string?> OpenShiftAsync() => Task.FromResult<string?>("shift-1");
-        public Task<bool> CloseShiftAsync(string shiftId) => Task.FromResult(true);
+        public Task<bool> CloseShiftAsync(string shiftId)
+        {
+            CloseShiftCallCount++;
+            return Task.FromResult(CloseShiftResult);
+        }
         public Task<string?> GetShiftStateAsync() => Task.FromResult<string?>("shift-1");
     }
 
@@ -325,6 +334,8 @@ public class PosViewModelSellerGateTest
         }
 
         public Task<IEnumerable<SellerInfo>> GetCachedAsync() => Task.FromResult<IEnumerable<SellerInfo>>(Roster);
+
+        public Task<bool> SetPinAsync(string sellerId, string pin) => Task.FromResult(true);
     }
 
     private sealed class Deps
@@ -332,6 +343,8 @@ public class PosViewModelSellerGateTest
         public FakeSellerSession SellerSession { get; } = new();
         public FakeExpenseDocumentService ExpenseDocumentService { get; } = new();
         public FakeSellerRosterService RosterService { get; } = new();
+        public FakeSettingsService SettingsService { get; } = new();
+        public FakeShiftService ShiftService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -344,10 +357,10 @@ public class PosViewModelSellerGateTest
             new FakeCartService(),
             new FakePrinterService(),
             new FakeCustomerDisplayService(),
-            new FakeShiftService(),
+            deps.ShiftService,
             new FakeOfflineStorageService(),
             new FakeSyncService(),
-            new FakeSettingsService(),
+            deps.SettingsService,
             deps.ExpenseDocumentService,
             new FakeCounterpartyService(),
             new FakeParkedSaleService(),
@@ -622,5 +635,150 @@ public class PosViewModelSellerGateTest
         // (populated with "s9" only after construction finished).
         Assert.True(deps.RosterService.RefreshCallCount > callsBeforeOpen);
         Assert.Single(deps.SellerSession.Roster, s => s.Id == "s9");
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Close-shift gate and token lifetime (Task 18): closing requires CanCloseShift,
+    // escalates through the approval overlay when it's missing, actually finishes
+    // closing once approved (not just dismissing the overlay), and only a
+    // *successful* close wipes the stored auth token / clears the seller session.
+    // ---------------------------------------------------------------------------------
+
+    private static SellerInfo MakeSeller(string id, bool canCloseShift) =>
+        new() { Id = id, FirstName = "Seller", LastName = id, CanCloseShift = canCloseShift };
+
+    [Fact]
+    public void CloseShiftCommand_SellerLacksRight_RaisesApprovalRequest_DoesNotClose()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: false));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        vm.CloseShiftCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal("shift-1", vm.CurrentShiftId);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public void CloseShiftCommand_NoCurrentSeller_TreatedAsLackingRight_RaisesApprovalRequest()
+    {
+        // Nobody has confirmed on yet (Current == null) — fail closed, same as an
+        // explicit CanCloseShift == false, rather than allowing an unattributed close.
+        using var vm = CreateViewModel(out var deps);
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        vm.CloseShiftCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+        Assert.True(vm.IsShiftOpen);
+    }
+
+    [Fact]
+    public async Task CloseShiftCommand_SellerHasRight_ClosesDirectly_NoApprovalRaised()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        await vm.CloseShiftCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.False(vm.IsShiftOpen);
+        Assert.Null(vm.CurrentShiftId);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public async Task OnCloseShiftApproved_AfterApprovalRequested_ActuallyClosesTheShift()
+    {
+        // The continuation: approving must not just dismiss the overlay, it must
+        // finish the close PosViewModel originally asked for.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: false));
+        vm.CloseShiftCommand.Execute(null); // raises CloseShiftApprovalRequested, sets pending
+
+        await vm.OnCloseShiftApproved();
+
+        Assert.False(vm.IsShiftOpen);
+        Assert.Null(vm.CurrentShiftId);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public async Task OnCloseShiftApproved_WithoutAPriorRequest_IsNoOp()
+    {
+        // A stray Approved event (e.g. from some unrelated future approval flow)
+        // must never be mistaken for permission to close this shift.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+
+        await vm.OnCloseShiftApproved();
+
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public async Task CloseShift_OnSuccess_WipesAuthTokenAndClearsSellerSession()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SettingsService.AuthToken = "some-token";
+        deps.SettingsService.AuthTokenExpiresAt = DateTime.UtcNow.AddHours(5);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+
+        await vm.CloseShiftCommand.ExecuteAsync(null);
+
+        Assert.Equal(string.Empty, deps.SettingsService.AuthToken);
+        Assert.Null(deps.SettingsService.AuthTokenExpiresAt);
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public async Task CloseShift_WhenCloseShiftAsyncFails_LeavesTokenAndSellerSessionUntouched()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.ShiftService.CloseShiftResult = false;
+        deps.SettingsService.AuthToken = "some-token";
+        deps.SettingsService.AuthTokenExpiresAt = DateTime.UtcNow.AddHours(5);
+        var seller = MakeSeller("s1", canCloseShift: true);
+        deps.SellerSession.SetCurrent(seller);
+
+        await vm.CloseShiftCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsShiftOpen); // the shift itself never actually closed
+        Assert.Equal("some-token", deps.SettingsService.AuthToken);
+        Assert.NotNull(deps.SettingsService.AuthTokenExpiresAt);
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void CloseShift_CancelledConfirmDialog_LeavesTokenAndSellerSessionUntouched()
+    {
+        // Stands in for the "parked sales exist" branch (ProceedToCloseShiftAsync
+        // shows IsShiftCloseConfirmVisible instead of closing outright) without
+        // depending on FakeParkedSaleService's CountChanged/Dispatcher plumbing,
+        // which nothing else in this suite exercises yet — setting the same
+        // publicly-settable property the real flow would have set is equivalent
+        // for what this test actually checks: that CancelCloseShiftCommand alone
+        // never reaches DoCloseShiftAsync.
+        using var vm = CreateViewModel(out var deps);
+        deps.SettingsService.AuthToken = "some-token";
+        var seller = MakeSeller("s1", canCloseShift: true);
+        deps.SellerSession.SetCurrent(seller);
+        vm.IsShiftCloseConfirmVisible = true;
+
+        vm.CancelCloseShiftCommand.Execute(null);
+
+        Assert.False(vm.IsShiftCloseConfirmVisible);
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal("some-token", deps.SettingsService.AuthToken);
+        Assert.Same(seller, deps.SellerSession.Current);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
     }
 }

@@ -63,6 +63,16 @@ public partial class App : Application
                 posVm.SellerSwitchViewModel = sellerSwitchVm;
                 posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open();
 
+                // Closing a shift without CanCloseShift escalates through the same
+                // overlay, in approval mode (see SellerSwitchViewModel.OpenForApproval).
+                // The overlay's own Approved event is the continuation: PosViewModel
+                // decides whether that approval was actually for closing the shift
+                // (OnCloseShiftApproved is a no-op otherwise) and, if so, finishes the
+                // close — without this, approving would only dismiss the overlay and
+                // never actually close anything.
+                posVm.CloseShiftApprovalRequested += (s, e) => sellerSwitchVm.OpenForApproval(x => x.CanCloseShift);
+                sellerSwitchVm.Approved += async (s, approver) => await posVm.OnCloseShiftApproved();
+
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)
                 {

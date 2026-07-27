@@ -43,6 +43,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
 
+    // Set right before raising CloseShiftApprovalRequested and consumed by
+    // OnCloseShiftApproved (see both below) — this is what lets a later
+    // SellerSwitchViewModel.Approved event be recognised as "yes, this was for
+    // closing the shift" rather than acted on unconditionally, which would be
+    // wrong the moment a second reason to open the approval overlay exists.
+    private bool _closeShiftApprovalPending;
+
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<Product> _products = new();
     [ObservableProperty] private ObservableCollection<CartItem> _cartItems = new();
@@ -197,6 +204,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// it rather than being handed a callback to invoke.</summary>
     public event EventHandler? SellerSwitchRequested;
 
+    /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch
+    /// overlay in approval mode (see <see cref="SellerSwitchViewModel.OpenForApproval"/>)
+    /// because the current seller lacks <c>CanCloseShift</c> — see <see cref="CloseShift"/>.
+    /// Plays the same decoupling role as <see cref="SellerSwitchRequested"/>: PosViewModel
+    /// raises intent without knowing how the overlay gets opened.</summary>
+    public event EventHandler? CloseShiftApprovalRequested;
+
     /// <summary>Current seller's name for the header chip, or — when none is selected — the
     /// same action-shaped invitation ("Who is selling?") already used by this button's
     /// tooltip and by the overlay's own heading, so an empty chip reads as something to
@@ -247,6 +261,24 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         if (string.IsNullOrEmpty(CurrentShiftId)) return;
 
+        // Closing a shift requires CanCloseShift. Nobody having confirmed at all
+        // (Current == null) is treated the same as lacking the right — fail closed,
+        // same reasoning as SellerSession.LoadRosterAsync treating a disabled
+        // seller as absent. A seller who lacks it must escalate through a
+        // supervisor PIN instead of closing outright: raise intent (mirrors
+        // AddToCart's SellerSwitchRequested) and let the host open the overlay.
+        if (!(_sellerSession.Current?.CanCloseShift ?? false))
+        {
+            _closeShiftApprovalPending = true;
+            CloseShiftApprovalRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        await ProceedToCloseShiftAsync();
+    }
+
+    private async Task ProceedToCloseShiftAsync()
+    {
         if (ParkedSalesCount > 0)
         {
             IsShiftCloseConfirmVisible = true;
@@ -254,6 +286,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
 
         await DoCloseShiftAsync();
+    }
+
+    /// <summary>Called by the host (App.axaml.cs) when SellerSwitchViewModel's
+    /// Approved event fires. Only actually proceeds with closing the shift when
+    /// that approval was raised in response to this view model's own
+    /// <see cref="CloseShiftApprovalRequested"/> (<see cref="_closeShiftApprovalPending"/>) —
+    /// a no-op otherwise, so an Approved event raised for some unrelated future
+    /// approval flow can never be mistaken for permission to close this shift. This
+    /// is the continuation the approval flow needs: without it, a successful PIN
+    /// would only dismiss the overlay and never actually finish closing.</summary>
+    public async Task OnCloseShiftApproved()
+    {
+        if (!_closeShiftApprovalPending) return;
+        _closeShiftApprovalPending = false;
+        await ProceedToCloseShiftAsync();
     }
 
     [RelayCommand]
@@ -283,6 +330,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             CurrentShiftId = null;
             IsShiftOpen = false;
             IsShiftModalVisible = true;
+
+            // The auth token's lifetime is now tied to the shift (see
+            // AuthConstants.MaxShiftHours), so a closed shift must not leave a
+            // still-"remembered" token sitting in settings for the next register
+            // start to silently resume from, nor a stale seller left selected
+            // against a session that — as far as the register is concerned — just
+            // ended. Deliberately only on this success branch: a cancelled confirm
+            // dialog or a failed CloseShiftAsync call must leave both untouched, so
+            // the shift (and whoever is signed in) is genuinely still open.
+            _sellerSession.Clear();
+            _settingsService.AuthToken = string.Empty;
+            _settingsService.AuthTokenExpiresAt = null;
+            _settingsService.Save();
         }
     }
 
