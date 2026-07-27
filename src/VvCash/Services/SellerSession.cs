@@ -51,6 +51,12 @@ public class SellerSession : ISellerSession
     private List<SellerInfo> _roster = new();
     private DateTime _lastActivity;
 
+    /// <summary>Convenience constructor for tests and simple/manual usage — hardcodes
+    /// the real clock and a 90-second idle timeout. The design calls for the idle
+    /// timeout to come from cash-register config, so production code (wired up via
+    /// DI in a later task) must construct this with the configured
+    /// <see cref="TimeSpan"/> explicitly rather than relying on this default; do not
+    /// let <c>new SellerSession()</c> become the production registration.</summary>
     public SellerSession() : this(() => DateTime.UtcNow, TimeSpan.FromSeconds(90)) { }
 
     public SellerSession(Func<DateTime> clock, TimeSpan idleTimeout)
@@ -72,7 +78,47 @@ public class SellerSession : ISellerSession
     {
         AssertUiThread();
         _roster = sellers.ToList();
+
+        // Prune lockout bookkeeping for sellers who left the roster entirely —
+        // otherwise it leaks forever, and a departed-then-readded seller would
+        // inherit a stale failure count / lock from before they left. Scoped to
+        // roster membership (id presence), not CanSell: a seller who is still on
+        // the roster but temporarily not sellable hasn't "left" and keeps their
+        // lockout state.
+        var rosterIds = new HashSet<string>(_roster.Select(s => s.Id));
+        PruneMissing(_failures, rosterIds);
+        PruneMissing(_lockedUntil, rosterIds);
+
+        // The backend rejects a body-supplied seller_id that is no longer on the
+        // register's roster (crediting the shift owner instead and flagging the
+        // document), so a register that kept treating a removed seller as Current
+        // would keep printing receipts the server silently marks suspicious with
+        // nobody at the till aware of it. Reconcile Current against the fresh
+        // roster on every reload: if the current seller is gone, clear them so
+        // the UI re-prompts on the next receipt.
+        //
+        // A seller present but with CanSell == false is treated the same as
+        // absent, deliberately: GET /cashes/seller/ already filters on can_sell,
+        // so this seller should never actually arrive here, but if a roster ever
+        // did include a disabled seller, staying Current would let them keep
+        // ringing up sales attributed to an account that just lost selling
+        // rights — the same failure mode this fix exists to close. This is a
+        // narrower check than Check()'s: Check() (SwitchAsync/ApproveAsync) does
+        // not gate on CanSell, since a caller might reasonably approve/verify a
+        // non-selling seller for another capability (e.g. CanRefund); it is only
+        // "who may keep acting as the current seller" that requires CanSell.
+        var stillActive = Current != null
+            && _roster.FirstOrDefault(s => s.Id == Current.Id) is { CanSell: true };
+        if (Current != null && !stillActive)
+            Clear();
+
         return Task.CompletedTask;
+    }
+
+    private static void PruneMissing<TValue>(Dictionary<string, TValue> dict, HashSet<string> keepIds)
+    {
+        foreach (var key in dict.Keys.Where(k => !keepIds.Contains(k)).ToList())
+            dict.Remove(key);
     }
 
     public Task<SwitchResult> SwitchAsync(string sellerId, string pin)
@@ -110,7 +156,17 @@ public class SellerSession : ISellerSession
     {
         AssertUiThread();
         var (result, seller) = Check(sellerId, pin);
-        return Task.FromResult(result == SwitchResult.Ok ? seller : null);
+        if (result != SwitchResult.Ok) return Task.FromResult<SellerInfo?>(null);
+
+        // A successful approval is unambiguous terminal activity — someone just
+        // typed a correct PIN at this register — so it resets the idle timer
+        // exactly like SwitchAsync does, even though it doesn't touch Current or
+        // raise CurrentChanged. A *failed* approval deliberately does not reset
+        // it: if it did, a wrong-PIN guessing loop at the approval prompt would
+        // keep an otherwise-idle session alive indefinitely, defeating the point
+        // of the idle timeout.
+        _lastActivity = _clock();
+        return Task.FromResult<SellerInfo?>(seller);
     }
 
     public void Touch()

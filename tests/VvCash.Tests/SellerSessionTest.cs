@@ -238,4 +238,152 @@ public class SellerSessionTest
 
         Assert.Null(approver);
     }
+
+    // --- LoadRosterAsync reconciliation (removed/disabled current seller) ---
+
+    [Fact]
+    public async Task LoadRosterAsync_WhenCurrentSellerRemoved_ClearsCurrentAndRaisesEvent()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+        await session.SwitchAsync("u-1", "4821");
+
+        var raised = 0;
+        session.CurrentChanged += (_, _) => raised++;
+
+        // Reloaded roster no longer contains u-1 (e.g. an admin removed them
+        // mid-shift).
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-2", FirstName = "Дилноза", PinHash = Encode("9073"), CanSell = true }
+        });
+
+        Assert.Null(session.Current);
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public async Task LoadRosterAsync_WhenCurrentSellerStillPresent_LeavesCurrentAndDoesNotRaiseEvent()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+        await session.SwitchAsync("u-1", "4821");
+
+        var raised = 0;
+        session.CurrentChanged += (_, _) => raised++;
+
+        // Reloaded roster still contains u-1 — nothing about the acting seller
+        // should change.
+        await session.LoadRosterAsync(Roster());
+
+        Assert.Equal("u-1", session.Current?.Id);
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
+    public async Task LoadRosterAsync_WhenCurrentSellerLosesCanSell_ClearsCurrent()
+    {
+        // Deliberate decision: present-but-not-sellable is treated the same as
+        // absent for the purpose of staying Current, even though the backend's
+        // GET /cashes/seller/ already filters on can_sell and should never
+        // actually send such a row.
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+        await session.SwitchAsync("u-1", "4821");
+
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-1", FirstName = "Азиз", PinHash = Encode("4821"), CanSell = false }
+        });
+
+        Assert.Null(session.Current);
+    }
+
+    [Fact]
+    public async Task LoadRosterAsync_PrunesLockoutStateForVanishedSeller()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+
+        // Lock u-1 out.
+        for (var i = 0; i < 5; i++)
+            await session.SwitchAsync("u-1", "0000");
+        Assert.Equal(SwitchResult.Locked, await session.SwitchAsync("u-1", "4821"));
+
+        // u-1 leaves the roster, then comes back (still within the 60s lock
+        // window that would otherwise still be active) before it expires.
+        await session.LoadRosterAsync(new List<SellerInfo>());
+        await session.LoadRosterAsync(Roster());
+
+        // No stale lock/failure count carried over — the correct PIN works
+        // immediately instead of returning Locked.
+        Assert.Equal(SwitchResult.Ok, await session.SwitchAsync("u-1", "4821"));
+    }
+
+    // --- ApproveAsync idle-timer interaction ---
+
+    [Fact]
+    public async Task ApproveAsync_WithValidPin_ResetsIdleTimer()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+        await session.SwitchAsync("u-1", "4821");
+
+        now = now.AddSeconds(80);
+        await session.ApproveAsync("u-2", "9073");
+        now = now.AddSeconds(80);
+
+        // Had the approval not reset the timer, 160s since the switch would
+        // already be stale (idle timeout is 90s).
+        Assert.False(session.IsStale);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_WithWrongPin_DoesNotResetIdleTimer()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+        await session.SwitchAsync("u-1", "4821");
+
+        now = now.AddSeconds(91);
+        await session.ApproveAsync("u-2", "0000");
+
+        Assert.True(session.IsStale);
+    }
+
+    // --- Shared lockout counter between SwitchAsync and ApproveAsync ---
+
+    [Fact]
+    public async Task ApproveAsync_FiveFailures_LocksSubsequentSwitchAsync()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+
+        for (var i = 0; i < 5; i++)
+            await session.ApproveAsync("u-1", "0000");
+
+        Assert.Equal(SwitchResult.Locked, await session.SwitchAsync("u-1", "4821"));
+    }
+
+    [Fact]
+    public async Task SwitchAsync_FiveFailures_LocksSubsequentApproveAsync()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+
+        for (var i = 0; i < 5; i++)
+            await session.SwitchAsync("u-1", "0000");
+
+        // Correct PIN, but the counter is shared: still locked from the
+        // SwitchAsync failures above, so ApproveAsync must also refuse it.
+        Assert.Null(await session.ApproveAsync("u-1", "4821"));
+    }
 }
