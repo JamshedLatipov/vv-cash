@@ -557,6 +557,14 @@ type SellerItem struct {
 
 В `cashes/cash_repo.go` заменить тело `GetSellersForCash` на:
 ```go
+// ЧЕРНОВИК — НЕ КОПИРОВАТЬ. Две ошибки, найденные при реализации:
+//   1. `u.phone` — такой колонки в `users` нет; из-за неё GetSellersForCash падал
+//      и на master (эндпоинт всегда отдавал 500). Починено отдельным коммитом.
+//   2. join на `stores.max_discount` — такой колонки не существует, см. примечание
+//      «РЕШЕНО при реализации» ниже.
+// Фактическая реализация — в `cashes/cash_repo.go` на ветке feat/seller-pin:
+// EXISTS-подзапросы с UNION по прямым и групповым правам, по образцу
+// `authorization.AuthRepo.EffectivePermissionCodes`.
 func (r *CashRepo) GetSellersForCash(ctx context.Context, db base.PGXDB, cashID string) ([]SellerItem, error) {
 	rows, err := db.Query(ctx,
 		`SELECT cu.user_id, u.first_name, u.last_name, u.email, u.phone,
@@ -606,7 +614,9 @@ func (r *CashRepo) GetSellersForCash(ctx context.Context, db base.PGXDB, cashID 
 }
 ```
 
-**Проверить перед написанием:** имена колонок `warehouses.store_id` и `stores.max_discount` — свериться с `warehouses/` и `stores/` (там используется `stores.GetMaxAllowedDiscount`). Если колонка лимита называется иначе, подставить фактическое имя; если лимит магазина хранится не в `stores`, заменить `COALESCE(cu.max_discount, s.max_discount, 0)` на `COALESCE(cu.max_discount, 0)` и оставить наследование лимита магазина серверной проверке.
+**РЕШЕНО при реализации:** колонки `stores.max_discount` не существует. `stores.GetMaxAllowedDiscount` (`stores/settings.go`) читает EAV-таблицу `store_settings` по ключу `MAX_ALLOWED_DISCOUNT_FOR_COUNTERPARTY` — это лимит скидки **контрагенту**, другое понятие, с семантикой «строки нет → безлимит». Join отброшен, используется `COALESCE(cu.max_discount, 0)`.
+
+Следствие для клиента: **`max_discount == 0` значит «персональный потолок не задан», а не «скидка запрещена»** — при нуле ручная скидка не гейтится вовсе (см. Task 21). Иначе сразу после миграции, когда потолок не задан ни у кого, каждая ручная скидка требовала бы PIN старшего.
 
 - [ ] **Step 5: Запустить тест**
 
@@ -2773,7 +2783,17 @@ Expected: FAIL — у `OpenForApproval` нет второго параметра
 
 - [ ] **Step 5: Подключить эскалацию скидки**
 
-В команде применения ручной скидки: если `ManualDiscountAmount` в процентах превышает `_sellerSession.Current?.MaxDiscount`, вместо применения вызвать
+**`MaxDiscount == 0` означает «персональный потолок не задан» — гейта нет.** Не «скидка запрещена». Сразу после миграции потолок не задан ни у кого, и обратная трактовка потребовала бы PIN старшего на каждую ручную скидку с первого дня. Подробности — в спеке, раздел про `cash_users.max_discount`.
+
+В команде применения ручной скидки:
+```csharp
+    private bool NeedsDiscountApproval(decimal percent)
+    {
+        var cap = _sellerSession.Current?.MaxDiscount ?? 0m;
+        return cap > 0m && percent > cap;
+    }
+```
+Если `NeedsDiscountApproval(...)` — вместо применения вызвать
 ```csharp
         RequestDiscountApproval?.Invoke(this, EventArgs.Empty);
 ```
@@ -2781,10 +2801,10 @@ Expected: FAIL — у `OpenForApproval` нет второго параметра
 ```csharp
     public event EventHandler? RequestDiscountApproval;
 ```
-и подпиской в `App.axaml.cs`:
+и подпиской в `App.axaml.cs` (подтвердить может тот, у кого потолок задан и покрывает запрошенный процент):
 ```csharp
                 posVm.RequestDiscountApproval += (s, e) => switchVm.OpenForApproval(
-                    x => x.MaxDiscount >= posVm.PendingDiscountPercent,
+                    x => x.MaxDiscount > 0m && x.MaxDiscount >= posVm.PendingDiscountPercent,
                     approver => { posVm.ApplyApprovedDiscount(approver.Id); return Task.CompletedTask; });
 ```
 Добавить в `PosViewModel` свойство `PendingDiscountPercent` (процент, который пытались применить) и метод:
