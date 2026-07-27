@@ -898,6 +898,16 @@ git commit -m "feat: persist approved_by on expense documents"
 
 ## Task 8: Проверка PIN-хэша на клиенте
 
+> **РЕАЛИЗОВАНО, форма изменилась при ревью.** `PinHasher.Verify` возвращает не `bool`, а
+> `PinVerificationResult { Valid, WrongPin, Malformed }`. Причина: `false` на всё подряд
+> означал бы, что испорченная запись в кэше засчитывается счётчику попыток Task 12 как
+> промах — и честного продавца блокировали бы за чужую ошибку, которую повтором ввода не
+> исправить. `Malformed` описывает **хранимый хэш**, а не ввод: пустой PIN против валидного
+> хэша — это `WrongPin`. Также добавлен потолок итераций (испорченное значение в
+> нешифрованной SQLite иначе вешает UI на минуты) и зафиксирована реальная фикстура,
+> сгенерированная Go. Приведённые ниже сигнатуры тестов — черновик до этих правок;
+> фактическая реализация в `src/VvCash/Services/PinHasher.cs`.
+
 **Files:**
 - Create: `src/VvCash/Services/PinHasher.cs`
 - Test: `tests/VvCash.Tests/PinHasherTest.cs`
@@ -1552,6 +1562,20 @@ public class SellerSessionTest
     }
 
     [Fact]
+    public async Task SwitchAsync_WithCorruptHash_DoesNotCountTowardLockout()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(new List<SellerInfo>
+        {
+            new() { Id = "u-4", FirstName = "Битый", PinHash = "not-a-valid-hash", CanSell = true }
+        });
+
+        for (var i = 0; i < 6; i++)
+            Assert.Equal(SwitchResult.CorruptHash, await session.SwitchAsync("u-4", "4821"));
+    }
+
+    [Fact]
     public async Task Clear_DropsCurrentSeller()
     {
         var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
@@ -1588,7 +1612,11 @@ public enum SwitchResult
     WrongPin,
     Locked,
     PinNotSet,
-    UnknownSeller
+    UnknownSeller,
+
+    /// <summary>The cached hash is unusable — a corrupt row, not a bad guess.
+    /// No PIN can succeed until the roster is refreshed.</summary>
+    CorruptHash
 }
 
 public interface ISellerSession
@@ -1708,12 +1736,19 @@ public class SellerSession : ISellerSession
             _failures.Remove(sellerId);
         }
 
-        if (!PinHasher.Verify(pin, seller.PinHash))
+        // Only a genuinely wrong PIN counts toward the lockout. A corrupt cached
+        // hash would otherwise lock out a seller who typed correctly, for a fault
+        // that is not theirs and that retrying cannot clear.
+        switch (PinHasher.Verify(pin, seller.PinHash))
         {
-            var count = _failures.TryGetValue(sellerId, out var c) ? c + 1 : 1;
-            _failures[sellerId] = count;
-            if (count >= MaxFailures) _lockedUntil[sellerId] = _clock() + LockDuration;
-            return (SwitchResult.WrongPin, null);
+            case PinVerificationResult.Malformed:
+                return (SwitchResult.CorruptHash, null);
+
+            case PinVerificationResult.WrongPin:
+                var count = _failures.TryGetValue(sellerId, out var c) ? c + 1 : 1;
+                _failures[sellerId] = count;
+                if (count >= MaxFailures) _lockedUntil[sellerId] = _clock() + LockDuration;
+                return (SwitchResult.WrongPin, null);
         }
 
         _failures.Remove(sellerId);
