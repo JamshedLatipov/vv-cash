@@ -132,6 +132,24 @@ public class SellerSessionTest
     }
 
     [Fact]
+    public async Task SwitchAsync_ForUnknownSeller_ReturnsUnknownSeller_LeavesCurrentUnchanged_RaisesNoEvent()
+    {
+        var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);
+        var session = NewSession(() => now);
+        await session.LoadRosterAsync(Roster());
+        await session.SwitchAsync("u-1", "4821");
+
+        var raised = 0;
+        session.CurrentChanged += (_, _) => raised++;
+
+        var result = await session.SwitchAsync("ghost", "4821");
+
+        Assert.Equal(SwitchResult.UnknownSeller, result);
+        Assert.Equal("u-1", session.Current?.Id);
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
     public async Task SwitchAsync_ForSellerWithoutPin_ReturnsPinNotSet()
     {
         var now = new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc);

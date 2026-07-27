@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using VvCash.Models;
 
@@ -21,7 +23,20 @@ namespace VvCash.Services;
 /// re-entrancy window even across an `await` — the only actual concurrency
 /// concern would be a second caller from a non-UI thread, which nothing in this
 /// codebase does today (registration is UI-thread singleton usage, same as
-/// SessionContext). If a background thread ever needs to touch this, add
+/// SessionContext). Nothing currently violates this — the background sync loop
+/// only reaches SellerRosterService/SQLite, never this type — but LoadRosterAsync
+/// and SellerRosterService.RefreshAsync are easy to conflate, and a future wiring
+/// mistake (e.g. a sync-loop callback invoking LoadRosterAsync directly) would
+/// race an unsynchronised `_roster` reassignment against a `SwitchAsync` read with
+/// no exception and no reliable repro. Rather than leave that solely to a code
+/// comment, every mutating member asserts it is running on the UI thread via
+/// <see cref="AssertUiThread"/>. The assert is a Debug-only guard, not a thrown
+/// exception: it is compiled out of Release builds entirely (see the assert's own
+/// [Conditional("DEBUG")]), so a threading mis-wire is loud in development and in
+/// this test suite (Debug configuration) but can never bring down a production
+/// register over what is, per the design spec, not a security boundary — trading
+/// a slower production diagnosis for zero crash risk on the shop floor. If a
+/// background thread ever needs to touch this legitimately, add real
 /// synchronization then rather than pre-emptively here.</summary>
 public class SellerSession : ISellerSession
 {
@@ -55,12 +70,14 @@ public class SellerSession : ISellerSession
 
     public Task LoadRosterAsync(IEnumerable<SellerInfo> sellers)
     {
+        AssertUiThread();
         _roster = sellers.ToList();
         return Task.CompletedTask;
     }
 
     public Task<SwitchResult> SwitchAsync(string sellerId, string pin)
     {
+        AssertUiThread();
         var (result, seller) = Check(sellerId, pin);
         if (result != SwitchResult.Ok) return Task.FromResult(result);
 
@@ -78,19 +95,47 @@ public class SellerSession : ISellerSession
     // side channel for unlimited guesses against any seller's PIN via the
     // approval flow instead of the switch flow. It never touches Current or
     // raises CurrentChanged, per the interface contract.
+    //
+    // The cost of sharing one counter per sellerId: a supervisor who fat-fingers
+    // their own PIN twice while approving someone else's refund, then mistypes
+    // three more times switching in for their own shift, has burned all five
+    // attempts on one combined counter and is locked out of *both* flows for 60
+    // seconds — not because they were brute-forced, but because the two flows
+    // aren't accounted separately. Accepted trade for now: simpler state, and a
+    // supervisor is exactly the seller most likely to also need SwitchAsync
+    // shortly after approving, so a shared cool-down isn't a surprising outcome.
+    // Revisit with a per-flow counter if that combined lockout proves disruptive
+    // in practice.
     public Task<SellerInfo?> ApproveAsync(string sellerId, string pin)
     {
+        AssertUiThread();
         var (result, seller) = Check(sellerId, pin);
         return Task.FromResult(result == SwitchResult.Ok ? seller : null);
     }
 
-    public void Touch() => _lastActivity = _clock();
+    public void Touch()
+    {
+        AssertUiThread();
+        _lastActivity = _clock();
+    }
 
     public void Clear()
     {
+        AssertUiThread();
         if (Current == null) return;
         Current = null;
         CurrentChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // Debug-only by construction: Debug.Assert carries [Conditional("DEBUG")], so
+    // in a Release build this entire call — including the CheckAccess()
+    // evaluation — is removed at the call site. See the class remarks for why a
+    // silent Release no-op is the right trade-off for a POS terminal.
+    private static void AssertUiThread([CallerMemberName] string member = "")
+    {
+        Debug.Assert(
+            Avalonia.Threading.Dispatcher.UIThread.CheckAccess(),
+            $"SellerSession.{member} was called off the Avalonia UI thread; this type is not thread-safe (see class remarks).");
     }
 
     private (SwitchResult, SellerInfo?) Check(string sellerId, string pin)
