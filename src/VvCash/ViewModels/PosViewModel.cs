@@ -107,6 +107,20 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isMixedPaymentEnabled = true;
     [ObservableProperty] private bool _isCustomerRegistrationEnabled = true;
     [ObservableProperty] private bool _isSellerSwitchEnabled = true;
+    [ObservableProperty] private bool _isCustomerDisplayEnabled = true;
+
+    /// <summary>A display that was fed cart data before the flag actually loaded (see
+    /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
+    /// again once InitializeAsync's real fetch resolves) must not keep showing that
+    /// stale cart once the flag turns out to be off — otherwise a customer-facing screen
+    /// the store just disabled would sit there displaying someone else's total. Reset to
+    /// idle exactly once, on the off transition; the guarded push sites (OnCartChanged,
+    /// the payment-success branch) take over from there and simply stop pushing.</summary>
+    partial void OnIsCustomerDisplayEnabledChanged(bool value)
+    {
+        if (!value && CustomerDisplayViewModel != null)
+            CustomerDisplayViewModel.IsIdle = true;
+    }
 
     /// <summary>Parked sales already on this register outlive the flag being
     /// switched off: "Park" disappears at once, but the list stays reachable
@@ -590,6 +604,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IsMixedPaymentEnabled = features.IsEnabled(CashFeatureCodes.MixedPayment);
         IsCustomerRegistrationEnabled = features.IsEnabled(CashFeatureCodes.CustomerRegistration);
         IsSellerSwitchEnabled = features.IsEnabled(CashFeatureCodes.SellerSwitch);
+        IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
     }
 
 
@@ -816,7 +831,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         TotalAmount = _cartService.TotalAmount;
         AppliedDiscountName = _cartService.AppliedDiscountName ?? string.Empty;
 
-        if (CustomerDisplayViewModel != null)
+        if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)
         {
             CustomerDisplayViewModel.Items = CartItems;
             CustomerDisplayViewModel.Total = TotalAmount;
@@ -1430,7 +1445,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
-                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService);
+                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
                 await dialog.ShowDialog(mainWindow);
             }
         }
@@ -1597,7 +1612,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _approvedById = null;
                         StatusMessage = "Payment processed. Thank you!";
 
-                        if (CustomerDisplayViewModel != null)
+                        if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)
                         {
                             CustomerDisplayViewModel.IsIdle = true;
                             CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";

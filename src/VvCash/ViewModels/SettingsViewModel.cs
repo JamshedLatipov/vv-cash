@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Services;
 using VvCash.Services.Data;
@@ -77,6 +78,7 @@ public partial class SettingsViewModel : ViewModelBase
 {
     private readonly ISettingsService _settingsService;
     private readonly IOfflineStorageService _offlineStorageService;
+    private readonly ICashFeatureService _features;
 
     [ObservableProperty]
     private string _backendUrl = string.Empty;
@@ -100,16 +102,24 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private bool _returnPrintReceipt = true;
 
+    /// <summary>What the register will actually do, which is the server's answer.
+    /// The local fields behind the old checkboxes are kept and still saved, but no
+    /// longer consulted — see ReturnsViewModel.</summary>
+    public bool ReturnOpenCashDrawerEffective => _features.Current.IsEnabled(CashFeatureCodes.ReturnOpenDrawer);
+    public bool ReturnPrintReceiptEffective => _features.Current.IsEnabled(CashFeatureCodes.ReturnPrintReceipt);
+
     public Array ConnectionTypes => Enum.GetValues(typeof(PrinterConnectionType));
 
     public Action<ViewModelBase>? NavigationRequest { get; set; }
     private ViewModelBase _previousViewModel;
 
-    public SettingsViewModel(ViewModelBase previousViewModel, ISettingsService settingsService, IOfflineStorageService offlineStorageService)
+    public SettingsViewModel(ViewModelBase previousViewModel, ISettingsService settingsService,
+        IOfflineStorageService offlineStorageService, ICashFeatureService features)
     {
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
         _offlineStorageService = offlineStorageService;
+        _features = features;
 
         // Load existing settings
         BackendUrl = _settingsService.BackendUrl;

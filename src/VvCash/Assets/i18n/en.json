@@ -156,6 +156,7 @@
   "Next": "Next",
   "ReturnOpenDrawerSetting": "Open cash drawer on return",
   "ReturnPrintReceiptSetting": "Print return receipt",
+  "ManagedInAdminHint": "Set in the admin panel, in the cash register settings",
   "Categories": "Categories",
   "Pay": "Pay",
   "Coupon": "Coupon",

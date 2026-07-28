@@ -1755,4 +1755,24 @@ public class PosViewModelSellerGateTest
 
         Assert.False(vm.IsParkedSalesListVisible);
     }
+
+    [Fact]
+    public void CustomerDisplayDisabled_CartChanges_NotPushedToDisplay()
+    {
+        // The flag must be set BEFORE CreateViewModel runs (see the class remarks above
+        // this section): InitializeAsync's own ApplyFeatures call reads the cached map
+        // synchronously during construction with these fakes, so flipping it afterwards
+        // would not reliably be reflected. CustomerDisplayViewModel itself is assigned
+        // after construction, matching App.axaml.cs's own wiring (it's a settable
+        // property, not a constructor dependency).
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.CustomerDisplay, false));
+        var display = new CustomerDisplayViewModel();
+        vm.CustomerDisplayViewModel = display;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.False(vm.IsCustomerDisplayEnabled);
+        Assert.Empty(display.Items);
+        Assert.True(display.IsIdle);
+    }
 }

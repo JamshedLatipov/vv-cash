@@ -135,6 +135,7 @@
   "Next": "Вперёд",
   "ReturnOpenDrawerSetting": "Открывать денежный ящик при возврате",
   "ReturnPrintReceiptSetting": "Печатать чек возврата",
+  "ManagedInAdminHint": "Задаётся в админке, в настройках кассы",
   "Categories": "Категории",
   "Pay": "Оплатить",
   "Coupon": "Купон",
