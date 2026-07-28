@@ -139,6 +139,7 @@
 
                     <!-- current seller chip: tap to switch who is selling -->
                     <Button Classes="Transparent" Padding="0" Command="{Binding OpenSellerSwitchCommand}" VerticalAlignment="Center"
+                            IsVisible="{Binding IsSellerSwitchEnabled}"
                             ToolTip.Tip="{Binding [SelectSeller], Source={x:Static services:I18nService.Instance}}">
                         <Border Background="{StaticResource PrimaryLightBrush}" CornerRadius="99" Padding="12,6">
                             <StackPanel Orientation="Horizontal" Spacing="6">
@@ -167,7 +168,7 @@
 
                 <!-- actions -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <Panel>
+                    <Panel IsVisible="{Binding IsParkedSalesListVisible}">
                         <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenParkedSalesCommand}" ToolTip.Tip="{Binding [ParkedSales], Source={x:Static services:I18nService.Instance}}">
                             <material:MaterialIcon Kind="ClipboardTextClockOutline" Width="22" Height="22"/>
                         </Button>
@@ -177,10 +178,10 @@
                             <TextBlock Text="{Binding ParkedSalesCount}" Foreground="White" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center"/>
                         </Border>
                     </Panel>
-                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenReturnsCommand}" ToolTip.Tip="{Binding [Returns], Source={x:Static services:I18nService.Instance}}">
+                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenReturnsCommand}" IsVisible="{Binding IsReturnsEnabled}" ToolTip.Tip="{Binding [Returns], Source={x:Static services:I18nService.Instance}}">
                         <material:MaterialIcon Kind="BackupRestore" Width="22" Height="22"/>
                     </Button>
-                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenCustomerRegistrationCommand}" ToolTip.Tip="{Binding [AddCustomer], Source={x:Static services:I18nService.Instance}}">
+                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenCustomerRegistrationCommand}" IsVisible="{Binding IsCustomerRegistrationEnabled}" ToolTip.Tip="{Binding [AddCustomer], Source={x:Static services:I18nService.Instance}}">
                         <material:MaterialIcon Kind="AccountPlusOutline" Width="22" Height="22"/>
                     </Button>
                     <Button Classes="IconButton" Width="44" Height="44" Command="{Binding FullReinitializeCommand}" ToolTip.Tip="{Binding [SyncData], Source={x:Static services:I18nService.Instance}}">
@@ -568,7 +569,7 @@
                                         <TextBlock Text="{Binding [Coupon], Source={x:Static services:I18nService.Instance}}" FontSize="13" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
-                                <Button Grid.Column="2" Classes="SecondaryButton" Height="38" Margin="0,0,8,0" HorizontalAlignment="Stretch" Command="{Binding OpenParkLabelModalCommand}">
+                                <Button Grid.Column="2" Classes="SecondaryButton" Height="38" Margin="0,0,8,0" HorizontalAlignment="Stretch" Command="{Binding OpenParkLabelModalCommand}" IsVisible="{Binding IsParkingEnabled}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <material:MaterialIcon Kind="PauseCircleOutline" Width="16" Height="16"/>
                                         <TextBlock Text="{Binding [Park], Source={x:Static services:I18nService.Instance}}" FontSize="13" VerticalAlignment="Center"/>

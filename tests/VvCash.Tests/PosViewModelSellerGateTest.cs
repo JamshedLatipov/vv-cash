@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
@@ -374,6 +375,11 @@ public class PosViewModelSellerGateTest
         public ParkedSaleSnapshot? LastParkedSnapshot { get; private set; }
         public string? LastParkedId { get; private set; }
 
+        /// <summary>What GetCountAsync reports back — defaults to 0 (matching prior
+        /// behaviour); the feature-flag tests below set it directly to simulate sales
+        /// already parked on the register before the flag was switched off.</summary>
+        public int Count { get; set; }
+
         public Task<ParkedSale> ParkAsync(ParkedSaleSnapshot snapshot, decimal total)
         {
             var id = Guid.NewGuid().ToString();
@@ -402,8 +408,18 @@ public class PosViewModelSellerGateTest
         public void SeedParkedSnapshot(string id, ParkedSaleSnapshot snapshot) => _parked[id] = snapshot;
 
         public Task DeleteAsync(string id) => Task.CompletedTask;
-        public Task<int> GetCountAsync() => Task.FromResult(0);
+        public Task<int> GetCountAsync() => Task.FromResult(Count);
         public event EventHandler<int>? CountChanged;
+    }
+
+    /// <summary>Stands in for CashFeatureService: no storage, flags set directly.</summary>
+    private class FakeCashFeatureService : ICashFeatureService
+    {
+        public CashFeatures Current { get; } = CashFeatures.Default;
+
+        public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
+
+        public Task RefreshAsync() => Task.CompletedTask;
     }
 
     // GetSalesAsync/GetReturnableLinesAsync/CreateReturnAsync are never reached by the
@@ -463,6 +479,7 @@ public class PosViewModelSellerGateTest
         public FakeAuthService AuthService { get; } = new();
         public FakeCartService CartService { get; } = new();
         public FakeParkedSaleService ParkedSaleService { get; } = new();
+        public FakeCashFeatureService Features { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -490,7 +507,8 @@ public class PosViewModelSellerGateTest
             deps.HttpClient,
             deps.SellerSession,
             deps.RosterService,
-            deps.AuthService);
+            deps.AuthService,
+            deps.Features);
     }
 
     private static Product MakeProduct(string id, decimal price) => new()
@@ -1636,5 +1654,105 @@ public class PosViewModelSellerGateTest
 
         Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
         Assert.Equal(1, raisedCount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Feature-flag gates (Task 13): disabled entry points hide rather than grey out, and
+    // turning off seller switching must take its permission gates with it. Every flag
+    // below is set on Deps.Features BEFORE CreateViewModel runs — InitializeAsync's own
+    // ApplyFeatures call (see PosViewModel's remarks) reads the cached map once the fakes'
+    // already-completed Tasks let it run synchronously during construction, so a flag
+    // flipped afterwards would not reliably be reflected without a real Dispatcher pump.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CloseShiftCommand_SellerSwitchDisabled_ClosesWithoutApproval()
+    {
+        // With seller switching off, this register has no notion of separate sellers, so
+        // nobody ever becomes Current. If CanCloseShift's gate stayed on regardless, it
+        // would fire forever with no seller-switch overlay left to satisfy it (the
+        // overlay is hidden along with the flag) — the shift could never close. The flag
+        // must take its own gate down with it.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        await vm.CloseShiftCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public void CloseShiftCommand_SellerSwitchEnabled_StillRequiresApproval()
+    {
+        // Guards the pre-existing behaviour against being lost while adding the flag
+        // above: with seller switching on, a register with nobody confirmed must still
+        // fail closed exactly as before — the new escape hatch is scoped to the flag
+        // being off, not a general loosening of the close-shift gate.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, true));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        vm.CloseShiftCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public void OpenSellerSwitchCommand_Disabled_DoesNotRaise()
+    {
+        // A command that still raised the overlay behind a hidden chip would be dead
+        // code reachable only by a stray click on a control the view no longer shows —
+        // the command itself must refuse, not just the XAML visibility.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenSellerSwitchCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.False(vm.IsSellerSwitchEnabled);
+    }
+
+    [Fact]
+    public void Returns_Disabled_HidesTheEntryPoint()
+    {
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.Returns, false));
+
+        Assert.False(vm.IsReturnsEnabled);
+    }
+
+    [Fact]
+    public void ParkedSales_DisabledWithSalesStillParked_KeepsTheListReachable()
+    {
+        // Parked sales already sitting on this register outlive the flag being switched
+        // off: "Park" (the write side) disappears at once, but the list stays reachable
+        // until the last one is cleared — otherwise switching the flag off would strand
+        // receipts with goods already picked and no money taken.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.Set(CashFeatureCodes.ParkedSales, false);
+            d.ParkedSaleService.Count = 2;
+        });
+
+        Assert.False(vm.IsParkingEnabled);
+        Assert.True(vm.IsParkedSalesListVisible);
+    }
+
+    [Fact]
+    public void ParkedSales_DisabledAndDrained_HidesTheListToo()
+    {
+        // Once the last parked sale is gone there is nothing left for the list to
+        // reach, so it hides along with the flag, same as any other disabled entry
+        // point.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.Set(CashFeatureCodes.ParkedSales, false);
+            d.ParkedSaleService.Count = 0;
+        });
+
+        Assert.False(vm.IsParkedSalesListVisible);
     }
 }
