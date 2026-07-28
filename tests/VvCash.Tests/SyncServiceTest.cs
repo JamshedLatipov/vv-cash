@@ -61,6 +61,17 @@ public class SyncServiceTest
         public Task<MoneyPolicy> GetMoneyPolicyAsync()
             => Task.FromResult(SavedMoneyPolicy ?? MoneyPolicy.Default);
 
+        public CashFeatures? SavedCashFeatures;
+
+        public Task SaveCashFeaturesAsync(CashFeatures features)
+        {
+            SavedCashFeatures = features;
+            return Task.CompletedTask;
+        }
+
+        public Task<CashFeatures> GetCashFeaturesAsync()
+            => Task.FromResult(SavedCashFeatures ?? CashFeatures.Default);
+
         public Task SaveProductsAsync(IEnumerable<Product> products)
         {
             SavedProducts.AddRange(products);

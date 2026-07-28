@@ -50,6 +50,8 @@ public class SellerRosterServiceTest
         public Task ClearPromotionsAsync() => Task.CompletedTask;
         public Task SaveMoneyPolicyAsync(MoneyPolicy policy) => Task.CompletedTask;
         public Task<MoneyPolicy> GetMoneyPolicyAsync() => Task.FromResult(MoneyPolicy.Default);
+        public Task SaveCashFeaturesAsync(CashFeatures features) => Task.CompletedTask;
+        public Task<CashFeatures> GetCashFeaturesAsync() => Task.FromResult(CashFeatures.Default);
 
         public Task SetLastSyncVersionAsync(int version) => Task.CompletedTask;
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;

@@ -26,6 +26,11 @@ public interface IOfflineStorageService
     Task SaveMoneyPolicyAsync(MoneyPolicy policy);
     Task<MoneyPolicy> GetMoneyPolicyAsync();
 
+    // Which register functions are switched on, so the POS screen knows what to
+    // show before the first sync of the day completes.
+    Task SaveCashFeaturesAsync(CashFeatures features);
+    Task<CashFeatures> GetCashFeaturesAsync();
+
     Task SetLastSyncVersionAsync(int version);
     Task SaveUnsyncedDocumentAsync(string hash, string payload);
     Task<IEnumerable<System.Collections.Generic.KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync();
