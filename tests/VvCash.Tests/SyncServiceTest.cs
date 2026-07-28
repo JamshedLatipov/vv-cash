@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Services;
 using VvCash.Services.Api;
@@ -291,5 +292,83 @@ public class SyncServiceTest
         await Build(handler, storage).SyncProductsAsync();
 
         Assert.Empty(storage.SavedPromotions!);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_CachesFeatures()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            if (url.Contains("cashes/features/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":{"cash_returns_enabled":false},"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        var features = storage.SavedCashFeatures!;
+        Assert.False(features.IsEnabled(CashFeatureCodes.Returns));
+        Assert.True(features.IsEnabled(CashFeatureCodes.ParkedSales));
+    }
+
+    [Fact]
+    public async Task SyncFeatures_HttpFailure_KeepsCachedValue()
+    {
+        // Losing the endpoint must not silently switch a function back on that
+        // the store deliberately switched off, nor switch one off that it left on.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            return (HttpStatusCode.InternalServerError, """{"message":"boom","body":null,"status":1}""");
+        });
+        var storage = new FakeStorage
+        {
+            SavedCashFeatures = new CashFeatures
+            {
+                Flags = new Dictionary<string, bool> { [CashFeatureCodes.Returns] = false }
+            }
+        };
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.False(storage.SavedCashFeatures!.IsEnabled(CashFeatureCodes.Returns));
+    }
+
+    [Fact]
+    public async Task SyncFeatures_EmptyBody_SavesEmptyMap()
+    {
+        // "Nothing configured for this cash" is a legitimate answer meaning
+        // everything is on, not an error to be ignored — it must still be saved,
+        // so re-enabling the last disabled flag actually reaches the register.
+        // Seed a non-empty cached map first so this test only passes if a save
+        // genuinely happened, not merely because empty and missing read alike.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            if (url.Contains("cashes/features/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":{},"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage
+        {
+            SavedCashFeatures = new CashFeatures
+            {
+                Flags = new Dictionary<string, bool> { [CashFeatureCodes.Returns] = false }
+            }
+        };
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.NotNull(storage.SavedCashFeatures);
+        Assert.Empty(storage.SavedCashFeatures!.Flags);
+        Assert.True(storage.SavedCashFeatures.IsEnabled(CashFeatureCodes.Returns));
     }
 }

@@ -274,6 +274,7 @@ public class SyncService : ISyncService
             }
             await SyncPromotionsAsync(baseUrl);
             await SyncMoneyPolicyAsync(baseUrl);
+            await SyncFeaturesAsync(baseUrl);
 
             SyncStatusChanged?.Invoke(this, true);
             ProductsSynced?.Invoke(this, EventArgs.Empty);
@@ -372,6 +373,56 @@ public class SyncService : ISyncService
         catch (Exception ex)
         {
             Console.WriteLine($"[SyncService] money policy sync error: {ex.Message}");
+        }
+    }
+
+    /// <summary>Refreshes the cached feature-flag map. Any failure keeps the
+    /// previously cached map: losing the endpoint must not silently switch a
+    /// function back on that the store deliberately switched off, nor switch one
+    /// off that it left on.
+    ///
+    /// Unlike promotions there is no "empty body means clear the cache" branch to
+    /// get right, because an empty map and a missing map already mean the same
+    /// thing — every function enabled. An empty object is still saved rather than
+    /// ignored, so that switching the last flag back on actually reaches the
+    /// register.</summary>
+    private async Task SyncFeaturesAsync(string baseUrl)
+    {
+        try
+        {
+            var url = $"{baseUrl}cashes/features/";
+            Console.WriteLine($"[SyncService] GET {url}");
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[SyncService] features: HTTP {(int)response.StatusCode}, keeping cached map");
+                return;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("status", out var status) || status.GetInt32() != 0)
+            {
+                Console.WriteLine("[SyncService] features: backend status != 0, keeping cached map");
+                return;
+            }
+            if (!root.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.Object)
+            {
+                Console.WriteLine("[SyncService] features: no body, keeping cached map");
+                return;
+            }
+
+            var flags = JsonSerializer.Deserialize<Dictionary<string, bool>>(body.GetRawText())
+                        ?? new Dictionary<string, bool>();
+
+            await _storageService.SaveCashFeaturesAsync(new CashFeatures { Flags = flags });
+            Console.WriteLine($"[SyncService] features: cached {flags.Count} flag(s)");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncService] features sync error: {ex.Message}");
         }
     }
 }
