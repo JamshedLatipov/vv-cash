@@ -181,6 +181,7 @@ public partial class App : Application
         // Core Services
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
+        services.AddSingleton<ICashFeatureService, CashFeatureService>();
         services.AddSingleton<ISessionContext, SessionContext>();
 
         // SellerSession's parameterless constructor is a test/manual-usage
