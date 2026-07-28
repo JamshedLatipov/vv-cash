@@ -13,7 +13,17 @@ public interface ISettingsService
     int SyncIntervalMinutes { get; set; }
     string Language { get; set; }
     List<PrinterConfig> Printers { get; set; }
+
+    /// <summary>The old local checkbox value — still loaded and saved by
+    /// SettingsViewModel, deliberately, so that removing the server-driven flags
+    /// later restores this rather than losing it. No longer read by anything that
+    /// decides register behaviour: opening the cash drawer on a return is now
+    /// decided by ICashFeatureService reading CashFeatureCodes.ReturnOpenDrawer
+    /// (see ReturnsViewModel). Do not add a read of this field to gate behaviour.</summary>
     bool ReturnOpenCashDrawer { get; set; }
+
+    /// <summary>Same story as <see cref="ReturnOpenCashDrawer"/>, for
+    /// CashFeatureCodes.ReturnPrintReceipt instead.</summary>
     bool ReturnPrintReceipt { get; set; }
 
     event EventHandler? SettingsChanged;

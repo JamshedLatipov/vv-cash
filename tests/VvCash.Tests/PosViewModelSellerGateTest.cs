@@ -419,7 +419,30 @@ public class PosViewModelSellerGateTest
 
         public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
 
-        public Task RefreshAsync() => Task.CompletedTask;
+        /// <summary>When set, RefreshAsync awaits this before returning instead of
+        /// completing immediately — reproducing the real gap between the constructor's
+        /// ApplyFeatures pass (reading whatever Current already holds, the all-enabled
+        /// default on a register that has never synced) and InitializeAsync's own
+        /// RefreshAsync/ApplyFeatures pass, which in production only resolves once the
+        /// register's local storage is actually ready. Every other fake in this class
+        /// completes synchronously by design (see the class remarks), so this is the one
+        /// deliberate exception, and only when a test opts in by setting it.</summary>
+        public TaskCompletionSource<bool>? PendingRefresh;
+
+        private readonly Dictionary<string, bool> _afterRefresh = new();
+
+        /// <summary>Queues a flag value that only takes effect when RefreshAsync actually
+        /// runs — immediately if PendingRefresh is null, or once a test completes
+        /// PendingRefresh otherwise — never at the moment this is called. That mirrors
+        /// the real CashFeatureService: the map only ever changes as a result of a
+        /// refresh actually completing.</summary>
+        public void SetAfterRefresh(string code, bool enabled) => _afterRefresh[code] = enabled;
+
+        public async Task RefreshAsync()
+        {
+            if (PendingRefresh != null) await PendingRefresh.Task;
+            foreach (var (code, enabled) in _afterRefresh) Current.Flags[code] = enabled;
+        }
     }
 
     // GetSalesAsync/GetReturnableLinesAsync/CreateReturnAsync are never reached by the
@@ -1774,5 +1797,45 @@ public class PosViewModelSellerGateTest
         Assert.False(vm.IsCustomerDisplayEnabled);
         Assert.Empty(display.Items);
         Assert.True(display.IsIdle);
+    }
+
+    [Fact]
+    public void CustomerDisplay_FlagDisabledAfterRefresh_ResetsAlreadyFedDisplayToIdle()
+    {
+        // Proves the actual mechanism OnIsCustomerDisplayEnabledChanged exists for: not
+        // "a flag disabled from the start blocks pushing" (the test above already covers
+        // that), but "a display that was fed on the constructor's optimistic first pass
+        // gets pulled back to idle once the real, disabled value lands". PendingRefresh
+        // holds InitializeAsync's RefreshAsync/ApplyFeatures pass open past construction,
+        // so IsCustomerDisplayEnabled is still true (the default) when CustomerDisplayViewModel
+        // is assigned and the cart is fed — exactly the window ApplyFeatures' own remarks
+        // describe. Completing PendingRefresh below is what stands in for "the register's
+        // storage becomes ready and the real fetch resolves".
+        var pending = new TaskCompletionSource<bool>();
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.PendingRefresh = pending;
+            d.Features.SetAfterRefresh(CashFeatureCodes.CustomerDisplay, false);
+        });
+        Assert.True(vm.IsCustomerDisplayEnabled); // still the optimistic default; real value hasn't landed
+
+        var display = new CustomerDisplayViewModel();
+        vm.CustomerDisplayViewModel = display;
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        // Fed while the flag still (optimistically) reads as enabled.
+        Assert.False(display.IsIdle);
+        Assert.NotEmpty(display.Items);
+
+        // The real fetch resolves: RefreshAsync applies the queued disabled value and
+        // InitializeAsync's own ApplyFeatures call re-snapshots it. TaskCompletionSource's
+        // default (not RunContinuationsAsynchronously) behaviour runs the awaiting
+        // continuation synchronously on this thread when nothing captured a
+        // SynchronizationContext — there is none in this test host — so this line
+        // deterministically drives ApplyFeatures to completion; no delay, no polling.
+        pending.SetResult(true);
+
+        Assert.False(vm.IsCustomerDisplayEnabled);
+        Assert.True(display.IsIdle); // pulled back to idle, not left showing a stale cart
     }
 }

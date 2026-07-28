@@ -104,7 +104,24 @@ public partial class SettingsViewModel : ViewModelBase
 
     /// <summary>What the register will actually do, which is the server's answer.
     /// The local fields behind the old checkboxes are kept and still saved, but no
-    /// longer consulted — see ReturnsViewModel.</summary>
+    /// longer consulted — see ReturnsViewModel.
+    ///
+    /// Can read stale (show "enabled" even when the server has switched a flag off)
+    /// on one specific path: this screen is reachable from the login screen, before
+    /// any shift has been opened this run of the process, and ICashFeatureService's
+    /// cache is only populated by PosViewModel.InitializeAsync — refreshing it any
+    /// earlier is impossible, not just undone, because that same InitializeAsync is
+    /// what creates the local database's Settings table in the first place
+    /// (OfflineStorageService.InitializeAsync); reading the cache before that table
+    /// exists would fail outright. Reordering startup to fix this display-only gap
+    /// is deliberately out of scope: that sequencing already caused one production
+    /// lockout (see the expired-session-escape fix), so it stays as-is for a toggle
+    /// that is read-only here anyway.
+    ///
+    /// This never affects what actually happens on a return: RunPostReturnActionsAsync
+    /// runs after a shift has opened, by which point InitializeAsync has already
+    /// refreshed the real flags. Only what this screen *shows*, before that point,
+    /// can lag behind — never what the register *does*.</summary>
     public bool ReturnOpenCashDrawerEffective => _features.Current.IsEnabled(CashFeatureCodes.ReturnOpenDrawer);
     public bool ReturnPrintReceiptEffective => _features.Current.IsEnabled(CashFeatureCodes.ReturnPrintReceipt);
 
