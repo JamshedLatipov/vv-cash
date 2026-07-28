@@ -1617,7 +1617,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
                 // Return to POS View
                 NavigationRequest(this);
-            });
+            }, IsMixedPaymentEnabled);
 
             NavigationRequest(mixedPaymentVm);
         }
