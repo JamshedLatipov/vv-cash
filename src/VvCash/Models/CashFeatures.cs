@@ -19,5 +19,14 @@ public class CashFeatures
     /// <summary>What a register with no cached map uses: everything on.</summary>
     public static CashFeatures Default => new();
 
-    public bool IsEnabled(string code) => !Flags.TryGetValue(code, out var enabled) || enabled;
+    /// <summary>Whether a function is on. An unknown code reads as enabled — see
+    /// the class remarks for why that default lives here and only here.
+    ///
+    /// A null or empty code reads as enabled too, deliberately. Empty is not a
+    /// hypothetical: every option seeded before 20260728000800 carries an empty
+    /// code on the wire, twenty of them today, so a caller that hands this an
+    /// option's raw code will legitimately pass "". Throwing there would take
+    /// down a register over a value the server sends by design.</summary>
+    public bool IsEnabled(string code) =>
+        string.IsNullOrEmpty(code) || !Flags.TryGetValue(code, out var enabled) || enabled;
 }

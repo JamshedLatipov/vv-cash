@@ -61,4 +61,24 @@ public class CashFeaturesTest
         Assert.Empty(features.Flags);
         Assert.True(features.IsEnabled(CashFeatureCodes.SellerSwitch));
     }
+
+    [Fact]
+    public void IsEnabled_EmptyCode_ReturnsTrue()
+    {
+        // Not a hypothetical: every option seeded before migration
+        // 20260728000800 carries an empty code on the wire — twenty of them
+        // today (storeName, receiptPrinters, lcdCOM, ...). A caller that hands
+        // this an option's raw code will legitimately pass "".
+        var features = new CashFeatures();
+
+        Assert.True(features.IsEnabled(string.Empty));
+    }
+
+    [Fact]
+    public void IsEnabled_NullCode_ReturnsTrue()
+    {
+        var features = new CashFeatures();
+
+        Assert.True(features.IsEnabled(null!));
+    }
 }
