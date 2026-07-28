@@ -14,11 +14,27 @@ public class ShiftService : IShiftService
     private readonly ISettingsService _settingsService;
     private readonly ISessionContext _session;
 
+    public event EventHandler? SessionRevoked;
+
     public ShiftService(HttpClient httpClient, ISettingsService settingsService, ISessionContext session)
     {
         _httpClient = httpClient;
         _settingsService = settingsService;
         _session = session;
+    }
+
+    /// <summary>Mirrors ExpenseDocumentService.NotifySessionRevoked: both call sites below
+    /// currently only ever run on the UI thread (OpenShiftAsync from a UI-triggered command,
+    /// GetShiftStateAsync from PosViewModel's constructor-kicked InitializeAsync — see that
+    /// class's own remarks on why that's still the UI thread), but posting rather than
+    /// invoking directly keeps this safe if a future caller ever awaits either method from a
+    /// background thread, and matches the one existing precedent for this event shape.</summary>
+    private void NotifySessionRevoked()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            SessionRevoked?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     /// <summary>Extracts warehouse id from the untyped cash-session body.
@@ -69,6 +85,17 @@ public class ShiftService : IShiftService
             Console.WriteLine($"[ShiftService] Response content: {responseContent}");
             Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
 
+            // A response actually arrived, so this is the server saying the token is dead —
+            // not the network being unreachable (that path never gets here; it throws and
+            // lands in the catch below, which deliberately does NOT raise SessionRevoked).
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                Console.WriteLine("[ShiftService] OpenShiftAsync got 401 Unauthorized — session revoked.");
+                Debug.WriteLine("[ShiftService] OpenShiftAsync got 401 Unauthorized — session revoked.");
+                NotifySessionRevoked();
+                return null;
+            }
+
             if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.BadRequest)
             {
                 using var jsonDoc = JsonDocument.Parse(responseContent);
@@ -87,6 +114,10 @@ public class ShiftService : IShiftService
         }
         catch (Exception ex)
         {
+            // Network unreachable, DNS failure, timeout, etc. — the server was never asked,
+            // so there is nothing to conclude about the session's validity. Deliberately does
+            // NOT raise SessionRevoked: doing so here would log a cashier out of a register
+            // that simply has no signal, which offline operation must never do.
             Debug.WriteLine($"[ShiftService] Error opening shift: {ex.Message}");
             return null;
         }
@@ -164,10 +195,20 @@ public class ShiftService : IShiftService
                     }
                 }
             }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                // Same distinction as OpenShiftAsync: a response arrived, so this is the
+                // server rejecting the token, not the network being unreachable.
+                Console.WriteLine("[ShiftService] GetShiftStateAsync got 401 Unauthorized — session revoked.");
+                Debug.WriteLine("[ShiftService] GetShiftStateAsync got 401 Unauthorized — session revoked.");
+                NotifySessionRevoked();
+            }
             return null;
         }
         catch (Exception ex)
         {
+            // Network unreachable, DNS failure, timeout, etc. — see OpenShiftAsync's own
+            // remarks on why this must never raise SessionRevoked.
             Debug.WriteLine($"[ShiftService] Error getting shift state: {ex.Message}");
             return null;
         }

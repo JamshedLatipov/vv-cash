@@ -94,6 +94,19 @@ public partial class App : Application
                     x => x.MaxDiscount > 0m && x.MaxDiscount >= percent,
                     approver => { posVm.ApplyApprovedDiscount(approver.Id, percent); return Task.CompletedTask; });
 
+                // The shift modal's manual sign-out, and the automatic recovery from a
+                // server-rejected session (see PosViewModel.PerformSignOut/OnShiftSessionRevoked),
+                // both converge here: PosViewModel can't navigate to loginVm itself because it
+                // never holds that instance — it must be the *same* one constructed above, whose
+                // LoginSuccessful handler below is already wired to NavigateToPos. An empty
+                // explanation (the manual escape hatch) clears any stale error left over from a
+                // previous failed login attempt rather than leaving it showing.
+                posVm.LogoutRequested += (s, explanation) =>
+                {
+                    loginVm.ErrorMessage = explanation;
+                    mainVm.NavigateTo(loginVm);
+                };
+
                 var screens = desktop.MainWindow?.Screens.All;
                 if (screens != null && screens.Count > 1)
                 {
@@ -126,7 +139,19 @@ public partial class App : Application
 
             loginVm.LoginSuccessful += (s, e) => NavigateToPos();
 
-            // Auto-login if a "Remember me" session is still valid.
+            // Auto-login if a "Remember me" session is still valid. This is only a *local*
+            // check — AuthTokenExpiresAt is a backstop against a shift that never gets closed
+            // (see AuthService.LoginAsync's own remarks), not the server's real idea of when
+            // the token dies, so this can still say "valid" for a token the server has already
+            // revoked. Deliberately not validated against the server here: doing so would mean
+            // either blocking startup on a network round-trip (this app must still launch with
+            // no network — offline operation is the whole point) or firing an extra ping whose
+            // only possible finding — "the token is dead" — NavigateToPos already discovers a
+            // moment later anyway, for free, the instant PosViewModel's InitializeAsync calls
+            // GetShiftStateAsync. That call's own 401 handling (ShiftService.SessionRevoked ->
+            // PosViewModel.OnShiftSessionRevoked) is what actually closes the loop this gate
+            // used to leave open: an optimistic wrong guess here now self-corrects within one
+            // more round-trip instead of trapping the cashier behind a dead shift modal.
             bool rememberedSessionValid =
                 !string.IsNullOrWhiteSpace(initSettingsService.AuthToken)
                 && initSettingsService.AuthTokenExpiresAt.HasValue

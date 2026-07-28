@@ -67,6 +67,11 @@ public class ExpenseDocumentServiceTest
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult<IEnumerable<Category>>(Array.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync() => Task.FromResult<IEnumerable<Category>>(Array.Empty<Category>());
+        public Task SavePromotionsAsync(IEnumerable<Promotion> promotions) => Task.CompletedTask;
+        public Task<IEnumerable<Promotion>> GetPromotionsAsync() => Task.FromResult<IEnumerable<Promotion>>(Array.Empty<Promotion>());
+        public Task ClearPromotionsAsync() => Task.CompletedTask;
+        public Task SaveMoneyPolicyAsync(MoneyPolicy policy) => Task.CompletedTask;
+        public Task<MoneyPolicy> GetMoneyPolicyAsync() => Task.FromResult(MoneyPolicy.Default);
         public Task SetLastSyncVersionAsync(int version) => Task.CompletedTask;
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(0);
         public Task ClearCategoriesAsync() => Task.CompletedTask;

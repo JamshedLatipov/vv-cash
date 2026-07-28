@@ -9,6 +9,7 @@ using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
 using VvCash.ViewModels;
 using Xunit;
@@ -141,6 +142,16 @@ public class PosViewModelSellerGateTest
             CartChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        public void SetQuantity(CartItem item, decimal quantity)
+        {
+            item.Quantity = quantity;
+            CartChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public PromotionOutcome? OfflinePromotion => null;
+        public string? AppliedDiscountName => null;
+        public MoneyPolicy MoneyPolicy => MoneyPolicy.Default;
+
         public void ClearCart()
         {
             _items.Clear();
@@ -207,7 +218,7 @@ public class PosViewModelSellerGateTest
     {
         public PrinterStatus Status => PrinterStatus.Ready;
         public event EventHandler<PrinterStatus>? StatusChanged;
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber) => Task.FromResult(true);
@@ -228,13 +239,31 @@ public class PosViewModelSellerGateTest
         public bool CloseShiftResult { get; set; } = true;
         public int CloseShiftCallCount { get; private set; }
 
-        public Task<string?> OpenShiftAsync() => Task.FromResult<string?>("shift-1");
+        /// <summary>What OpenShiftAsync/GetShiftStateAsync report back — default "shift-1"
+        /// matches prior behaviour (an already-open shift restored on startup). The escape
+        /// hatch tests below flip these to null to simulate a rejected or unreachable
+        /// session, and separately call RaiseSessionRevoked to simulate the real
+        /// ShiftService's 401-only distinction — null alone (no event) stands in for a
+        /// network failure, since the real service also returns null without raising
+        /// SessionRevoked when the request never reached the server.</summary>
+        public string? OpenShiftResult { get; set; } = "shift-1";
+        public string? GetShiftStateResult { get; set; } = "shift-1";
+
+        public Task<string?> OpenShiftAsync() => Task.FromResult(OpenShiftResult);
         public Task<bool> CloseShiftAsync(string shiftId)
         {
             CloseShiftCallCount++;
             return Task.FromResult(CloseShiftResult);
         }
-        public Task<string?> GetShiftStateAsync() => Task.FromResult<string?>("shift-1");
+        public Task<string?> GetShiftStateAsync() => Task.FromResult(GetShiftStateResult);
+
+        public event EventHandler? SessionRevoked;
+
+        /// <summary>Test hook standing in for the real ShiftService hitting a 401 on
+        /// GetShiftStateAsync/OpenShiftAsync — raises the real event so PosViewModel's own
+        /// OnShiftSessionRevoked subscription is what's under test, not this fake's
+        /// plumbing (mirrors FakeExpenseDocumentService.RaiseSessionRevoked above).</summary>
+        public void RaiseSessionRevoked() => SessionRevoked?.Invoke(this, EventArgs.Empty);
     }
 
     private class FakeOfflineStorageService : IOfflineStorageService
@@ -247,6 +276,11 @@ public class PosViewModelSellerGateTest
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
+        public Task SavePromotionsAsync(IEnumerable<Promotion> promotions) => Task.CompletedTask;
+        public Task<IEnumerable<Promotion>> GetPromotionsAsync() => Task.FromResult(Enumerable.Empty<Promotion>());
+        public Task ClearPromotionsAsync() => Task.CompletedTask;
+        public Task SaveMoneyPolicyAsync(MoneyPolicy policy) => Task.CompletedTask;
+        public Task<MoneyPolicy> GetMoneyPolicyAsync() => Task.FromResult(MoneyPolicy.Default);
         public Task SetLastSyncVersionAsync(int version) => Task.CompletedTask;
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult(Enumerable.Empty<KeyValuePair<string, string>>());
@@ -390,6 +424,13 @@ public class PosViewModelSellerGateTest
         public string? WarehouseId { get; set; }
     }
 
+    private class FakePromotionProvider : IPromotionProvider
+    {
+        public IReadOnlyList<Promotion> Promotions { get; set; } = Array.Empty<Promotion>();
+        public MoneyPolicy MoneyPolicy { get; set; } = MoneyPolicy.Default;
+        public Task RefreshAsync() => Task.CompletedTask;
+    }
+
     /// <summary>Stands in for the real SellerRosterService: RefreshAsync never throws
     /// (per its documented contract) and this fake just hands back whatever roster the
     /// test configured, defaulting to empty — an empty roster is a legitimate state,
@@ -423,9 +464,10 @@ public class PosViewModelSellerGateTest
         public HttpClient HttpClient { get; } = new();
     }
 
-    private static PosViewModel CreateViewModel(out Deps deps)
+    private static PosViewModel CreateViewModel(out Deps deps, Action<Deps>? configure = null)
     {
         deps = new Deps();
+        configure?.Invoke(deps);
         return new PosViewModel(
             new FakeProductService(),
             new FakeCategoryService(),
@@ -441,6 +483,7 @@ public class PosViewModelSellerGateTest
             deps.ParkedSaleService,
             new FakeReturnService(),
             new FakeQuoteService(),
+            new FakePromotionProvider(),
             new FakeSessionContext(),
             deps.HttpClient,
             deps.SellerSession,
@@ -1483,5 +1526,113 @@ public class PosViewModelSellerGateTest
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         Assert.False(vm.IsSessionRevoked);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Shift-modal escape hatch / session-expiry lockout fix: unlike the queued-document
+    // 401 above (which only raises a banner, since a receipt might be mid-flight),
+    // ShiftService.SessionRevoked fires from GetShiftStateAsync/OpenShiftAsync — call
+    // sites that only ever run while nothing is mid-receipt (startup, or the register
+    // already blocked behind the shift modal with no way for it to ever succeed) — so
+    // PosViewModel completes a real sign-out and asks the host to navigate to login,
+    // rather than leaving the cashier trapped. The modal's own manual SignOutCommand (the
+    // escape hatch a cashier can press regardless of *why* the modal is up) converges on
+    // the exact same PerformSignOut path, so both are covered together here. A network
+    // failure (simulated below as GetShiftStateAsync returning null without raising the
+    // event — see ShiftServiceTest for that distinction proved at the real HTTP level)
+    // must never trigger any of this: offline operation must never be treated as a
+    // rejected session.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ShiftServiceSessionRevoked_ClearsCredentialsAndSellerSession_RequestsLogoutWithExplanation()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
+        var raisedCount = 0;
+        string? loggedOutWith = null;
+        vm.LogoutRequested += (s, explanation) => { raisedCount++; loggedOutWith = explanation; };
+
+        deps.ShiftService.RaiseSessionRevoked();
+
+        // Not yet applied: OnShiftSessionRevoked only posts the sign-out, it doesn't run it
+        // inline — same marshalling proof as SessionRevoked_FromExpenseDocumentService_
+        // SetsIsSessionRevoked_OnUiThread above.
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+        Assert.Equal(0, raisedCount);
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Equal(1, raisedCount);
+        Assert.Equal(I18nService.Instance["SessionExpiredSignInAgain"], loggedOutWith);
+    }
+
+    [Fact]
+    public void ShiftServiceNetworkFailure_NoSessionRevokedRaised_NeverClearsCredentials_NeverRequestsLogout()
+    {
+        // GetShiftStateResult = null with no RaiseSessionRevoked call stands in for the real
+        // ShiftService's network-failure path (returns null, event never fires — see
+        // ShiftServiceTest.GetShiftStateAsync_NetworkUnreachable_...). The register should
+        // just show the ordinary "start a shift" modal, exactly as it does today when it has
+        // never been able to reach the server at all.
+        using var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        var raisedCount = 0;
+        vm.LogoutRequested += (s, e) => raisedCount++;
+
+        Assert.False(vm.IsShiftOpen);
+        Assert.True(vm.IsShiftModalVisible);
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public void Dispose_UnsubscribesFromShiftServiceSessionRevoked_LaterRaiseNeverClearsCredentials()
+    {
+        var vm = CreateViewModel(out var deps);
+        vm.Dispose();
+
+        deps.ShiftService.RaiseSessionRevoked();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+    }
+
+    [Fact]
+    public void SignOutCommand_ClearsCredentialsAndSellerSession_RequestsLogoutWithEmptyExplanation()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
+        var raisedCount = 0;
+        string? loggedOutWith = "not set by handler";
+        vm.LogoutRequested += (s, explanation) => { raisedCount++; loggedOutWith = explanation; };
+
+        // No Dispatcher pump needed here: unlike the automatic 401 recovery, the manual
+        // escape hatch is a direct command execution on the calling (UI) thread, not a
+        // background-thread event handler.
+        vm.SignOutCommand.Execute(null);
+
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Equal(1, raisedCount);
+        Assert.Equal(string.Empty, loggedOutWith);
+    }
+
+    [Fact]
+    public void SignOutCommand_WorksWithNoOpenShift_RegardlessOfWhyTheModalIsUp()
+    {
+        // The escape hatch must be reachable whether the shift modal is up because of a
+        // dead session or simply because nobody has opened a shift yet (e.g. the wrong
+        // cashier launched the app) — same command, same result, either way.
+        using var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        Assert.True(vm.IsShiftModalVisible);
+        var raisedCount = 0;
+        vm.LogoutRequested += (s, e) => raisedCount++;
+
+        vm.SignOutCommand.Execute(null);
+
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Equal(1, raisedCount);
     }
 }

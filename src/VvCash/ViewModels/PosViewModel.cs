@@ -217,6 +217,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// simply this instance going away.</summary>
     [ObservableProperty] private bool _isSessionRevoked;
 
+    /// <summary>Raised to ask the host (App.axaml.cs) to return to the login screen — the
+    /// escape hatch this class otherwise has no way to reach on its own, since the
+    /// LoginViewModel instance the host needs to navigate to (with its LoginSuccessful
+    /// handler already wired at startup — see App.axaml.cs's NavigateToPos) was never handed
+    /// to PosViewModel. Same decoupling role as SellerSwitchRequested and friends above:
+    /// raise intent, let the host do the mechanics. Fired by two callers that converge on the
+    /// same underlying <see cref="PerformSignOut"/> — <see cref="OnShiftSessionRevoked"/>
+    /// (the server rejected the session) and <see cref="SignOut"/> (the shift modal's manual
+    /// escape hatch) — so the two can never drift apart. The string argument is an
+    /// already-localized explanation to show on the login screen, or empty for a plain,
+    /// cashier-initiated sign-out with nothing to explain.</summary>
+    public event EventHandler<string>? LogoutRequested;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -409,6 +421,32 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>The shift modal's manual escape hatch (see PosView.axaml's Start Shift Modal
+    /// Overlay). Deliberately available whenever the modal is up regardless of *why* — a dead
+    /// remembered session (see <see cref="OnShiftSessionRevoked"/>), a shift closed without
+    /// ever navigating away (DoCloseShiftAsync above clears the token but stays on this same
+    /// view), or simply the wrong cashier having opened the app — the fix is the same in every
+    /// case: sign out and let the next person log in properly instead of being trapped behind
+    /// a modal that can never succeed with no valid session.</summary>
+    [RelayCommand]
+    private void SignOut() => PerformSignOut(string.Empty);
+
+    /// <summary>Single choke point for leaving the current session — shared by the automatic
+    /// 401 recovery (<see cref="OnShiftSessionRevoked"/>) and the manual escape hatch
+    /// (<see cref="SignOut"/>) so the two can never diverge. Mirrors DoCloseShiftAsync's own
+    /// sign-out branch (clear seller + auth token) but also asks the host to navigate away,
+    /// which a mid-shift close deliberately does not do. Does not touch the cart or any
+    /// queued offline document: clearing the auth token doesn't discard anything already
+    /// saved via IOfflineStorageService, and ExpenseDocumentService.SyncOfflineDocumentsAsync
+    /// picks the queue back up on its own once a valid session exists again — see this
+    /// class's own remarks on why IsSessionRevoked is never cleared for the same reason.</summary>
+    private void PerformSignOut(string explanation)
+    {
+        _sellerSession.Clear();
+        _authService.ClearSession();
+        LogoutRequested?.Invoke(this, explanation);
+    }
+
     [RelayCommand]
     private async Task FullReinitializeAsync()
     {
@@ -557,6 +595,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
+        _shiftService.SessionRevoked += OnShiftSessionRevoked;
 
         _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
@@ -848,6 +887,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSessionRevoked = true);
     }
 
+    /// <summary>Unlike <see cref="OnSessionRevoked"/> above — which only raises a banner
+    /// because a queued receipt might be mid-flight — ShiftService.SessionRevoked fires from
+    /// GetShiftStateAsync (startup) or OpenShiftAsync (the shift modal's own button), and both
+    /// only ever run while nothing is mid-receipt: either the register just launched, or it is
+    /// already blocked behind the shift modal with no way for that modal to ever succeed on a
+    /// dead token. There is nothing to protect by staying put, so this completes the sign-out
+    /// immediately (see <see cref="PerformSignOut"/>) instead of leaving the cashier stuck.
+    /// Marshals to the UI thread for the same reason as every other handler here — ShiftService
+    /// posts this event, not invokes it inline (see its own NotifySessionRevoked remarks).</summary>
+    private void OnShiftSessionRevoked(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () => PerformSignOut(I18nService.Instance["SessionExpiredSignInAgain"]));
+    }
+
     private void OnParkedSaleCountChanged(object? sender, int count)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
@@ -879,6 +933,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _printerService.StatusChanged -= OnPrinterStatusChanged;
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
         _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
+        _shiftService.SessionRevoked -= OnShiftSessionRevoked;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;

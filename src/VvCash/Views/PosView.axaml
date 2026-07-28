@@ -888,7 +888,19 @@
                         </Button.IsEnabled>
                     </Button>
 
-                    <Button Classes="OutlineButton"
+                    <!-- Escape hatch: works regardless of why this modal is up — a dead
+                         remembered session that can never open a shift, or simply the wrong
+                         cashier being logged in. Signs out and returns to the login screen
+                         (see PosViewModel.SignOut/PerformSignOut) rather than trapping the
+                         cashier behind a modal that cannot succeed. -->
+                    <Button Classes="SecondaryButton"
+                            Content="{Binding [SignOutAction], Source={x:Static services:I18nService.Instance}}"
+                            Command="{Binding SignOutCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Height="48"/>
+
+                    <Button Classes="OutlinedButton"
                             Content="{Binding [ExitApplication], Source={x:Static services:I18nService.Instance}}"
                             Command="{Binding CloseApplicationCommand}"
                             HorizontalAlignment="Stretch"
