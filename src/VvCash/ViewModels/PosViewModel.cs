@@ -1492,6 +1492,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 var dialog = new VvCash.Views.ExchangeWindow();
                 dialog.DataContext = new ExchangeViewModel(
                     dialog, _returnService, _exchangeService, _productService, _syncService,
+                    _printerService, _features,
                     _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty, _sellerSession.Current?.Id, IsSystemOnline);
                 await dialog.ShowDialog(mainWindow);
             }

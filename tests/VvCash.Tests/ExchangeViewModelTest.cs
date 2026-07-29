@@ -1,6 +1,12 @@
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
+using VvCash.Services;
+using VvCash.Services.Api;
+using VvCash.Services.Hardware;
 using VvCash.ViewModels;
 using Xunit;
 
@@ -8,6 +14,102 @@ namespace VvCash.Tests;
 
 public class ExchangeViewModelTest
 {
+    // Records what was actually sent, and hands back a canned response — null
+    // stands in for the server refusing the exchange (see ExchangeService's own
+    // remarks: any refusal or transport failure comes back as null).
+    private sealed class FakeExchangeService : IExchangeService
+    {
+        public ExchangeResponseBody? Response;
+        public Task<ExchangeResponseBody?> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+            => Task.FromResult(Response);
+    }
+
+    // Counts calls the same way ReturnsViewModelTest's own CountingPrinter does
+    // for a return, plus its own counter for the exchange receipt so the two
+    // never get confused.
+    private sealed class CountingPrinter : IPrinterService
+    {
+        public int Drawer;
+        public int ExchangeReceipt;
+        public decimal? LastDifference;
+        public string? LastDocumentNumber;
+        public PrinterStatus Status => PrinterStatus.Ready;
+        public event System.EventHandler<PrinterStatus>? StatusChanged;
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
+        public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
+        public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
+        public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d) => Task.FromResult(true);
+        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber)
+        {
+            ExchangeReceipt++;
+            LastDifference = difference;
+            LastDocumentNumber = documentNumber;
+            return Task.FromResult(true);
+        }
+    }
+
+    private sealed class FakeCashFeatureService : ICashFeatureService
+    {
+        public CashFeatures Current { get; } = CashFeatures.Default;
+        public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
+        public Task RefreshAsync() => Task.CompletedTask;
+    }
+
+    private static ExchangeViewModel BuildForSubmit(
+        FakeExchangeService exchange, CountingPrinter printer, ICashFeatureService features,
+        decimal returnedPrice = 80m, decimal issuedPrice = 100m)
+    {
+        var vm = new ExchangeViewModel(exchangeService: exchange, printerService: printer, features: features, isOnline: true);
+        vm.SelectedSale = new ExpenseListItem { Id = "doc1", DocumentNumber = "9" };
+        vm.SetReturnedLines(new[] { MakeReturnedLine(returnedPrice) });
+        vm.AddIssuedLine(MakeIssuedLine(issuedPrice));
+        return vm;
+    }
+
+    [Fact]
+    public async Task SubmitExchange_Success_WithDifference_PrintsOnceWithServerDocumentNumber_AndOpensDrawer()
+    {
+        var exchange = new FakeExchangeService
+        { Response = new ExchangeResponseBody { ExpenseDocumentNumber = "77", Difference = 20m } };
+        var printer = new CountingPrinter();
+        var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService()); // returned 80, issued 100
+
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, printer.ExchangeReceipt);
+        Assert.Equal("77", printer.LastDocumentNumber); // from the server response, not invented locally
+        Assert.Equal(20m, printer.LastDifference);
+        Assert.Equal(1, printer.Drawer); // money actually moved
+    }
+
+    [Fact]
+    public async Task SubmitExchange_ServerRefuses_NoPrint_NoDrawer_BasketsUntouched()
+    {
+        var exchange = new FakeExchangeService { Response = null }; // server refusal / transport failure
+        var printer = new CountingPrinter();
+        var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService());
+
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, printer.ExchangeReceipt);
+        Assert.Equal(0, printer.Drawer);
+        Assert.Single(vm.IssuedLines); // left exactly as the cashier built it, so they can retry
+        Assert.Equal(1, vm.ReturnedLines.Single().ReturnQty);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_ExactPriceMatch_PrintsReceipt_ButDoesNotOpenDrawer()
+    {
+        var exchange = new FakeExchangeService
+        { Response = new ExchangeResponseBody { ExpenseDocumentNumber = "5", Difference = 0m } };
+        var printer = new CountingPrinter();
+        var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService(), returnedPrice: 80m, issuedPrice: 80m);
+
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, printer.ExchangeReceipt);
+        Assert.Equal(0, printer.Drawer); // nothing for the drawer to hand over or collect
+    }
     // Same shape ReturnsViewModel uses to build a ReturnLineVm: one unit sold,
     // none returned yet, priced at `price` after discount.
     private static ReturnLineVm MakeReturnedLine(decimal price)

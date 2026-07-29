@@ -7,11 +7,13 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
 
@@ -35,6 +37,8 @@ public partial class ExchangeViewModel : ViewModelBase
     private readonly IExchangeService? _exchangeService;
     private readonly IProductService? _productService;
     private readonly ISyncService? _syncService;
+    private readonly IPrinterService? _printerService;
+    private readonly ICashFeatureService? _features;
     private readonly MoneyPolicy _moneyPolicy;
     private readonly string _shiftId;
     private readonly string? _sellerId;
@@ -109,6 +113,8 @@ public partial class ExchangeViewModel : ViewModelBase
         IExchangeService? exchangeService = null,
         IProductService? productService = null,
         ISyncService? syncService = null,
+        IPrinterService? printerService = null,
+        ICashFeatureService? features = null,
         MoneyPolicy? moneyPolicy = null,
         string shiftId = "",
         string? sellerId = null,
@@ -119,6 +125,8 @@ public partial class ExchangeViewModel : ViewModelBase
         _exchangeService = exchangeService;
         _productService = productService;
         _syncService = syncService;
+        _printerService = printerService;
+        _features = features;
         _moneyPolicy = moneyPolicy ?? MoneyPolicy.Default;
         _shiftId = shiftId;
         _sellerId = sellerId;
@@ -307,9 +315,10 @@ public partial class ExchangeViewModel : ViewModelBase
                     DiscountPercent = l.Product.DiscountPercent ?? 0,
                 }).ToList(),
             },
-            // The difference is settled in cash by default — the screen has no
-            // cash/card split control (out of scope here, same as ReturnsViewModel
-            // never splits a refund either).
+            // Intentional MVP simplification, not an oversight: the whole
+            // difference always goes to paid_in_cash. There is no cash/card split
+            // control on this screen — a future task can add one; until then this
+            // is the one and only place a positive difference is ever charged.
             DifferencePayment = new ExchangeDifferencePayment
             {
                 PaidInCash = CustomerPays ? Difference : 0m,
@@ -331,9 +340,33 @@ public partial class ExchangeViewModel : ViewModelBase
             var result = await _exchangeService.CreateExchangeAsync(SelectedSale.Id, request);
             if (result == null)
             {
+                // No exchange happened server-side: nothing gets printed, the
+                // drawer stays shut, and both baskets are left exactly as the
+                // cashier built them so they can retry or cancel — see
+                // ExchangeService's own remarks on why there is no offline
+                // fallback to fall back to.
                 ErrorMessage = I18nService.Instance["ExchangeFailed"];
                 return;
             }
+
+            // Snapshot the receipt lines before the baskets are cleared below —
+            // RemoveIssuedLine would otherwise change IssuedTotal/Difference out
+            // from under the receipt being printed.
+            var returnedReceiptLines = ReturnedLines.Where(l => l.ReturnQty > 0)
+                .Select(l => new ReturnReceiptLine(l.Name, l.ReturnQty, l.LineRefund)).ToList();
+            var issuedReceiptLines = IssuedLines
+                .Select(l => new ReturnReceiptLine(l.Product.Name, (int)l.Quantity, l.LineTotal)).ToList();
+
+            // The server is the authority on money, same reason the document
+            // number below comes from it and not from the screen: a price-drift
+            // audit or a rounding difference could make its figure differ from
+            // what this screen computed before the request went out.
+            var difference = result.Difference;
+            // The document that carries the exchange — from the server, never
+            // invented locally.
+            var documentNumber = result.ExpenseDocumentNumber ?? string.Empty;
+
+            await RunPostExchangeActionsAsync(returnedReceiptLines, issuedReceiptLines, difference, documentNumber);
 
             SuccessMessage = I18nService.Instance["ExchangeSuccess"];
             foreach (var item in IssuedLines.ToList()) RemoveIssuedLine(item);
@@ -346,6 +379,31 @@ public partial class ExchangeViewModel : ViewModelBase
         finally
         {
             IsSubmitting = false;
+        }
+    }
+
+    /// <summary>Same store-level switches ReturnsViewModel already reads for a
+    /// return (RunPostReturnActionsAsync) — reused rather than duplicated: an
+    /// exchange prints on the same printer and opens the same drawer, and the
+    /// task deliberately did not introduce separate flags for it.</summary>
+    private async Task RunPostExchangeActionsAsync(
+        IReadOnlyList<ReturnReceiptLine> returnedReceiptLines,
+        IReadOnlyList<ReturnReceiptLine> issuedReceiptLines,
+        decimal difference, string documentNumber)
+    {
+        // Only when money actually moves — an exchange priced exactly even has
+        // nothing for the drawer to hand over or collect.
+        if (difference != 0m
+            && (_features?.Current.IsEnabled(CashFeatureCodes.ReturnOpenDrawer) ?? true)
+            && _printerService != null)
+        {
+            try { await _printerService.OpenCashDrawerAsync(); } catch { }
+        }
+        if ((_features?.Current.IsEnabled(CashFeatureCodes.ReturnPrintReceipt) ?? true)
+            && _printerService != null)
+        {
+            try { await _printerService.PrintExchangeReceiptAsync(returnedReceiptLines, issuedReceiptLines, difference, documentNumber); }
+            catch { }
         }
     }
 
