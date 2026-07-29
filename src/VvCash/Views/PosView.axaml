@@ -557,13 +557,13 @@
 
                             <!-- secondary actions -->
                             <Grid ColumnDefinitions="*, *, *, Auto">
-                                <Button Grid.Column="0" Classes="SecondaryButton" Height="38" Margin="0,0,8,0" HorizontalAlignment="Stretch" Command="{Binding OpenDiscountModalCommand}">
+                                <Button Grid.Column="0" Classes="SecondaryButton" Height="38" Margin="0,0,8,0" HorizontalAlignment="Stretch" Command="{Binding OpenDiscountModalCommand}" IsVisible="{Binding IsDiscountEnabled}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <material:MaterialIcon Kind="TagOutline" Width="16" Height="16"/>
                                         <TextBlock Text="{Binding [Discount], Source={x:Static services:I18nService.Instance}}" FontSize="13" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Button>
-                                <Button Grid.Column="1" Classes="SecondaryButton" Height="38" Margin="0,0,8,0" HorizontalAlignment="Stretch" Command="{Binding OpenCouponModalCommand}">
+                                <Button Grid.Column="1" Classes="SecondaryButton" Height="38" Margin="0,0,8,0" HorizontalAlignment="Stretch" Command="{Binding OpenCouponModalCommand}" IsVisible="{Binding IsCouponsEnabled}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <material:MaterialIcon Kind="TicketPercentOutline" Width="16" Height="16"/>
                                         <TextBlock Text="{Binding [Coupon], Source={x:Static services:I18nService.Instance}}" FontSize="13" VerticalAlignment="Center"/>

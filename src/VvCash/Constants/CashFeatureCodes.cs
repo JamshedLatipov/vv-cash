@@ -16,4 +16,6 @@ public static class CashFeatureCodes
     public const string SellerSwitch = "cash_seller_switch_enabled";
     public const string ReturnPrintReceipt = "cash_return_print_receipt";
     public const string ReturnOpenDrawer = "cash_return_open_drawer";
+    public const string Discount = "cash_discount_enabled";
+    public const string Coupons = "cash_coupons_enabled";
 }
