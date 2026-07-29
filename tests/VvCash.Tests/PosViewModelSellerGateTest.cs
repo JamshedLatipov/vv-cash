@@ -1838,4 +1838,59 @@ public class PosViewModelSellerGateTest
         Assert.False(vm.IsCustomerDisplayEnabled);
         Assert.True(display.IsIdle); // pulled back to idle, not left showing a stale cart
     }
+
+    // ---------------------------------------------------------------------------------
+    // Manual discount and coupon flags (Task 22): the store owner asked for exactly one
+    // thing here — hide the button, keep the pricing untouched. Customer-category
+    // discounts and automatic promotions do not go through OpenDiscountModal/
+    // OpenCouponModal at all, so gating these two commands can never make an offline
+    // total disagree with the server's.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void OpenDiscountModalCommand_FlagDisabled_DoesNotOpenTheModal()
+    {
+        // A command that still opened the modal behind a hidden button would be dead
+        // code reachable only by a stray click on a control the view no longer shows —
+        // same shape as OpenSellerSwitchCommand_Disabled_DoesNotRaise above, but for a
+        // property flip (IsDiscountModalVisible) rather than an event.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.Discount, false));
+
+        vm.OpenDiscountModalCommand.Execute(null);
+
+        Assert.False(vm.IsDiscountEnabled);
+        Assert.False(vm.IsDiscountModalVisible);
+    }
+
+    [Fact]
+    public void OpenCouponModalCommand_FlagDisabled_DoesNotOpenTheModal()
+    {
+        // Same reasoning as OpenDiscountModalCommand_FlagDisabled_DoesNotOpenTheModal,
+        // for the coupon button/modal pair.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.Coupons, false));
+
+        vm.OpenCouponModalCommand.Execute(null);
+
+        Assert.False(vm.IsCouponsEnabled);
+        Assert.False(vm.IsCouponModalVisible);
+    }
+
+    [Fact]
+    public void DiscountAndCouponFlags_NotConfigured_BothEnabled_BothModalsOpen()
+    {
+        // CashFeatures.IsEnabled treats an unknown/unconfigured code as enabled — the
+        // default lives there and nowhere else (see its own remarks) — so a register
+        // that hasn't heard about these two codes yet must behave exactly as it did
+        // before this task: both buttons work.
+        using var vm = CreateViewModel(out var deps);
+
+        Assert.True(vm.IsDiscountEnabled);
+        Assert.True(vm.IsCouponsEnabled);
+
+        vm.OpenDiscountModalCommand.Execute(null);
+        Assert.True(vm.IsDiscountModalVisible);
+
+        vm.OpenCouponModalCommand.Execute(null);
+        Assert.True(vm.IsCouponModalVisible);
+    }
 }

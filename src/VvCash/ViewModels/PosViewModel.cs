@@ -108,6 +108,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isCustomerRegistrationEnabled = true;
     [ObservableProperty] private bool _isSellerSwitchEnabled = true;
     [ObservableProperty] private bool _isCustomerDisplayEnabled = true;
+    [ObservableProperty] private bool _isDiscountEnabled = true;
+    [ObservableProperty] private bool _isCouponsEnabled = true;
 
     /// <summary>A display that was fed cart data before the flag actually loaded (see
     /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
@@ -605,6 +607,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IsCustomerRegistrationEnabled = features.IsEnabled(CashFeatureCodes.CustomerRegistration);
         IsSellerSwitchEnabled = features.IsEnabled(CashFeatureCodes.SellerSwitch);
         IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
+        IsDiscountEnabled = features.IsEnabled(CashFeatureCodes.Discount);
+        IsCouponsEnabled = features.IsEnabled(CashFeatureCodes.Coupons);
     }
 
 
@@ -1169,6 +1173,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void OpenCouponModal()
     {
+        // Disabled entry points are hidden, not greyed out (see PosView.axaml's binding
+        // on this command's button) — but the command itself must also refuse, since a
+        // stray click on a control mid-hide-animation, or any other path that still
+        // reaches this method, must not open a modal this register's flag says doesn't
+        // apply here (see OpenSellerSwitch's own remarks for the same rule).
+        if (!IsCouponsEnabled) return;
+
         CouponCode = string.Empty;
         IsCouponModalVisible = true;
     }
@@ -1190,6 +1201,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void OpenDiscountModal()
     {
+        // Same guard as OpenCouponModal above, and OpenSellerSwitch before that: this
+        // flag hides the manual-discount button only — customer-category discounts and
+        // automatic promotions never go through this command, so gating it cannot make
+        // an offline total disagree with the server's.
+        if (!IsDiscountEnabled) return;
+
         DiscountInputValue = string.Empty;
         IsDiscountModalVisible = true;
     }
