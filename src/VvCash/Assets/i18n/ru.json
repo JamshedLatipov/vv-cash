@@ -167,5 +167,18 @@
   "SellerPinSetupOffline": "Нет связи — задайте PIN позже",
   "PinTooWeak": "Слишком простой PIN — попробуйте другой",
   "SessionRevokedBanner": "Сессия смены недействительна. Чеки сохраняются, войдите заново после текущего клиента.",
-  "SessionExpiredSignInAgain": "Сессия истекла. Пожалуйста, войдите снова."
+  "SessionExpiredSignInAgain": "Сессия истекла. Пожалуйста, войдите снова.",
+  "Exchange": "Обмен",
+  "ExchangeReturnedLabel": "Возврат:",
+  "ExchangeIssuedLabel": "Выдача:",
+  "ExchangeCustomerPaysLabel": "К доплате:",
+  "ExchangeRefundDueLabel": "К выдаче:",
+  "ExchangeOfflineWarning": "Обмен требует связи с сервером",
+  "ExchangeExpiredWarning": "Срок обмена по этому чеку истёк",
+  "ExchangeAction": "Обменять",
+  "SelectSaleToExchange": "Выберите чек для обмена",
+  "IssuedGoods": "Выдача товара",
+  "SearchProductToIssue": "Поиск товара по названию или штрихкоду",
+  "ExchangeSuccess": "Обмен выполнен",
+  "ExchangeFailed": "Ошибка обмена"
 }

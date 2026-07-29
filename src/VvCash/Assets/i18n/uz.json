@@ -188,5 +188,18 @@
   "SellerPinSetupOffline": "Aloqa yo'q — PIN-ni keyinroq o'rnating",
   "PinTooWeak": "PIN juda oddiy — boshqasini sinab ko'ring",
   "SessionRevokedBanner": "Smena sessiyasi haqiqiy emas. Cheklar saqlanmoqda — joriy mijozdan keyin qayta tizimga kiring.",
-  "SessionExpiredSignInAgain": "Sessiya muddati tugadi. Qaytadan tizimga kiring."
+  "SessionExpiredSignInAgain": "Sessiya muddati tugadi. Qaytadan tizimga kiring.",
+  "Exchange": "Almashtirish",
+  "ExchangeReturnedLabel": "Qaytarish:",
+  "ExchangeIssuedLabel": "Berish:",
+  "ExchangeCustomerPaysLabel": "Qo'shimcha to'lov:",
+  "ExchangeRefundDueLabel": "Qaytariladigan summa:",
+  "ExchangeOfflineWarning": "Almashtirish uchun serverga ulanish kerak",
+  "ExchangeExpiredWarning": "Ushbu chek bo'yicha almashtirish muddati tugagan",
+  "ExchangeAction": "Almashtirish",
+  "SelectSaleToExchange": "Almashtirish uchun chekni tanlang",
+  "IssuedGoods": "Beriladigan mahsulot",
+  "SearchProductToIssue": "Nomi yoki shtrix-kod bo'yicha mahsulot qidirish",
+  "ExchangeSuccess": "Almashtirish bajarildi",
+  "ExchangeFailed": "Almashtirishda xatolik"
 }

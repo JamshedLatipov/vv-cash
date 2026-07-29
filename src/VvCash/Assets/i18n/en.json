@@ -188,5 +188,18 @@
   "SellerPinSetupOffline": "No connection — set the PIN later",
   "PinTooWeak": "PIN is too simple — try another",
   "SessionRevokedBanner": "Shift session is no longer valid. Receipts are being saved — sign in again after this customer.",
-  "SessionExpiredSignInAgain": "Your session has expired. Please sign in again."
+  "SessionExpiredSignInAgain": "Your session has expired. Please sign in again.",
+  "Exchange": "Exchange",
+  "ExchangeReturnedLabel": "Returned:",
+  "ExchangeIssuedLabel": "Issued:",
+  "ExchangeCustomerPaysLabel": "Customer pays:",
+  "ExchangeRefundDueLabel": "Refund due:",
+  "ExchangeOfflineWarning": "Exchange requires a server connection",
+  "ExchangeExpiredWarning": "The exchange window for this receipt has expired",
+  "ExchangeAction": "Exchange",
+  "SelectSaleToExchange": "Select a receipt to exchange",
+  "IssuedGoods": "Goods issued",
+  "SearchProductToIssue": "Search product by name or barcode",
+  "ExchangeSuccess": "Exchange completed",
+  "ExchangeFailed": "Exchange failed"
 }

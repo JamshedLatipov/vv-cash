@@ -18,4 +18,5 @@ public static class CashFeatureCodes
     public const string ReturnOpenDrawer = "cash_return_open_drawer";
     public const string Discount = "cash_discount_enabled";
     public const string Coupons = "cash_coupons_enabled";
+    public const string Exchange = "cash_exchange_enabled";
 }

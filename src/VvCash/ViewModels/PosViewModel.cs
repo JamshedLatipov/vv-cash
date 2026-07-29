@@ -35,6 +35,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ICounterpartyService _counterpartyService;
     private readonly IParkedSaleService _parkedSaleService;
     private readonly IReturnService _returnService;
+    private readonly IExchangeService _exchangeService;
     private readonly IQuoteService _quoteService;
     private readonly IPromotionProvider _promotionProvider;
     private readonly ISessionContext _session;
@@ -110,6 +111,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isCustomerDisplayEnabled = true;
     [ObservableProperty] private bool _isDiscountEnabled = true;
     [ObservableProperty] private bool _isCouponsEnabled = true;
+
+    /// <summary>Exchange is hidden when the store switched the function off, and
+    /// disabled while the register is offline: an exchange cannot be queued, so
+    /// offering the button without a connection would promise something the
+    /// register cannot deliver. Read live (not snapshotted like the flags above)
+    /// so <see cref="IsSystemOnline"/> flipping updates it without needing its own
+    /// ApplyFeatures pass.</summary>
+    public bool IsExchangeVisible => _features.Current.IsEnabled(CashFeatureCodes.Exchange);
+    public bool IsExchangeEnabled => IsExchangeVisible && IsSystemOnline;
 
     /// <summary>A display that was fed cart data before the flag actually loaded (see
     /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
@@ -237,6 +247,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SystemStatusText))]
+    [NotifyPropertyChangedFor(nameof(IsExchangeEnabled))]
     private bool _isSystemOnline = true;
 
     public string SystemStatusText => IsSystemOnline ? "SYSTEM ONLINE" : "SYSTEM OFFLINE";
@@ -545,6 +556,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ICounterpartyService counterpartyService,
         IParkedSaleService parkedSaleService,
         IReturnService returnService,
+        IExchangeService exchangeService,
         IQuoteService quoteService,
         IPromotionProvider promotionProvider,
         ISessionContext session,
@@ -568,6 +580,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _counterpartyService = counterpartyService;
         _parkedSaleService = parkedSaleService;
         _returnService = returnService;
+        _exchangeService = exchangeService;
         _quoteService = quoteService;
         _session = session;
         _httpClient = httpClient;
@@ -1463,6 +1476,23 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
                 dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                await dialog.ShowDialog(mainWindow);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenExchange()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.ExchangeWindow();
+                dialog.DataContext = new ExchangeViewModel(
+                    dialog, _returnService, _exchangeService, _productService, _syncService,
+                    _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty, _sellerSession.Current?.Id, IsSystemOnline);
                 await dialog.ShowDialog(mainWindow);
             }
         }
