@@ -224,6 +224,7 @@ public partial class App : Application
         services.AddHttpClient<ExpenseDocumentService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<IExpenseDocumentService>(sp => sp.GetRequiredService<ExpenseDocumentService>());
         services.AddHttpClient<IReturnService, ReturnService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<IExchangeService, ExchangeService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ISyncService, SyncService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // POS Services
