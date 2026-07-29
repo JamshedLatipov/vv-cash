@@ -58,10 +58,20 @@ public partial class MixedPaymentViewModel : ViewModelBase
 
     private readonly Action<bool, decimal, decimal> _onCompletion;
 
-    public MixedPaymentViewModel(decimal totalAmount, Action<bool, decimal, decimal> onCompletion)
+    /// <summary>Whether one receipt may be split across several tenders. When the
+    /// store switches mixed payment off, choosing a different method moves the
+    /// amount rather than adding a second tender — the cashier still picks how the
+    /// customer pays, they just cannot split one receipt in two.
+    ///
+    /// Defaults to true so that a caller which knows nothing about feature flags
+    /// keeps the behaviour this screen has always had.</summary>
+    private readonly bool _allowMixed;
+
+    public MixedPaymentViewModel(decimal totalAmount, Action<bool, decimal, decimal> onCompletion, bool allowMixed = true)
     {
         TotalAmount = totalAmount;
         _onCompletion = onCompletion;
+        _allowMixed = allowMixed;
         RecomputeQuickAmounts();
     }
 
@@ -130,6 +140,19 @@ public partial class MixedPaymentViewModel : ViewModelBase
 
     partial void OnSelectedMethodChanged(string value)
     {
+        if (!_allowMixed)
+        {
+            // Single-tender mode: the newly selected method keeps whatever amount it
+            // already carries (normally zero), and every other tender is zeroed so the
+            // amount follows the cashier's choice instead of accumulating across
+            // methods. This runs here rather than in the SelectMethod command because
+            // SelectedMethod can also be assigned directly (e.g. from tests or other
+            // callers), and this hook fires on every path that changes it.
+            if (value != "Cash") CashAmount = 0;
+            if (value != "Card") CardAmount = 0;
+            if (value != "Gift") GiftAmount = 0;
+        }
+
         _currentInputBuffer = value switch
         {
             "Cash" => CashAmount.ToString("0.##", CultureInfo.InvariantCulture),

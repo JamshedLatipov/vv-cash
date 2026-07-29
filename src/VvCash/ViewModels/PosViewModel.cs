@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
@@ -41,6 +42,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ISellerSession _sellerSession;
     private readonly ISellerRosterService _rosterService;
     private readonly IAuthService _authService;
+    private readonly ICashFeatureService _features;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private bool _applyingQuoteResult;
@@ -89,8 +91,42 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasParkedSales))]
+    [NotifyPropertyChangedFor(nameof(IsParkedSalesListVisible))]
     private int _parkedSalesCount;
     public bool HasParkedSales => ParkedSalesCount > 0;
+
+    /// <summary>Feature-flag visibility for the POS screen. Snapshotted by
+    /// <see cref="ApplyFeatures"/> — see its own remarks for why these are read once per
+    /// screen rather than kept live.</summary>
+    [ObservableProperty] private bool _isReturnsEnabled = true;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsParkedSalesListVisible))]
+    private bool _isParkingEnabled = true;
+
+    [ObservableProperty] private bool _isMixedPaymentEnabled = true;
+    [ObservableProperty] private bool _isCustomerRegistrationEnabled = true;
+    [ObservableProperty] private bool _isSellerSwitchEnabled = true;
+    [ObservableProperty] private bool _isCustomerDisplayEnabled = true;
+
+    /// <summary>A display that was fed cart data before the flag actually loaded (see
+    /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
+    /// again once InitializeAsync's real fetch resolves) must not keep showing that
+    /// stale cart once the flag turns out to be off — otherwise a customer-facing screen
+    /// the store just disabled would sit there displaying someone else's total. Reset to
+    /// idle exactly once, on the off transition; the guarded push sites (OnCartChanged,
+    /// the payment-success branch) take over from there and simply stop pushing.</summary>
+    partial void OnIsCustomerDisplayEnabledChanged(bool value)
+    {
+        if (!value && CustomerDisplayViewModel != null)
+            CustomerDisplayViewModel.IsIdle = true;
+    }
+
+    /// <summary>Parked sales already on this register outlive the flag being
+    /// switched off: "Park" disappears at once, but the list stays reachable
+    /// until the last one is cleared. Otherwise switching the flag off would
+    /// strand receipts with goods picked and no money taken.</summary>
+    public bool IsParkedSalesListVisible => IsParkingEnabled || ParkedSalesCount > 0;
 
     // Park label modal
     [ObservableProperty] private bool _isParkLabelModalVisible = false;
@@ -217,6 +253,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// simply this instance going away.</summary>
     [ObservableProperty] private bool _isSessionRevoked;
 
+    /// <summary>Raised to ask the host (App.axaml.cs) to return to the login screen — the
+    /// escape hatch this class otherwise has no way to reach on its own, since the
+    /// LoginViewModel instance the host needs to navigate to (with its LoginSuccessful
+    /// handler already wired at startup — see App.axaml.cs's NavigateToPos) was never handed
+    /// to PosViewModel. Same decoupling role as SellerSwitchRequested and friends above:
+    /// raise intent, let the host do the mechanics. Fired by two callers that converge on the
+    /// same underlying <see cref="PerformSignOut"/> — <see cref="OnShiftSessionRevoked"/>
+    /// (the server rejected the session) and <see cref="SignOut"/> (the shift modal's manual
+    /// escape hatch) — so the two can never drift apart. The string argument is an
+    /// already-localized explanation to show on the login screen, or empty for a plain,
+    /// cashier-initiated sign-out with nothing to explain.</summary>
+    public event EventHandler<string>? LogoutRequested;
 
     public CustomerDisplayViewModel? CustomerDisplayViewModel { get; set; }
     public Action<ViewModelBase>? NavigationRequest { get; set; }
@@ -270,7 +318,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         => OnPropertyChanged(nameof(SellerChipText));
 
     [RelayCommand]
-    private void OpenSellerSwitch() => SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+    private void OpenSellerSwitch()
+    {
+        // Disabled entry points are hidden, not greyed out (see PosView.axaml's binding
+        // on this command's button) — but the command itself must also refuse, since a
+        // stray click on a control mid-hide-animation, or any other path that still
+        // reaches this method, must not open an overlay this register's flag says
+        // doesn't apply here.
+        if (!IsSellerSwitchEnabled) return;
+
+        SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+    }
 
     [RelayCommand]
     private async Task OpenShiftAsync()
@@ -315,7 +373,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // seller as absent. A seller who lacks it must escalate through a
         // supervisor PIN instead of closing outright: raise intent (mirrors
         // AddToCart's SellerSwitchRequested) and let the host open the overlay.
-        if (!(_sellerSession.Current?.CanCloseShift ?? false))
+        //
+        // With seller switching disabled this register has no notion of separate
+        // sellers: everything is the shift owner's, and their rights are the only
+        // rights. Leaving the gate on while the approval overlay is hidden would
+        // make the shift impossible to close — nobody ever becomes Current, so the
+        // gate would fire forever with nothing able to satisfy it.
+        if (IsSellerSwitchEnabled && !(_sellerSession.Current?.CanCloseShift ?? false))
         {
             CloseShiftApprovalRequested?.Invoke(this, EventArgs.Empty);
             return;
@@ -409,6 +473,32 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>The shift modal's manual escape hatch (see PosView.axaml's Start Shift Modal
+    /// Overlay). Deliberately available whenever the modal is up regardless of *why* — a dead
+    /// remembered session (see <see cref="OnShiftSessionRevoked"/>), a shift closed without
+    /// ever navigating away (DoCloseShiftAsync above clears the token but stays on this same
+    /// view), or simply the wrong cashier having opened the app — the fix is the same in every
+    /// case: sign out and let the next person log in properly instead of being trapped behind
+    /// a modal that can never succeed with no valid session.</summary>
+    [RelayCommand]
+    private void SignOut() => PerformSignOut(string.Empty);
+
+    /// <summary>Single choke point for leaving the current session — shared by the automatic
+    /// 401 recovery (<see cref="OnShiftSessionRevoked"/>) and the manual escape hatch
+    /// (<see cref="SignOut"/>) so the two can never diverge. Mirrors DoCloseShiftAsync's own
+    /// sign-out branch (clear seller + auth token) but also asks the host to navigate away,
+    /// which a mid-shift close deliberately does not do. Does not touch the cart or any
+    /// queued offline document: clearing the auth token doesn't discard anything already
+    /// saved via IOfflineStorageService, and ExpenseDocumentService.SyncOfflineDocumentsAsync
+    /// picks the queue back up on its own once a valid session exists again — see this
+    /// class's own remarks on why IsSessionRevoked is never cleared for the same reason.</summary>
+    private void PerformSignOut(string explanation)
+    {
+        _sellerSession.Clear();
+        _authService.ClearSession();
+        LogoutRequested?.Invoke(this, explanation);
+    }
+
     [RelayCommand]
     private async Task FullReinitializeAsync()
     {
@@ -459,7 +549,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         HttpClient httpClient,
         ISellerSession sellerSession,
         ISellerRosterService rosterService,
-        IAuthService authService)
+        IAuthService authService,
+        ICashFeatureService features)
     {
         _promotionProvider = promotionProvider;
         _productService = productService;
@@ -481,6 +572,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _sellerSession = sellerSession;
         _rosterService = rosterService;
         _authService = authService;
+        _features = features;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
@@ -490,6 +582,29 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _sellerSession.CurrentChanged += OnSellerChanged;
 
         _ = InitializeAsync();
+
+        // So the screen renders with the right visibility even before InitializeAsync's
+        // own await resolves — see ApplyFeatures' remarks for why it runs a second time
+        // once the cached map is actually loaded.
+        ApplyFeatures();
+    }
+
+    /// <summary>Snapshots the flags into the bindings the screen reads. Called
+    /// twice by design: once in the constructor, so the screen renders before any
+    /// await resolves, and once from InitializeAsync after the local database is
+    /// ready and the cached map has actually been loaded. Not called again after
+    /// that — a flag must never change what an open scenario is doing (see this
+    /// task's own rule: values are snapshotted when the screen opens, not re-read
+    /// continuously).</summary>
+    private void ApplyFeatures()
+    {
+        var features = _features.Current;
+        IsReturnsEnabled = features.IsEnabled(CashFeatureCodes.Returns);
+        IsParkingEnabled = features.IsEnabled(CashFeatureCodes.ParkedSales);
+        IsMixedPaymentEnabled = features.IsEnabled(CashFeatureCodes.MixedPayment);
+        IsCustomerRegistrationEnabled = features.IsEnabled(CashFeatureCodes.CustomerRegistration);
+        IsSellerSwitchEnabled = features.IsEnabled(CashFeatureCodes.SellerSwitch);
+        IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
     }
 
 
@@ -549,6 +664,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         await _offlineStorageService.InitializeAsync();
 
+        // Reading the cache any earlier is impossible: OfflineStorageService.InitializeAsync
+        // is what creates the Settings table this reads from. RefreshAsync loads whatever
+        // SyncService last cached; ApplyFeatures re-snapshots the flags now that the load
+        // actually happened, replacing the constructor's pre-await guess.
+        await _features.RefreshAsync();
+        ApplyFeatures();
+
         // Load the cached promotions before the first cart change, so an offline
         // start still prices carts instead of waiting for the first sync.
         await _promotionProvider.RefreshAsync();
@@ -557,6 +679,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
+        _shiftService.SessionRevoked += OnShiftSessionRevoked;
 
         _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
@@ -708,7 +831,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         TotalAmount = _cartService.TotalAmount;
         AppliedDiscountName = _cartService.AppliedDiscountName ?? string.Empty;
 
-        if (CustomerDisplayViewModel != null)
+        if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)
         {
             CustomerDisplayViewModel.Items = CartItems;
             CustomerDisplayViewModel.Total = TotalAmount;
@@ -848,6 +971,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSessionRevoked = true);
     }
 
+    /// <summary>Unlike <see cref="OnSessionRevoked"/> above — which only raises a banner
+    /// because a queued receipt might be mid-flight — ShiftService.SessionRevoked fires from
+    /// GetShiftStateAsync (startup) or OpenShiftAsync (the shift modal's own button), and both
+    /// only ever run while nothing is mid-receipt: either the register just launched, or it is
+    /// already blocked behind the shift modal with no way for that modal to ever succeed on a
+    /// dead token. There is nothing to protect by staying put, so this completes the sign-out
+    /// immediately (see <see cref="PerformSignOut"/>) instead of leaving the cashier stuck.
+    /// Marshals to the UI thread for the same reason as every other handler here — ShiftService
+    /// posts this event, not invokes it inline (see its own NotifySessionRevoked remarks).</summary>
+    private void OnShiftSessionRevoked(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            () => PerformSignOut(I18nService.Instance["SessionExpiredSignInAgain"]));
+    }
+
     private void OnParkedSaleCountChanged(object? sender, int count)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
@@ -879,6 +1017,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _printerService.StatusChanged -= OnPrinterStatusChanged;
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
         _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
+        _shiftService.SessionRevoked -= OnShiftSessionRevoked;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
@@ -965,7 +1104,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // overlay request before this item lands. Once the cart has an item, the receipt is
         // in progress and must never be interrupted for this — same reasoning as Touch()
         // below keeping the session alive through the rest of the sale.
-        if (!_cartService.Items.Any() && _sellerSession.IsStale)
+        // With seller switching disabled there is no separate identity to confirm —
+        // everything on this register is the shift owner's — so the start-of-receipt
+        // ask never fires.
+        if (IsSellerSwitchEnabled && !_cartService.Items.Any() && _sellerSession.IsStale)
             SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
 
         // Any add is genuine register activity, not just the first one — resets the idle
@@ -1101,7 +1243,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (IsDiscountPercentMode && NeedsDiscountApproval(value))
+        // Same seller-switch-off exception as CloseShift/OpenReturns: with no separate
+        // sellers there is nobody else's approval to escalate to, and the overlay that
+        // would collect it is hidden along with the flag.
+        if (IsSellerSwitchEnabled && IsDiscountPercentMode && NeedsDiscountApproval(value))
         {
             CloseDiscountModal();
             DiscountApprovalRequested?.Invoke(this, value);
@@ -1274,7 +1419,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // same reasoning CloseShift already uses for CanCloseShift. A seller who
         // lacks it must escalate through a supervisor PIN instead: raise intent and
         // let the host (App.axaml.cs) open the overlay in approval mode.
-        if (!(_sellerSession.Current?.CanRefund ?? false))
+        //
+        // Same seller-switch-off exception as CloseShift: with no separate sellers,
+        // the shift owner's rights are the only rights, and the overlay that could
+        // satisfy this gate is hidden along with the flag.
+        if (IsSellerSwitchEnabled && !(_sellerSession.Current?.CanRefund ?? false))
         {
             RefundApprovalRequested?.Invoke(this, EventArgs.Empty);
             return;
@@ -1296,7 +1445,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
-                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService);
+                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
                 await dialog.ShowDialog(mainWindow);
             }
         }
@@ -1362,8 +1511,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         // Same start-of-receipt gate as AddToCart, applied here because resuming skips
         // AddToCart entirely — see this method's own remarks for why this must run before
-        // Touch() and before the cart is populated below.
-        if (_sellerSession.IsStale)
+        // Touch() and before the cart is populated below. Same seller-switch-off
+        // exception as AddToCart too: no separate identity to confirm when the flag is off.
+        if (IsSellerSwitchEnabled && _sellerSession.IsStale)
             SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
 
         // Resuming a parked sale is genuine register activity, same as AddToCart's own
@@ -1462,7 +1612,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         _approvedById = null;
                         StatusMessage = "Payment processed. Thank you!";
 
-                        if (CustomerDisplayViewModel != null)
+                        if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)
                         {
                             CustomerDisplayViewModel.IsIdle = true;
                             CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
@@ -1482,7 +1632,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
                 // Return to POS View
                 NavigationRequest(this);
-            });
+            }, IsMixedPaymentEnabled);
 
             NavigationRequest(mixedPaymentVm);
         }

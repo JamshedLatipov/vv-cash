@@ -4,11 +4,13 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
 using VvCash.ViewModels;
 using Xunit;
@@ -141,6 +143,16 @@ public class PosViewModelSellerGateTest
             CartChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        public void SetQuantity(CartItem item, decimal quantity)
+        {
+            item.Quantity = quantity;
+            CartChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public PromotionOutcome? OfflinePromotion => null;
+        public string? AppliedDiscountName => null;
+        public MoneyPolicy MoneyPolicy => MoneyPolicy.Default;
+
         public void ClearCart()
         {
             _items.Clear();
@@ -207,7 +219,7 @@ public class PosViewModelSellerGateTest
     {
         public PrinterStatus Status => PrinterStatus.Ready;
         public event EventHandler<PrinterStatus>? StatusChanged;
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber) => Task.FromResult(true);
@@ -228,13 +240,31 @@ public class PosViewModelSellerGateTest
         public bool CloseShiftResult { get; set; } = true;
         public int CloseShiftCallCount { get; private set; }
 
-        public Task<string?> OpenShiftAsync() => Task.FromResult<string?>("shift-1");
+        /// <summary>What OpenShiftAsync/GetShiftStateAsync report back — default "shift-1"
+        /// matches prior behaviour (an already-open shift restored on startup). The escape
+        /// hatch tests below flip these to null to simulate a rejected or unreachable
+        /// session, and separately call RaiseSessionRevoked to simulate the real
+        /// ShiftService's 401-only distinction — null alone (no event) stands in for a
+        /// network failure, since the real service also returns null without raising
+        /// SessionRevoked when the request never reached the server.</summary>
+        public string? OpenShiftResult { get; set; } = "shift-1";
+        public string? GetShiftStateResult { get; set; } = "shift-1";
+
+        public Task<string?> OpenShiftAsync() => Task.FromResult(OpenShiftResult);
         public Task<bool> CloseShiftAsync(string shiftId)
         {
             CloseShiftCallCount++;
             return Task.FromResult(CloseShiftResult);
         }
-        public Task<string?> GetShiftStateAsync() => Task.FromResult<string?>("shift-1");
+        public Task<string?> GetShiftStateAsync() => Task.FromResult(GetShiftStateResult);
+
+        public event EventHandler? SessionRevoked;
+
+        /// <summary>Test hook standing in for the real ShiftService hitting a 401 on
+        /// GetShiftStateAsync/OpenShiftAsync — raises the real event so PosViewModel's own
+        /// OnShiftSessionRevoked subscription is what's under test, not this fake's
+        /// plumbing (mirrors FakeExpenseDocumentService.RaiseSessionRevoked above).</summary>
+        public void RaiseSessionRevoked() => SessionRevoked?.Invoke(this, EventArgs.Empty);
     }
 
     private class FakeOfflineStorageService : IOfflineStorageService
@@ -247,6 +277,13 @@ public class PosViewModelSellerGateTest
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
+        public Task SavePromotionsAsync(IEnumerable<Promotion> promotions) => Task.CompletedTask;
+        public Task<IEnumerable<Promotion>> GetPromotionsAsync() => Task.FromResult(Enumerable.Empty<Promotion>());
+        public Task ClearPromotionsAsync() => Task.CompletedTask;
+        public Task SaveMoneyPolicyAsync(MoneyPolicy policy) => Task.CompletedTask;
+        public Task<MoneyPolicy> GetMoneyPolicyAsync() => Task.FromResult(MoneyPolicy.Default);
+        public Task SaveCashFeaturesAsync(CashFeatures features) => Task.CompletedTask;
+        public Task<CashFeatures> GetCashFeaturesAsync() => Task.FromResult(CashFeatures.Default);
         public Task SetLastSyncVersionAsync(int version) => Task.CompletedTask;
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult(Enumerable.Empty<KeyValuePair<string, string>>());
@@ -338,6 +375,11 @@ public class PosViewModelSellerGateTest
         public ParkedSaleSnapshot? LastParkedSnapshot { get; private set; }
         public string? LastParkedId { get; private set; }
 
+        /// <summary>What GetCountAsync reports back — defaults to 0 (matching prior
+        /// behaviour); the feature-flag tests below set it directly to simulate sales
+        /// already parked on the register before the flag was switched off.</summary>
+        public int Count { get; set; }
+
         public Task<ParkedSale> ParkAsync(ParkedSaleSnapshot snapshot, decimal total)
         {
             var id = Guid.NewGuid().ToString();
@@ -366,8 +408,41 @@ public class PosViewModelSellerGateTest
         public void SeedParkedSnapshot(string id, ParkedSaleSnapshot snapshot) => _parked[id] = snapshot;
 
         public Task DeleteAsync(string id) => Task.CompletedTask;
-        public Task<int> GetCountAsync() => Task.FromResult(0);
+        public Task<int> GetCountAsync() => Task.FromResult(Count);
         public event EventHandler<int>? CountChanged;
+    }
+
+    /// <summary>Stands in for CashFeatureService: no storage, flags set directly.</summary>
+    private class FakeCashFeatureService : ICashFeatureService
+    {
+        public CashFeatures Current { get; } = CashFeatures.Default;
+
+        public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
+
+        /// <summary>When set, RefreshAsync awaits this before returning instead of
+        /// completing immediately — reproducing the real gap between the constructor's
+        /// ApplyFeatures pass (reading whatever Current already holds, the all-enabled
+        /// default on a register that has never synced) and InitializeAsync's own
+        /// RefreshAsync/ApplyFeatures pass, which in production only resolves once the
+        /// register's local storage is actually ready. Every other fake in this class
+        /// completes synchronously by design (see the class remarks), so this is the one
+        /// deliberate exception, and only when a test opts in by setting it.</summary>
+        public TaskCompletionSource<bool>? PendingRefresh;
+
+        private readonly Dictionary<string, bool> _afterRefresh = new();
+
+        /// <summary>Queues a flag value that only takes effect when RefreshAsync actually
+        /// runs — immediately if PendingRefresh is null, or once a test completes
+        /// PendingRefresh otherwise — never at the moment this is called. That mirrors
+        /// the real CashFeatureService: the map only ever changes as a result of a
+        /// refresh actually completing.</summary>
+        public void SetAfterRefresh(string code, bool enabled) => _afterRefresh[code] = enabled;
+
+        public async Task RefreshAsync()
+        {
+            if (PendingRefresh != null) await PendingRefresh.Task;
+            foreach (var (code, enabled) in _afterRefresh) Current.Flags[code] = enabled;
+        }
     }
 
     // GetSalesAsync/GetReturnableLinesAsync/CreateReturnAsync are never reached by the
@@ -388,6 +463,13 @@ public class PosViewModelSellerGateTest
     private class FakeSessionContext : ISessionContext
     {
         public string? WarehouseId { get; set; }
+    }
+
+    private class FakePromotionProvider : IPromotionProvider
+    {
+        public IReadOnlyList<Promotion> Promotions { get; set; } = Array.Empty<Promotion>();
+        public MoneyPolicy MoneyPolicy { get; set; } = MoneyPolicy.Default;
+        public Task RefreshAsync() => Task.CompletedTask;
     }
 
     /// <summary>Stands in for the real SellerRosterService: RefreshAsync never throws
@@ -420,12 +502,14 @@ public class PosViewModelSellerGateTest
         public FakeAuthService AuthService { get; } = new();
         public FakeCartService CartService { get; } = new();
         public FakeParkedSaleService ParkedSaleService { get; } = new();
+        public FakeCashFeatureService Features { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
-    private static PosViewModel CreateViewModel(out Deps deps)
+    private static PosViewModel CreateViewModel(out Deps deps, Action<Deps>? configure = null)
     {
         deps = new Deps();
+        configure?.Invoke(deps);
         return new PosViewModel(
             new FakeProductService(),
             new FakeCategoryService(),
@@ -441,11 +525,13 @@ public class PosViewModelSellerGateTest
             deps.ParkedSaleService,
             new FakeReturnService(),
             new FakeQuoteService(),
+            new FakePromotionProvider(),
             new FakeSessionContext(),
             deps.HttpClient,
             deps.SellerSession,
             deps.RosterService,
-            deps.AuthService);
+            deps.AuthService,
+            deps.Features);
     }
 
     private static Product MakeProduct(string id, decimal price) => new()
@@ -1483,5 +1569,273 @@ public class PosViewModelSellerGateTest
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         Assert.False(vm.IsSessionRevoked);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Shift-modal escape hatch / session-expiry lockout fix: unlike the queued-document
+    // 401 above (which only raises a banner, since a receipt might be mid-flight),
+    // ShiftService.SessionRevoked fires from GetShiftStateAsync/OpenShiftAsync — call
+    // sites that only ever run while nothing is mid-receipt (startup, or the register
+    // already blocked behind the shift modal with no way for it to ever succeed) — so
+    // PosViewModel completes a real sign-out and asks the host to navigate to login,
+    // rather than leaving the cashier trapped. The modal's own manual SignOutCommand (the
+    // escape hatch a cashier can press regardless of *why* the modal is up) converges on
+    // the exact same PerformSignOut path, so both are covered together here. A network
+    // failure (simulated below as GetShiftStateAsync returning null without raising the
+    // event — see ShiftServiceTest for that distinction proved at the real HTTP level)
+    // must never trigger any of this: offline operation must never be treated as a
+    // rejected session.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ShiftServiceSessionRevoked_ClearsCredentialsAndSellerSession_RequestsLogoutWithExplanation()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
+        var raisedCount = 0;
+        string? loggedOutWith = null;
+        vm.LogoutRequested += (s, explanation) => { raisedCount++; loggedOutWith = explanation; };
+
+        deps.ShiftService.RaiseSessionRevoked();
+
+        // Not yet applied: OnShiftSessionRevoked only posts the sign-out, it doesn't run it
+        // inline — same marshalling proof as SessionRevoked_FromExpenseDocumentService_
+        // SetsIsSessionRevoked_OnUiThread above.
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+        Assert.Equal(0, raisedCount);
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Equal(1, raisedCount);
+        Assert.Equal(I18nService.Instance["SessionExpiredSignInAgain"], loggedOutWith);
+    }
+
+    [Fact]
+    public void ShiftServiceNetworkFailure_NoSessionRevokedRaised_NeverClearsCredentials_NeverRequestsLogout()
+    {
+        // GetShiftStateResult = null with no RaiseSessionRevoked call stands in for the real
+        // ShiftService's network-failure path (returns null, event never fires — see
+        // ShiftServiceTest.GetShiftStateAsync_NetworkUnreachable_...). The register should
+        // just show the ordinary "start a shift" modal, exactly as it does today when it has
+        // never been able to reach the server at all.
+        using var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        var raisedCount = 0;
+        vm.LogoutRequested += (s, e) => raisedCount++;
+
+        Assert.False(vm.IsShiftOpen);
+        Assert.True(vm.IsShiftModalVisible);
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public void Dispose_UnsubscribesFromShiftServiceSessionRevoked_LaterRaiseNeverClearsCredentials()
+    {
+        var vm = CreateViewModel(out var deps);
+        vm.Dispose();
+
+        deps.ShiftService.RaiseSessionRevoked();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+    }
+
+    [Fact]
+    public void SignOutCommand_ClearsCredentialsAndSellerSession_RequestsLogoutWithEmptyExplanation()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
+        var raisedCount = 0;
+        string? loggedOutWith = "not set by handler";
+        vm.LogoutRequested += (s, explanation) => { raisedCount++; loggedOutWith = explanation; };
+
+        // No Dispatcher pump needed here: unlike the automatic 401 recovery, the manual
+        // escape hatch is a direct command execution on the calling (UI) thread, not a
+        // background-thread event handler.
+        vm.SignOutCommand.Execute(null);
+
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Equal(1, raisedCount);
+        Assert.Equal(string.Empty, loggedOutWith);
+    }
+
+    [Fact]
+    public void SignOutCommand_WorksWithNoOpenShift_RegardlessOfWhyTheModalIsUp()
+    {
+        // The escape hatch must be reachable whether the shift modal is up because of a
+        // dead session or simply because nobody has opened a shift yet (e.g. the wrong
+        // cashier launched the app) — same command, same result, either way.
+        using var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        Assert.True(vm.IsShiftModalVisible);
+        var raisedCount = 0;
+        vm.LogoutRequested += (s, e) => raisedCount++;
+
+        vm.SignOutCommand.Execute(null);
+
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Equal(1, raisedCount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Feature-flag gates (Task 13): disabled entry points hide rather than grey out, and
+    // turning off seller switching must take its permission gates with it. Every flag
+    // below is set on Deps.Features BEFORE CreateViewModel runs — InitializeAsync's own
+    // ApplyFeatures call (see PosViewModel's remarks) reads the cached map once the fakes'
+    // already-completed Tasks let it run synchronously during construction, so a flag
+    // flipped afterwards would not reliably be reflected without a real Dispatcher pump.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CloseShiftCommand_SellerSwitchDisabled_ClosesWithoutApproval()
+    {
+        // With seller switching off, this register has no notion of separate sellers, so
+        // nobody ever becomes Current. If CanCloseShift's gate stayed on regardless, it
+        // would fire forever with no seller-switch overlay left to satisfy it (the
+        // overlay is hidden along with the flag) — the shift could never close. The flag
+        // must take its own gate down with it.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        await vm.CloseShiftCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public void CloseShiftCommand_SellerSwitchEnabled_StillRequiresApproval()
+    {
+        // Guards the pre-existing behaviour against being lost while adding the flag
+        // above: with seller switching on, a register with nobody confirmed must still
+        // fail closed exactly as before — the new escape hatch is scoped to the flag
+        // being off, not a general loosening of the close-shift gate.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, true));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        vm.CloseShiftCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+    }
+
+    [Fact]
+    public void OpenSellerSwitchCommand_Disabled_DoesNotRaise()
+    {
+        // A command that still raised the overlay behind a hidden chip would be dead
+        // code reachable only by a stray click on a control the view no longer shows —
+        // the command itself must refuse, not just the XAML visibility.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenSellerSwitchCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.False(vm.IsSellerSwitchEnabled);
+    }
+
+    [Fact]
+    public void Returns_Disabled_HidesTheEntryPoint()
+    {
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.Returns, false));
+
+        Assert.False(vm.IsReturnsEnabled);
+    }
+
+    [Fact]
+    public void ParkedSales_DisabledWithSalesStillParked_KeepsTheListReachable()
+    {
+        // Parked sales already sitting on this register outlive the flag being switched
+        // off: "Park" (the write side) disappears at once, but the list stays reachable
+        // until the last one is cleared — otherwise switching the flag off would strand
+        // receipts with goods already picked and no money taken.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.Set(CashFeatureCodes.ParkedSales, false);
+            d.ParkedSaleService.Count = 2;
+        });
+
+        Assert.False(vm.IsParkingEnabled);
+        Assert.True(vm.IsParkedSalesListVisible);
+    }
+
+    [Fact]
+    public void ParkedSales_DisabledAndDrained_HidesTheListToo()
+    {
+        // Once the last parked sale is gone there is nothing left for the list to
+        // reach, so it hides along with the flag, same as any other disabled entry
+        // point.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.Set(CashFeatureCodes.ParkedSales, false);
+            d.ParkedSaleService.Count = 0;
+        });
+
+        Assert.False(vm.IsParkedSalesListVisible);
+    }
+
+    [Fact]
+    public void CustomerDisplayDisabled_CartChanges_NotPushedToDisplay()
+    {
+        // The flag must be set BEFORE CreateViewModel runs (see the class remarks above
+        // this section): InitializeAsync's own ApplyFeatures call reads the cached map
+        // synchronously during construction with these fakes, so flipping it afterwards
+        // would not reliably be reflected. CustomerDisplayViewModel itself is assigned
+        // after construction, matching App.axaml.cs's own wiring (it's a settable
+        // property, not a constructor dependency).
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.CustomerDisplay, false));
+        var display = new CustomerDisplayViewModel();
+        vm.CustomerDisplayViewModel = display;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.False(vm.IsCustomerDisplayEnabled);
+        Assert.Empty(display.Items);
+        Assert.True(display.IsIdle);
+    }
+
+    [Fact]
+    public void CustomerDisplay_FlagDisabledAfterRefresh_ResetsAlreadyFedDisplayToIdle()
+    {
+        // Proves the actual mechanism OnIsCustomerDisplayEnabledChanged exists for: not
+        // "a flag disabled from the start blocks pushing" (the test above already covers
+        // that), but "a display that was fed on the constructor's optimistic first pass
+        // gets pulled back to idle once the real, disabled value lands". PendingRefresh
+        // holds InitializeAsync's RefreshAsync/ApplyFeatures pass open past construction,
+        // so IsCustomerDisplayEnabled is still true (the default) when CustomerDisplayViewModel
+        // is assigned and the cart is fed — exactly the window ApplyFeatures' own remarks
+        // describe. Completing PendingRefresh below is what stands in for "the register's
+        // storage becomes ready and the real fetch resolves".
+        var pending = new TaskCompletionSource<bool>();
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.PendingRefresh = pending;
+            d.Features.SetAfterRefresh(CashFeatureCodes.CustomerDisplay, false);
+        });
+        Assert.True(vm.IsCustomerDisplayEnabled); // still the optimistic default; real value hasn't landed
+
+        var display = new CustomerDisplayViewModel();
+        vm.CustomerDisplayViewModel = display;
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        // Fed while the flag still (optimistically) reads as enabled.
+        Assert.False(display.IsIdle);
+        Assert.NotEmpty(display.Items);
+
+        // The real fetch resolves: RefreshAsync applies the queued disabled value and
+        // InitializeAsync's own ApplyFeatures call re-snapshots it. TaskCompletionSource's
+        // default (not RunContinuationsAsynchronously) behaviour runs the awaiting
+        // continuation synchronously on this thread when nothing captured a
+        // SynchronizationContext — there is none in this test host — so this line
+        // deterministically drives ApplyFeatures to completion; no delay, no polling.
+        pending.SetResult(true);
+
+        Assert.False(vm.IsCustomerDisplayEnabled);
+        Assert.True(display.IsIdle); // pulled back to idle, not left showing a stale cart
     }
 }

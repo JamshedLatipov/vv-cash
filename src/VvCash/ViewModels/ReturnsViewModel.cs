@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
@@ -20,6 +21,7 @@ public partial class ReturnsViewModel : ViewModelBase
     private readonly IReturnService _returnService;
     private readonly IPrinterService _printerService;
     private readonly ISettingsService _settingsService;
+    private readonly ICashFeatureService _features;
 
     [ObservableProperty] private ObservableCollection<ExpenseListItem> _sales = new();
     [ObservableProperty] private ObservableCollection<ReturnLineVm> _lines = new();
@@ -49,12 +51,14 @@ public partial class ReturnsViewModel : ViewModelBase
     public bool CanSubmit => !IsSubmitting && Lines.Any(l => l.ReturnQty > 0);
 
     public ReturnsViewModel(Window? window, IReturnService returnService,
-        IPrinterService printerService, ISettingsService settingsService)
+        IPrinterService printerService, ISettingsService settingsService,
+        ICashFeatureService features)
     {
         _window = window;
         _returnService = returnService;
         _printerService = printerService;
         _settingsService = settingsService;
+        _features = features;
         if (window != null)
             _ = LoadSalesAsync();
     }
@@ -175,11 +179,16 @@ public partial class ReturnsViewModel : ViewModelBase
 
     private async Task RunPostReturnActionsAsync(string documentNumber)
     {
-        if (_settingsService.ReturnOpenCashDrawer)
+        // The store's setting, not the terminal's: these two used to be local
+        // checkboxes, and a store that switched them off centrally must not have
+        // them re-enabled by whatever was ticked on one register. The local values
+        // are deliberately left in settings untouched, so that removing the flags
+        // later restores the old behaviour rather than losing it.
+        if (_features.Current.IsEnabled(CashFeatureCodes.ReturnOpenDrawer))
         {
             try { await _printerService.OpenCashDrawerAsync(); } catch { }
         }
-        if (_settingsService.ReturnPrintReceipt)
+        if (_features.Current.IsEnabled(CashFeatureCodes.ReturnPrintReceipt))
         {
             var receiptLines = Lines.Where(l => l.ReturnQty > 0)
                 .Select(l => new ReturnReceiptLine(l.Name, l.ReturnQty, l.LineRefund));

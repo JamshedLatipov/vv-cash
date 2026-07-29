@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
@@ -53,9 +54,19 @@ public class ReturnsViewModelTest
         public void Save() => SettingsChanged?.Invoke(this, System.EventArgs.Empty);
     }
 
-    private static ReturnsViewModel Build(FakeReturnService svc, CountingPrinter printer, FakeSettings settings)
+    /// <summary>Stands in for CashFeatureService: no storage, flags set directly —
+    /// mirrors PosViewModelSellerGateTest's own fake of the same name.</summary>
+    private sealed class FakeCashFeatureService : ICashFeatureService
     {
-        var vm = new ReturnsViewModel(null, svc, printer, settings);
+        public CashFeatures Current { get; } = CashFeatures.Default;
+        public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
+        public Task RefreshAsync() => Task.CompletedTask;
+    }
+
+    private static ReturnsViewModel Build(FakeReturnService svc, CountingPrinter printer, FakeSettings settings,
+        ICashFeatureService? features = null)
+    {
+        var vm = new ReturnsViewModel(null, svc, printer, settings, features ?? new FakeCashFeatureService());
         vm.SelectedSale = new ExpenseListItem
         {
             Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z"
@@ -90,11 +101,15 @@ public class ReturnsViewModelTest
     }
 
     [Fact]
-    public async Task Submit_PostsAndRunsConfiguredPostActions()
+    public async Task Submit_NeitherFlagConfigured_BothPostActionsHappen_RegardlessOfLocalSettings()
     {
         var svc = new FakeReturnService();
         var printer = new CountingPrinter();
-        var vm = Build(svc, printer, new FakeSettings());
+        // Local checkboxes are both off, but they are no longer consulted at all — an
+        // unconfigured flag reads as enabled, same as everywhere else (CashFeatures.IsEnabled),
+        // so both post-return actions must still run.
+        var settings = new FakeSettings { ReturnOpenCashDrawer = false, ReturnPrintReceipt = false };
+        var vm = Build(svc, printer, settings, new FakeCashFeatureService());
         vm.Lines[0].ReturnQty = 1;
 
         await vm.SubmitReturnCommand.ExecuteAsync(null);
@@ -105,17 +120,39 @@ public class ReturnsViewModelTest
     }
 
     [Fact]
-    public async Task Submit_RespectsDisabledPostActions()
+    public async Task Submit_DrawerFlagOff_LocalSettingOn_DoesNotOpenDrawer()
     {
         var svc = new FakeReturnService();
         var printer = new CountingPrinter();
-        var settings = new FakeSettings { ReturnOpenCashDrawer = false, ReturnPrintReceipt = false };
-        var vm = Build(svc, printer, settings);
+        var settings = new FakeSettings { ReturnOpenCashDrawer = true, ReturnPrintReceipt = true };
+        var features = new FakeCashFeatureService();
+        features.Set(CashFeatureCodes.ReturnOpenDrawer, false);
+        var vm = Build(svc, printer, settings, features);
         vm.Lines[0].ReturnQty = 1;
 
         await vm.SubmitReturnCommand.ExecuteAsync(null);
 
+        // The store's setting, not the terminal's: a store that switched this off
+        // centrally must not have it re-enabled by whatever is ticked on one register.
         Assert.Equal(0, printer.Drawer);
+        Assert.Equal(1, printer.Receipt); // the other flag is untouched and still unconfigured -> enabled
+    }
+
+    [Fact]
+    public async Task Submit_PrintFlagOff_LocalSettingOn_DoesNotPrintReceipt()
+    {
+        var svc = new FakeReturnService();
+        var printer = new CountingPrinter();
+        var settings = new FakeSettings { ReturnOpenCashDrawer = true, ReturnPrintReceipt = true };
+        var features = new FakeCashFeatureService();
+        features.Set(CashFeatureCodes.ReturnPrintReceipt, false);
+        var vm = Build(svc, printer, settings, features);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        // Same rule as the drawer above: the server's answer wins over the local checkbox.
         Assert.Equal(0, printer.Receipt);
+        Assert.Equal(1, printer.Drawer); // the other flag is untouched and still unconfigured -> enabled
     }
 }

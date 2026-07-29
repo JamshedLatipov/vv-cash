@@ -415,6 +415,56 @@ public class OfflineStorageService : IOfflineStorageService
         return MoneyPolicy.Default;
     }
 
+    /// <summary>Stored as a Settings row rather than its own table, for the same
+    /// reason as MoneyPolicy: it is one value per register, and the POS screen
+    /// must know what to show before any network call completes.
+    ///
+    /// The dictionary is serialized on its own, not the CashFeatures wrapper, so
+    /// the cached JSON is byte-for-byte what GET /cashes/features/ returns in its
+    /// body — one shape to reason about instead of two.</summary>
+    public async Task SaveCashFeaturesAsync(CashFeatures features)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO Settings (Key, Value) VALUES ('CashFeatures', $Value)
+            ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value;
+        ";
+        command.Parameters.AddWithValue("$Value", JsonSerializer.Serialize(features.Flags));
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>The cached flag map, or an empty one when nothing was ever synced
+    /// — which CashFeatures reads as every function enabled. A damaged cache is
+    /// treated the same way rather than thrown: a register must still open.</summary>
+    public async Task<CashFeatures> GetCashFeaturesAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM Settings WHERE Key = 'CashFeatures'";
+
+        var result = await command.ExecuteScalarAsync();
+        if (result is string raw && !string.IsNullOrWhiteSpace(raw))
+        {
+            try
+            {
+                var flags = JsonSerializer.Deserialize<Dictionary<string, bool>>(raw);
+                if (flags != null) return new CashFeatures { Flags = flags };
+            }
+            catch (JsonException)
+            {
+                // A corrupt cache must not stop the register from opening.
+            }
+        }
+
+        return CashFeatures.Default;
+    }
+
     public async Task SetLastSyncVersionAsync(int version)
     {
         using var connection = new SqliteConnection(_connectionString);

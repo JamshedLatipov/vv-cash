@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Services.Data;
 using Xunit;
@@ -156,5 +158,63 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.Equal(2, result.Count);
         Assert.Contains(result, s => s.Id == "seller-1" && s.FirstName == "Anna");
         Assert.Contains(result, s => s.Id == "seller-2" && s.FirstName == "Boris");
+    }
+
+    [Fact]
+    public async Task SaveAndGetCashFeatures_RoundTripsFlags()
+    {
+        await _service.InitializeAsync();
+        var features = new CashFeatures
+        {
+            Flags = new Dictionary<string, bool>
+            {
+                [CashFeatureCodes.Returns] = false,
+                [CashFeatureCodes.ParkedSales] = true
+            }
+        };
+        await _service.SaveCashFeaturesAsync(features);
+
+        var result = await _service.GetCashFeaturesAsync();
+
+        Assert.False(result.IsEnabled(CashFeatureCodes.Returns));
+        Assert.True(result.IsEnabled(CashFeatureCodes.ParkedSales));
+        // Never stored for this register -> reads as enabled, same as an unknown code always does.
+        Assert.True(result.IsEnabled(CashFeatureCodes.MixedPayment));
+    }
+
+    [Fact]
+    public async Task GetCashFeaturesAsync_NothingCached_ReturnsAllEnabledDefault()
+    {
+        // A register that has never synced must be fully functional, not locked down.
+        await _service.InitializeAsync();
+
+        var result = await _service.GetCashFeaturesAsync();
+
+        Assert.Empty(result.Flags);
+        Assert.True(result.IsEnabled(CashFeatureCodes.Returns));
+        Assert.True(result.IsEnabled(CashFeatureCodes.ParkedSales));
+    }
+
+    [Fact]
+    public async Task GetCashFeaturesAsync_CorruptCache_ReturnsAllEnabledDefaultRatherThanThrowing()
+    {
+        // A register must still open when its cache is damaged, e.g. by a crash mid-write.
+        await _service.InitializeAsync();
+
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = @"
+                INSERT INTO Settings (Key, Value) VALUES ('CashFeatures', 'not valid json')
+                ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value;
+            ";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var result = await _service.GetCashFeaturesAsync();
+
+        Assert.Empty(result.Flags);
+        Assert.True(result.IsEnabled(CashFeatureCodes.Returns));
     }
 }

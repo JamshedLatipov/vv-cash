@@ -123,6 +123,7 @@
   "Products": "Products",
   "StartShiftAction": "START SHIFT",
   "ExitApplication": "EXIT APPLICATION",
+  "SignOutAction": "SIGN OUT",
   "OK": "OK",
   "SyncData": "Sync Data",
   "Discount": "Discount",
@@ -155,6 +156,7 @@
   "Next": "Next",
   "ReturnOpenDrawerSetting": "Open cash drawer on return",
   "ReturnPrintReceiptSetting": "Print return receipt",
+  "ManagedInAdminHint": "Set in the admin panel, in the cash register settings",
   "Categories": "Categories",
   "Pay": "Pay",
   "Coupon": "Coupon",
@@ -185,5 +187,6 @@
   "PinMismatch": "PINs did not match",
   "SellerPinSetupOffline": "No connection — set the PIN later",
   "PinTooWeak": "PIN is too simple — try another",
-  "SessionRevokedBanner": "Shift session is no longer valid. Receipts are being saved — sign in again after this customer."
+  "SessionRevokedBanner": "Shift session is no longer valid. Receipts are being saved — sign in again after this customer.",
+  "SessionExpiredSignInAgain": "Your session has expired. Please sign in again."
 }

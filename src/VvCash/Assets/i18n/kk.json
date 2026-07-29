@@ -123,6 +123,7 @@
   "Products": "Тауарлар",
   "StartShiftAction": "АУЫСЫМДЫ БАСТАУ",
   "ExitApplication": "ҚОЛДАНБАДАН ШЫҒУ",
+  "SignOutAction": "ЖҮЙЕДЕН ШЫҒУ",
   "OK": "ОК",
   "SyncData": "Синхрондау",
   "Discount": "Жеңілдік",
@@ -155,6 +156,7 @@
   "Next": "Келесі",
   "ReturnOpenDrawerSetting": "Қайтару кезінде кассаны ашу",
   "ReturnPrintReceiptSetting": "Қайтару чегін басу",
+  "ManagedInAdminHint": "Әкімшілік панелінде, касса параметрлерінде белгіленеді",
   "Categories": "Санаттар",
   "Pay": "Төлеу",
   "Coupon": "Купон",
@@ -185,5 +187,6 @@
   "PinMismatch": "PIN сәйкес келмеді",
   "SellerPinSetupOffline": "Байланыс жоқ — PIN-ді кейінірек орнатыңыз",
   "PinTooWeak": "PIN тым қарапайым — басқасын байқаңыз",
-  "SessionRevokedBanner": "Ауысым сеансы жарамсыз. Чектер сақталуда — ағымдағы клиенттен кейін қайта кіріңіз."
+  "SessionRevokedBanner": "Ауысым сеансы жарамсыз. Чектер сақталуда — ағымдағы клиенттен кейін қайта кіріңіз.",
+  "SessionExpiredSignInAgain": "Сеанстың мерзімі аяқталды. Қайта кіріңіз."
 }

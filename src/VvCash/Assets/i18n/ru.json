@@ -102,6 +102,7 @@
   "Products": "Товары",
   "StartShiftAction": "НАЧАТЬ СМЕНУ",
   "ExitApplication": "ВЫЙТИ ИЗ ПРИЛОЖЕНИЯ",
+  "SignOutAction": "ВЫЙТИ ИЗ АККАУНТА",
   "OK": "ОК",
   "SyncData": "Синхронизация",
   "Discount": "Скидка",
@@ -134,6 +135,7 @@
   "Next": "Вперёд",
   "ReturnOpenDrawerSetting": "Открывать денежный ящик при возврате",
   "ReturnPrintReceiptSetting": "Печатать чек возврата",
+  "ManagedInAdminHint": "Задаётся в админке, в настройках кассы",
   "Categories": "Категории",
   "Pay": "Оплатить",
   "Coupon": "Купон",
@@ -164,5 +166,6 @@
   "PinMismatch": "PIN не совпал",
   "SellerPinSetupOffline": "Нет связи — задайте PIN позже",
   "PinTooWeak": "Слишком простой PIN — попробуйте другой",
-  "SessionRevokedBanner": "Сессия смены недействительна. Чеки сохраняются, войдите заново после текущего клиента."
+  "SessionRevokedBanner": "Сессия смены недействительна. Чеки сохраняются, войдите заново после текущего клиента.",
+  "SessionExpiredSignInAgain": "Сессия истекла. Пожалуйста, войдите снова."
 }
