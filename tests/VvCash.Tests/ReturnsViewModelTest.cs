@@ -37,6 +37,7 @@ public class ReturnsViewModelTest
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d) { Receipt++; return Task.FromResult(true); }
+        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber) => Task.FromResult(true);
     }
 
     private sealed class FakeSettings : ISettingsService

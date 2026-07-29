@@ -50,4 +50,21 @@ public class MockPrinterService : IPrinterService
         Console.WriteLine("===============");
         return Task.FromResult(true);
     }
+
+    public Task<bool> PrintExchangeReceiptAsync(
+        IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
+        IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
+        decimal difference, string documentNumber)
+    {
+        Console.WriteLine($"=== EXCHANGE #{documentNumber} ===");
+        Console.WriteLine("RETURNED:");
+        foreach (var l in returned)
+            Console.WriteLine($"  {l.Name} x{l.Quantity}  {l.LineRefund:F2}");
+        Console.WriteLine("ISSUED:");
+        foreach (var l in issued)
+            Console.WriteLine($"  {l.Name} x{l.Quantity}  {l.LineRefund:F2}");
+        Console.WriteLine(difference > 0 ? $"AMOUNT DUE: {difference:F2}" : $"REFUND: {-difference:F2}");
+        Console.WriteLine("===============");
+        return Task.FromResult(true);
+    }
 }
