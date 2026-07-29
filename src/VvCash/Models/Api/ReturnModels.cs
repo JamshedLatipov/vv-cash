@@ -40,6 +40,14 @@ public class ReturnDetailBody
 {
     [JsonPropertyName("id")] public string Id { get; set; } = string.Empty;
     [JsonPropertyName("details")] public List<ReturnDetailLine> Details { get; set; } = new();
+
+    /// <summary>Whether this receipt is still inside the store's exchange window.
+    /// Sent by the server so the cashier learns about an expired receipt when
+    /// opening it, not after building the cart.</summary>
+    [JsonPropertyName("exchange_allowed")] public bool ExchangeAllowed { get; set; } = true;
+
+    /// <summary>Whole days left, 0 once expired, -1 when the store set no limit.</summary>
+    [JsonPropertyName("exchange_days_left")] public int ExchangeDaysLeft { get; set; } = -1;
 }
 
 public class ReturnDetailLine
