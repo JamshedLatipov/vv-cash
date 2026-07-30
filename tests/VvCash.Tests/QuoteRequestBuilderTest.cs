@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json;
 using VvCash.Models;
 using VvCash.Services;
 using Xunit;
@@ -37,5 +38,23 @@ public class QuoteRequestBuilderTest
 
         Assert.Null(req.CardIdentifier);
         Assert.Null(req.Code);
+    }
+
+    [Fact]
+    public void Build_BlankWarehouseBecomesNull()
+    {
+        var req = QuoteRequestBuilder.Build(Cart(), null, null, null);
+
+        Assert.Null(req.WarehouseId);
+    }
+
+    [Fact]
+    public void Build_OmitsWarehouseFromTheWireWhenUnknown()
+    {
+        // The register has no warehouse id to send; the server resolves it from the cash
+        // token. Sending "warehouse_id": "" instead would be a valid-looking empty value.
+        var json = JsonSerializer.Serialize(QuoteRequestBuilder.Build(Cart(), null, null, null));
+
+        Assert.DoesNotContain("warehouse_id", json);
     }
 }

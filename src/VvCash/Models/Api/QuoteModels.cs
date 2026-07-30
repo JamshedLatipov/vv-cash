@@ -6,7 +6,12 @@ namespace VvCash.Models.Api;
 
 public class QuoteRequest
 {
-    [JsonPropertyName("warehouse_id")] public string WarehouseId { get; set; } = string.Empty;
+    /// <summary>Optional. The register does not know which warehouse its cash stocks
+    /// from — nothing the server sends it carries a warehouse id — so it omits this and
+    /// the server resolves the warehouse from the Cash-Authorization token instead.</summary>
+    [JsonPropertyName("warehouse_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WarehouseId { get; set; }
 
     [JsonPropertyName("card_identifier")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

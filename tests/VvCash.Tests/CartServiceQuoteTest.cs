@@ -215,4 +215,62 @@ public class CartServiceQuoteTest
 
         Assert.Equal("card-42", c.AppliedDiscountName);
     }
+
+    // ── line prices come from the quote ──────────────────────────────────────────
+    // The server prices the cart from the warehouse catalog and ignores the unit price
+    // the register sends, so a register whose product cache has gone stale must show
+    // and charge the server's price, not its own.
+
+    private static QuoteResult QuoteWithLine(string productId, decimal unitPrice, decimal discountTotal = 0m) => new()
+    {
+        QuoteId = "q1",
+        DiscountTotal = discountTotal,
+        Lines = { new QuoteLineResult { ProductId = productId, UnitPrice = unitPrice } },
+    };
+
+    [Fact]
+    public void ApplyQuote_PricesLinesAtTheServersUnitPrice()
+    {
+        var c = CartWith(100m, 2); // register's cached price: 100 × 2 = 200
+        c.ApplyQuote(QuoteWithLine("p1", 90m));
+
+        Assert.Equal(90m, c.Items[0].UnitPrice);
+        Assert.Equal(180m, c.Items[0].LineTotal);
+        Assert.Equal(180m, c.Subtotal);
+    }
+
+    [Fact]
+    public void QuotedLine_FollowsAQuantityChange()
+    {
+        // The requote is debounced, so between a +1 tap and the new quote arriving the
+        // line must still read qty × the server's unit price — not the previous line total.
+        var c = CartWith(100m, 2);
+        c.ApplyQuote(QuoteWithLine("p1", 90m));
+
+        c.IncreaseQuantity(c.Items[0]);
+
+        Assert.Equal(270m, c.Items[0].LineTotal);
+    }
+
+    [Fact]
+    public void ApplyQuote_LeavesLinesTheServerDidNotPrice_OnTheirCachedPrice()
+    {
+        var c = CartWith(100m, 1);
+        c.AddProduct(new Product { Id = "p2", Name = "Y", Price = 50m });
+        c.ApplyQuote(QuoteWithLine("p1", 90m));
+
+        Assert.Equal(90m, c.Items[0].UnitPrice);
+        Assert.Equal(50m, c.Items[1].UnitPrice);
+    }
+
+    [Fact]
+    public void ClearQuote_RestoresTheCachedPrice()
+    {
+        var c = CartWith(100m, 2);
+        c.ApplyQuote(QuoteWithLine("p1", 90m));
+        c.ClearQuote();
+
+        Assert.Equal(100m, c.Items[0].UnitPrice);
+        Assert.Equal(200m, c.Subtotal);
+    }
 }
