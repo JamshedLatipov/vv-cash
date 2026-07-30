@@ -1414,7 +1414,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private ParkedSaleSnapshot BuildSnapshot(string? label) => new()
     {
         Items = _cartService.Items
-            .Select(i => new ParkedCartItem { Product = i.Product, Quantity = i.Quantity })
+            .Select(i => new ParkedCartItem
+            {
+                Product = i.Product,
+                Quantity = i.Quantity,
+                QuantityInUnit = i.QuantityInUnit,
+                EnteredInUnit = i.EnteredInUnit,
+            })
             .ToList(),
         ManualDiscountPercent = _cartService.ManualDiscountPercent,
         ManualDiscountAmount = _cartService.ManualDiscountAmount,
@@ -1609,7 +1615,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _sellerSession.Touch();
 
         var items = snapshot.Items
-            .Select(i => new CartItem { Product = i.Product, Quantity = i.Quantity })
+            .Select(i => new CartItem
+            {
+                Product = i.Product,
+                Quantity = i.Quantity,
+                QuantityInUnit = i.QuantityInUnit,
+                EnteredInUnit = i.EnteredInUnit,
+            })
             .ToList();
 
         // Set the customer before LoadSnapshot so the CartChanged cascade sees

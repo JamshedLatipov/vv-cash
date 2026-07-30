@@ -30,4 +30,10 @@ public class ParkedCartItem
 {
     public Product Product { get; set; } = null!;
     public decimal Quantity { get; set; }
+
+    /// <summary>Unit entry carried across park and unpark. A line parked in m²
+    /// must come back in m²: restoring it in pieces would silently change what
+    /// the cashier sees when the sale resumes.</summary>
+    public decimal QuantityInUnit { get; set; }
+    public bool EnteredInUnit { get; set; }
 }
