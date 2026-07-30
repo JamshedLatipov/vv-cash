@@ -446,6 +446,15 @@
                                                         </Border>
                                                     </StackPanel>
                                                     <TextBlock Text="{Binding Product.Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource Slate400Brush}" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock IsVisible="{Binding Product.HasSecondaryUnit}"
+                                                               FontSize="12" Foreground="{StaticResource Slate500Brush}">
+                                                        <TextBlock.Text>
+                                                            <MultiBinding StringFormat="{}{0} {1}">
+                                                                <Binding Path="QuantityInUnitDisplay"/>
+                                                                <Binding Path="Product.UnitShortName"/>
+                                                            </MultiBinding>
+                                                        </TextBlock.Text>
+                                                    </TextBlock>
                                                 </StackPanel>
 
                                                 <!-- qty stepper -->
@@ -453,7 +462,12 @@
                                                     <Button Classes="QtyButton" Width="30" Height="30" FontSize="16" CornerRadius="8"
                                                             Command="{Binding DataContext.DecreaseQuantityCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding}" Content="-"/>
-                                                    <TextBlock Text="{Binding QuantityDisplay}" Width="26" TextAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="15"/>
+                                                    <Button Classes="QtyButton" MinWidth="26" Height="30" Padding="4,0" CornerRadius="8"
+                                                            Command="{Binding DataContext.OpenQuantityPadCommand, ElementName=RootWindow}"
+                                                            CommandParameter="{Binding}">
+                                                        <TextBlock Text="{Binding QuantityDisplay}" TextAlignment="Center" VerticalAlignment="Center"
+                                                                   Foreground="{StaticResource Slate900Brush}" FontWeight="Bold" FontSize="15"/>
+                                                    </Button>
                                                     <Button Classes="QtyButton" Width="30" Height="30" FontSize="16" CornerRadius="8"
                                                             Command="{Binding DataContext.IncreaseQuantityCommand, ElementName=RootWindow}"
                                                             CommandParameter="{Binding}" Content="+"/>
@@ -713,6 +727,106 @@
                         <Button Grid.Column="1" Classes="PrimaryButton"
                                 Content="{Binding [Apply], Source={x:Static services:I18nService.Instance}}"
                                 Command="{Binding ApplyManualDiscountCommand}"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="56" FontSize="18" Margin="8,0,0,0"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Quantity Pad Modal -->
+        <Border Grid.RowSpan="3" Background="#990f172a"
+                IsVisible="{Binding IsQuantityPadVisible}"
+                ZIndex="2000">
+            <Border Background="White"
+                    CornerRadius="24"
+                    Padding="32"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="480"
+                    BoxShadow="0 20 40 0 #40000000">
+                <StackPanel Spacing="20">
+                    <!-- Header: product name and the price in the unit being typed -->
+                    <Grid>
+                        <StackPanel Spacing="4" HorizontalAlignment="Center">
+                            <TextBlock Text="{Binding QuantityPad.Item.Product.Name}"
+                                       FontSize="22" FontWeight="Black" Foreground="{StaticResource Slate900Brush}"
+                                       TextTrimming="CharacterEllipsis" MaxWidth="340" HorizontalAlignment="Center"/>
+                            <TextBlock FontSize="15" Foreground="{StaticResource Slate500Brush}" HorizontalAlignment="Center">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="{}{0:F2} / {1}">
+                                        <Binding Path="QuantityPad.PriceInSelectedUnit"/>
+                                        <Binding Path="QuantityPad.UnitLabel"/>
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </StackPanel>
+
+                        <Button HorizontalAlignment="Right" VerticalAlignment="Top" Classes="IconButton" Command="{Binding CloseQuantityPadCommand}">
+                            <material:MaterialIcon Kind="Close" Width="28" Height="28" Foreground="{StaticResource Slate600Brush}"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- Unit toggle. Absent for a piece-only product: there is
+                         nothing to switch to, and an inert control reads as broken. -->
+                    <ToggleSwitch IsVisible="{Binding QuantityPad.CanSwitchUnit}"
+                                  IsChecked="{Binding QuantityPad.EnteredInUnit, Mode=TwoWay}"
+                                  OnContent="{Binding QuantityPad.Item.Product.UnitShortName}"
+                                  OffContent="шт"
+                                  HorizontalAlignment="Center"/>
+
+                    <!-- Input display -->
+                    <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="20,14">
+                        <Grid ColumnDefinitions="*, Auto, Auto">
+                            <TextBlock Grid.Column="0" Text="{Binding QuantityPad.Input}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="1" Text="{Binding QuantityPad.UnitLabel}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" Margin="8,0,12,0"/>
+                            <Button Grid.Column="2" Classes="IconButton" Command="{Binding QuantityPadBackspaceCommand}">
+                                <material:MaterialIcon Kind="BackspaceOutline" Width="26" Height="26" Foreground="{StaticResource Slate600Brush}"/>
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <!-- Live preview. The whole reason this modal exists: on an
+                         indivisible product the amount rounds up to a whole piece,
+                         and the customer pays for the round-up. -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding QuantityPad.PreviewText}"
+                                   FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
+                                   HorizontalAlignment="Center" TextAlignment="Center"
+                                   Foreground="{StaticResource Slate700Brush}"/>
+                        <TextBlock IsVisible="{Binding QuantityPad.IsRounded}"
+                                   Text="Округлено вверх до целой штуки"
+                                   FontSize="12" HorizontalAlignment="Center"
+                                   Foreground="{StaticResource Red600Brush}"/>
+                    </StackPanel>
+
+                    <!-- Numpad -->
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*,*" ShowGridLines="False">
+                        <Button Grid.Row="0" Grid.Column="0" Classes="NumpadButton" Content="1" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="1"/>
+                        <Button Grid.Row="0" Grid.Column="1" Classes="NumpadButton" Content="2" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="2"/>
+                        <Button Grid.Row="0" Grid.Column="2" Classes="NumpadButton" Content="3" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="3"/>
+                        <Button Grid.Row="1" Grid.Column="0" Classes="NumpadButton" Content="4" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="4"/>
+                        <Button Grid.Row="1" Grid.Column="1" Classes="NumpadButton" Content="5" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="5"/>
+                        <Button Grid.Row="1" Grid.Column="2" Classes="NumpadButton" Content="6" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="6"/>
+                        <Button Grid.Row="2" Grid.Column="0" Classes="NumpadButton" Content="7" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="7"/>
+                        <Button Grid.Row="2" Grid.Column="1" Classes="NumpadButton" Content="8" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="8"/>
+                        <Button Grid.Row="2" Grid.Column="2" Classes="NumpadButton" Content="9" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="9"/>
+                        <Button Grid.Row="3" Grid.Column="0" Classes="NumpadButton" Content="C" Margin="4" Foreground="{StaticResource Red500Brush}" Command="{Binding QuantityPadClearCommand}"/>
+                        <Button Grid.Row="3" Grid.Column="1" Classes="NumpadButton" Content="0" Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="0"/>
+                        <!-- Always ".", never ",": the pad parses with InvariantCulture,
+                             and a comma would silently fail to parse and disable OK. -->
+                        <Button Grid.Row="3" Grid.Column="2" Classes="NumpadButton" Content="." Margin="4" Command="{Binding QuantityPadAppendCommand}" CommandParameter="."/>
+                    </Grid>
+
+                    <!-- Actions -->
+                    <Grid ColumnDefinitions="*, *">
+                        <Button Grid.Column="0" Classes="SecondaryButton"
+                                Content="{Binding [Cancel], Source={x:Static services:I18nService.Instance}}"
+                                Command="{Binding CloseQuantityPadCommand}"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="56" FontSize="18" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Classes="PrimaryButton"
+                                Content="{Binding [Apply], Source={x:Static services:I18nService.Instance}}"
+                                Command="{Binding ConfirmQuantityPadCommand}"
+                                IsEnabled="{Binding QuantityPad.IsValid}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="56" FontSize="18" Margin="8,0,0,0"/>
                     </Grid>
                 </StackPanel>

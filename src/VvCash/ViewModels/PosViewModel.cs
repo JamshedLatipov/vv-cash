@@ -190,6 +190,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     partial void OnIsViewingCategoriesChanged(bool value)
         => OnPropertyChanged(nameof(ShowCatalogEmptyState));
 
+    // Quantity pad — the only place a line's exact amount can be entered, and
+    // the only place a secondary unit can be chosen.
+    [ObservableProperty] private bool _isQuantityPadVisible = false;
+    [ObservableProperty] private QuantityPadViewModel? _quantityPad;
+
     // Manual Discount Properties
     [ObservableProperty] private bool _isDiscountModalVisible = false;
     [ObservableProperty] private string _discountInputValue = string.Empty;
@@ -1266,6 +1271,36 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         IsDiscountModalVisible = false;
     }
+
+    [RelayCommand]
+    private void OpenQuantityPad(CartItem item)
+    {
+        QuantityPad = new QuantityPadViewModel(item);
+        IsQuantityPadVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseQuantityPad()
+    {
+        IsQuantityPadVisible = false;
+        QuantityPad = null;
+    }
+
+    [RelayCommand]
+    private void ConfirmQuantityPad()
+    {
+        QuantityPad?.Commit(_cartService);
+        CloseQuantityPad();
+    }
+
+    [RelayCommand]
+    private void QuantityPadAppend(string digit) => QuantityPad?.Append(digit);
+
+    [RelayCommand]
+    private void QuantityPadBackspace() => QuantityPad?.Backspace();
+
+    [RelayCommand]
+    private void QuantityPadClear() => QuantityPad?.Clear();
 
     [RelayCommand]
     private void AppendDiscountInput(string value)

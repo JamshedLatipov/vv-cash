@@ -36,6 +36,15 @@
                                     <StackPanel Grid.Column="0" Spacing="4">
                                         <TextBlock Text="{Binding Product.Name}" FontSize="22" FontWeight="SemiBold" Foreground="White"/>
                                         <TextBlock Text="{Binding Quantity, StringFormat='Qty: {0}'}" FontSize="16" Foreground="#a0a0b8"/>
+                                        <TextBlock IsVisible="{Binding Product.HasSecondaryUnit}"
+                                                   FontSize="16" Foreground="#a0a0b8">
+                                            <TextBlock.Text>
+                                                <MultiBinding StringFormat="{}{0} {1}">
+                                                    <Binding Path="QuantityInUnitDisplay"/>
+                                                    <Binding Path="Product.UnitShortName"/>
+                                                </MultiBinding>
+                                            </TextBlock.Text>
+                                        </TextBlock>
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding LineTotal, StringFormat='{}{0:F2}'}"
                                                FontSize="24" FontWeight="Bold" Foreground="#0075e2"
