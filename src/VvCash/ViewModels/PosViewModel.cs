@@ -1686,7 +1686,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 // stale cached price would flag every honest sale.
                                 SellPrice = item.UnitPrice,
                                 PriceBeforeDiscount = before,
-                                DiscountPercent = pct
+                                DiscountPercent = pct,
+                                // All three or none: the server rejects a partial trio.
+                                UnitId = item.Product.HasSecondaryUnit ? item.Product.UnitId : null,
+                                UnitFactor = item.Product.HasSecondaryUnit ? item.Product.UnitFactor : null,
+                                QuantityInUnit = item.Product.HasSecondaryUnit ? item.QuantityInUnit : null,
                             };
                         }).ToList()
                     };
