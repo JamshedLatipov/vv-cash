@@ -217,4 +217,42 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.Empty(result.Flags);
         Assert.True(result.IsEnabled(CashFeatureCodes.Returns));
     }
+
+    [Fact]
+    public async Task SaveProductsAsync_RoundTripsTheSecondaryUnit()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product
+            {
+                Id = "p1", Name = "Плитка", Price = 100m,
+                UnitId = "u-1", UnitCode = "m2", UnitShortName = "м²",
+                UnitFactor = 0.24m, IsDivisible = false, SellInSecondaryUnit = true,
+            },
+        });
+
+        var product = Assert.Single(await _service.GetAllProductsAsync());
+        Assert.Equal("u-1", product.UnitId);
+        Assert.Equal("m2", product.UnitCode);
+        Assert.Equal("м²", product.UnitShortName);
+        Assert.Equal(0.24m, product.UnitFactor);
+        Assert.False(product.IsDivisible);
+        Assert.True(product.SellInSecondaryUnit);
+    }
+
+    [Fact]
+    public async Task SaveProductsAsync_RoundTripsAPieceOnlyProduct()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product { Id = "p2", Name = "Товар", Price = 10m },
+        });
+
+        var product = Assert.Single(await _service.GetAllProductsAsync());
+        Assert.Equal(string.Empty, product.UnitId);
+        Assert.Equal(0m, product.UnitFactor);
+        Assert.False(product.HasSecondaryUnit);
+    }
 }

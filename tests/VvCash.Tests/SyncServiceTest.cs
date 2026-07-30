@@ -374,4 +374,57 @@ public class SyncServiceTest
         Assert.Empty(storage.SavedCashFeatures!.Flags);
         Assert.True(storage.SavedCashFeatures.IsEnabled(CashFeatureCodes.Returns));
     }
+
+    [Fact]
+    public async Task SyncProductsAsync_ParsesUnitFields()
+    {
+        // The register converts m2 to pieces with no server to ask, so the whole
+        // unit has to arrive during sync. unit_id especially: the document
+        // validator matches it against the product's own unit.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[1],"status":0}""");
+            if (url.Contains("product/update/1/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[{"id":"p1","name":"Плитка","sell_price":100,"unit_id":"u-1","unit_code":"m2","unit_short_name":"м²","unit_factor":0.24,"is_divisible":false,"sell_in_secondary_unit":true}],"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        var product = Assert.Single(storage.SavedProducts);
+        Assert.Equal("u-1", product.UnitId);
+        Assert.Equal("m2", product.UnitCode);
+        Assert.Equal("м²", product.UnitShortName);
+        Assert.Equal(0.24m, product.UnitFactor);
+        Assert.False(product.IsDivisible);
+        Assert.True(product.SellInSecondaryUnit);
+        Assert.True(product.HasSecondaryUnit);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_TreatsAMissingUnitAsPieceOnly()
+    {
+        // Most products have no secondary unit, and a backend older than the
+        // units module sends none of these keys at all. Neither may break sync.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[1],"status":0}""");
+            if (url.Contains("product/update/1/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[{"id":"p1","name":"Товар","sell_price":10}],"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        var product = Assert.Single(storage.SavedProducts);
+        Assert.Equal(string.Empty, product.UnitId);
+        Assert.Equal(0m, product.UnitFactor);
+        Assert.False(product.HasSecondaryUnit);
+    }
 }

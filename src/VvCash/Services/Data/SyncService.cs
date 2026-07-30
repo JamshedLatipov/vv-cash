@@ -209,6 +209,38 @@ public class SyncService : ISyncService
                                                             }
                                                         }
 
+                                                        // Secondary unit. Every key is optional: a piece-only product
+                                                        // carries none of them, and a backend older than the units
+                                                        // module sends none at all. Both read as "sold by the piece".
+                                                        var unitId = string.Empty;
+                                                        var unitCode = string.Empty;
+                                                        var unitShortName = string.Empty;
+                                                        var unitFactor = 0m;
+                                                        var isDivisible = false;
+                                                        var sellInSecondaryUnit = false;
+
+                                                        if (item.TryGetProperty("unit_id", out var unitIdElem) && unitIdElem.ValueKind == JsonValueKind.String)
+                                                            unitId = unitIdElem.GetString() ?? string.Empty;
+
+                                                        if (item.TryGetProperty("unit_code", out var unitCodeElem) && unitCodeElem.ValueKind == JsonValueKind.String)
+                                                            unitCode = unitCodeElem.GetString() ?? string.Empty;
+
+                                                        if (item.TryGetProperty("unit_short_name", out var unitShortElem) && unitShortElem.ValueKind == JsonValueKind.String)
+                                                            unitShortName = unitShortElem.GetString() ?? string.Empty;
+
+                                                        // GetDecimal, not GetDouble: the factor ends up in the snapshot
+                                                        // the server re-checks against its tolerance.
+                                                        if (item.TryGetProperty("unit_factor", out var unitFactorElem) && unitFactorElem.ValueKind == JsonValueKind.Number)
+                                                            unitFactor = unitFactorElem.GetDecimal();
+
+                                                        if (item.TryGetProperty("is_divisible", out var divisibleElem) &&
+                                                            (divisibleElem.ValueKind == JsonValueKind.True || divisibleElem.ValueKind == JsonValueKind.False))
+                                                            isDivisible = divisibleElem.GetBoolean();
+
+                                                        if (item.TryGetProperty("sell_in_secondary_unit", out var sellInUnitElem) &&
+                                                            (sellInUnitElem.ValueKind == JsonValueKind.True || sellInUnitElem.ValueKind == JsonValueKind.False))
+                                                            sellInSecondaryUnit = sellInUnitElem.GetBoolean();
+
                                                         Console.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
                                                         updatedProducts.Add(new Product
                                                         {
@@ -219,7 +251,13 @@ public class SyncService : ISyncService
                                                             Price = productPrice,
                                                             Barcode = barcode,
                                                             ImagePath = imagePath,
-                                                            TagIds = tagIds
+                                                            TagIds = tagIds,
+                                                            UnitId = unitId,
+                                                            UnitCode = unitCode,
+                                                            UnitShortName = unitShortName,
+                                                            UnitFactor = unitFactor,
+                                                            IsDivisible = isDivisible,
+                                                            SellInSecondaryUnit = sellInSecondaryUnit
                                                         });
                                                     }
                                                     catch (Exception ex)

@@ -84,6 +84,30 @@ public class DocumentProduct
 
     [JsonPropertyName("discount_percent")]
     public decimal DiscountPercent { get; set; }
+
+    /// <summary>Unit snapshot: which unit the operator typed in, the factor in
+    /// force at the till, and what the line came to in that unit. The server
+    /// takes all three or none and rejects a partial trio, so these are set
+    /// together or left null together.
+    ///
+    /// <see cref="Quantity"/> stays in pieces regardless — the trio records how
+    /// the amount was entered, not what was sold.
+    ///
+    /// The factor sent is the one this register synced, not one recomputed at
+    /// sale time: the register may have been offline when the card changed, its
+    /// receipt is already printed, and the server trusts a cash sale's own
+    /// factor for exactly that reason.</summary>
+    [JsonPropertyName("unit_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? UnitId { get; set; }
+
+    [JsonPropertyName("unit_factor")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? UnitFactor { get; set; }
+
+    [JsonPropertyName("quantity_in_unit")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? QuantityInUnit { get; set; }
 }
 
 /// <summary>What became of a sale posted to documents/expense/create/.

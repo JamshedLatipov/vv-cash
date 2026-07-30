@@ -117,10 +117,21 @@ public class CartService : ICartService
         if (existing != null)
         {
             existing.Quantity++;
+            SyncUnitAmount(existing);
         }
         else
         {
-            _items.Add(new CartItem { Product = product, Quantity = 1 });
+            var item = new CartItem
+            {
+                Product = product,
+                Quantity = 1,
+                // A tap adds one piece; the quantity pad is where the cashier
+                // states the real amount. The entry mode comes from the product
+                // card so tiles open in m² and rolls in pieces.
+                EnteredInUnit = product.SellInSecondaryUnit && product.HasSecondaryUnit,
+            };
+            SyncUnitAmount(item);
+            _items.Add(item);
         }
         RaiseCartChanged();
     }
@@ -131,9 +142,12 @@ public class CartService : ICartService
         RaiseCartChanged();
     }
 
+    /// <summary>Steps by one piece regardless of the entry unit: "+" on a tile
+    /// adds a tile, not a square metre. Nobody sells a loose square metre.</summary>
     public void IncreaseQuantity(CartItem item)
     {
         item.Quantity++;
+        SyncUnitAmount(item);
         RaiseCartChanged();
     }
 
@@ -142,6 +156,7 @@ public class CartService : ICartService
         if (item.Quantity > 1m)
         {
             item.Quantity--;
+            SyncUnitAmount(item);
             RaiseCartChanged();
         }
         else
@@ -150,9 +165,10 @@ public class CartService : ICartService
         }
     }
 
-    /// <summary>Sets an exact quantity — the entry point for weighted goods, where
-    /// the amount comes from a scale rather than from +/- taps. A non-positive
-    /// quantity removes the line, matching what DecreaseQuantity does at zero.</summary>
+    /// <summary>Sets an exact quantity in pieces — the entry point for weighted
+    /// goods, where the amount comes from a scale rather than from +/- taps. A
+    /// non-positive quantity removes the line, matching what DecreaseQuantity
+    /// does at zero.</summary>
     public void SetQuantity(CartItem item, decimal quantity)
     {
         if (quantity <= 0m)
@@ -161,7 +177,44 @@ public class CartService : ICartService
             return;
         }
         item.Quantity = quantity;
+        SyncUnitAmount(item);
         RaiseCartChanged();
+    }
+
+    /// <summary>Sets the line from an amount in the product's secondary unit —
+    /// "12.5 m² of tile" rather than "53 tiles".
+    ///
+    /// A piece-only product is left alone: there is no factor to convert with,
+    /// and inventing one would bill a quantity nobody entered.</summary>
+    public void SetQuantityInUnit(CartItem item, decimal amountInUnit)
+    {
+        if (!item.Product.HasSecondaryUnit) return;
+
+        if (amountInUnit <= 0m)
+        {
+            // RemoveItem raises CartChanged itself; raising again here would
+            // re-price the cart twice per keystroke.
+            RemoveItem(item);
+            return;
+        }
+
+        var (quantity, quantityInUnit) = UnitConverter.ToBase(
+            amountInUnit, item.Product.UnitFactor, item.Product.IsDivisible);
+
+        item.Quantity = quantity;
+        item.QuantityInUnit = quantityInUnit;
+        RaiseCartChanged();
+    }
+
+    /// <summary>Brings the unit amount back in line after the piece count moved
+    /// on its own — a +/- tap, or a quantity set in pieces. Only ever called
+    /// where pieces are authoritative, so recomputing is exactly right; a line
+    /// set from a unit amount keeps the figure the cashier typed instead.</summary>
+    private static void SyncUnitAmount(CartItem item)
+    {
+        item.QuantityInUnit = item.Product.HasSecondaryUnit
+            ? UnitConverter.ToUnit(item.Quantity, item.Product.UnitFactor)
+            : 0m;
     }
 
     public void ClearCart()

@@ -190,6 +190,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     partial void OnIsViewingCategoriesChanged(bool value)
         => OnPropertyChanged(nameof(ShowCatalogEmptyState));
 
+    // Quantity pad — the only place a line's exact amount can be entered, and
+    // the only place a secondary unit can be chosen.
+    [ObservableProperty] private bool _isQuantityPadVisible = false;
+    [ObservableProperty] private QuantityPadViewModel? _quantityPad;
+
     // Manual Discount Properties
     [ObservableProperty] private bool _isDiscountModalVisible = false;
     [ObservableProperty] private string _discountInputValue = string.Empty;
@@ -1268,6 +1273,36 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
+    private void OpenQuantityPad(CartItem item)
+    {
+        QuantityPad = new QuantityPadViewModel(item);
+        IsQuantityPadVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseQuantityPad()
+    {
+        IsQuantityPadVisible = false;
+        QuantityPad = null;
+    }
+
+    [RelayCommand]
+    private void ConfirmQuantityPad()
+    {
+        QuantityPad?.Commit(_cartService);
+        CloseQuantityPad();
+    }
+
+    [RelayCommand]
+    private void QuantityPadAppend(string digit) => QuantityPad?.Append(digit);
+
+    [RelayCommand]
+    private void QuantityPadBackspace() => QuantityPad?.Backspace();
+
+    [RelayCommand]
+    private void QuantityPadClear() => QuantityPad?.Clear();
+
+    [RelayCommand]
     private void AppendDiscountInput(string value)
     {
         if (value == "BACKSPACE")
@@ -1414,7 +1449,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private ParkedSaleSnapshot BuildSnapshot(string? label) => new()
     {
         Items = _cartService.Items
-            .Select(i => new ParkedCartItem { Product = i.Product, Quantity = i.Quantity })
+            .Select(i => new ParkedCartItem
+            {
+                Product = i.Product,
+                Quantity = i.Quantity,
+                QuantityInUnit = i.QuantityInUnit,
+                EnteredInUnit = i.EnteredInUnit,
+            })
             .ToList(),
         ManualDiscountPercent = _cartService.ManualDiscountPercent,
         ManualDiscountAmount = _cartService.ManualDiscountAmount,
@@ -1609,7 +1650,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _sellerSession.Touch();
 
         var items = snapshot.Items
-            .Select(i => new CartItem { Product = i.Product, Quantity = i.Quantity })
+            .Select(i => new CartItem
+            {
+                Product = i.Product,
+                Quantity = i.Quantity,
+                QuantityInUnit = i.QuantityInUnit,
+                EnteredInUnit = i.EnteredInUnit,
+            })
             .ToList();
 
         // Set the customer before LoadSnapshot so the CartChanged cascade sees
@@ -1686,7 +1733,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 // stale cached price would flag every honest sale.
                                 SellPrice = item.UnitPrice,
                                 PriceBeforeDiscount = before,
-                                DiscountPercent = pct
+                                DiscountPercent = pct,
+                                // All three or none: the server rejects a partial trio.
+                                UnitId = item.Product.HasSecondaryUnit ? item.Product.UnitId : null,
+                                UnitFactor = item.Product.HasSecondaryUnit ? item.Product.UnitFactor : null,
+                                QuantityInUnit = item.Product.HasSecondaryUnit ? item.QuantityInUnit : null,
                             };
                         }).ToList()
                     };
