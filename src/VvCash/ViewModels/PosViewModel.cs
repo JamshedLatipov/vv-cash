@@ -622,6 +622,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
         IsDiscountEnabled = features.IsEnabled(CashFeatureCodes.Discount);
         IsCouponsEnabled = features.IsEnabled(CashFeatureCodes.Coupons);
+
+        // These two read the map live instead of being snapshotted into a field, so
+        // nothing else would tell the view they just changed. Without this the
+        // constructor's optimistic pass — where an unconfigured code reads as
+        // enabled — is the only value the screen ever binds, and a store with
+        // cash_exchange_enabled off shows the button for the whole session.
+        OnPropertyChanged(nameof(IsExchangeVisible));
+        OnPropertyChanged(nameof(IsExchangeEnabled));
     }
 
 

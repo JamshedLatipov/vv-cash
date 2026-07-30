@@ -1925,6 +1925,35 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
+    public void IsExchangeVisible_FlagArrivesDisabled_HidesTheButtonOnTheOpenScreen()
+    {
+        // The flag map lands after the screen is already up (see ApplyFeatures'
+        // remarks), and until it does an unconfigured code reads as enabled — so this
+        // is the normal path for a store that switched exchanges off, not an edge
+        // case. IsExchangeVisible is computed live from the map, which means only an
+        // explicit notification can move the binding: without one the button stays on
+        // screen for the whole session, and no cashier is going to restart the
+        // register to find out.
+        var pending = new TaskCompletionSource<bool>();
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.PendingRefresh = pending;
+            d.Features.SetAfterRefresh(CashFeatureCodes.Exchange, false);
+        });
+        Assert.True(vm.IsExchangeVisible); // the optimistic default; the real value hasn't landed
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (s, e) => raised.Add(e.PropertyName);
+
+        pending.SetResult(true); // the register's storage becomes ready and the fetch resolves
+
+        Assert.False(vm.IsExchangeVisible);
+        Assert.False(vm.IsExchangeEnabled);
+        Assert.Contains(nameof(vm.IsExchangeVisible), raised);
+        Assert.Contains(nameof(vm.IsExchangeEnabled), raised);
+    }
+
+    [Fact]
     public void IsExchangeEnabled_FlagOnButOffline_False()
     {
         // CashFeatures.IsEnabled treats an unconfigured code as enabled, so a register
