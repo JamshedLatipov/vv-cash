@@ -86,6 +86,26 @@ public class DocumentProduct
     public decimal DiscountPercent { get; set; }
 }
 
+/// <summary>What became of a sale posted to documents/expense/create/.
+///
+/// <see cref="Queued"/> is not a failure — SyncOfflineDocumentsAsync replays it — but
+/// it is not "the server has it" either, and a screen that reports one as the other
+/// tells the cashier a document exists that nobody can find yet.</summary>
+public class ExpenseDocumentOutcome
+{
+    public bool Posted { get; init; }
+    public bool Queued { get; init; }
+
+    /// <summary>The sale's number, from the server. Empty for a queued document, which
+    /// has no number until it syncs.</summary>
+    public string DocumentNumber { get; init; } = string.Empty;
+
+    public static ExpenseDocumentOutcome Sent(string documentNumber)
+        => new() { Posted = true, DocumentNumber = documentNumber };
+
+    public static ExpenseDocumentOutcome Enqueued() => new() { Queued = true };
+}
+
 public enum SoldSourcesEnum
 {
     CASH = 1,

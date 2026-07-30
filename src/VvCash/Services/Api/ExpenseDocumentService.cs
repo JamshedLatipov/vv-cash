@@ -76,6 +76,13 @@ public class ExpenseDocumentService : IExpenseDocumentService
 
     public async Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
     {
+        var outcome = await CreateExpenseDocumentDetailedAsync(request);
+        // Unchanged contract: queued counts as success, so checkout continues offline.
+        return outcome.Posted || outcome.Queued;
+    }
+
+    public async Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
+    {
         Console.WriteLine("[ExpenseDocumentService] CreateExpenseDocumentAsync called.");
         Debug.WriteLine("[ExpenseDocumentService] CreateExpenseDocumentAsync called.");
         try
@@ -99,22 +106,37 @@ public class ExpenseDocumentService : IExpenseDocumentService
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
                 {
-                    return true;
+                    return ExpenseDocumentOutcome.Sent(ReadDocumentNumber(root));
                 }
             }
 
             // If we get here, the API returned a non-success status or the status property wasn't 0
             Console.WriteLine("[ExpenseDocumentService] Saving document offline due to API failure status.");
             await SaveOfflineAsync(request);
-            return true; // Still return true so the user can continue checkout locally
+            return ExpenseDocumentOutcome.Enqueued(); // Still a success so the user can continue checkout locally
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[ExpenseDocumentService] Error creating expense document, saving offline: {ex.Message}");
             Debug.WriteLine($"[ExpenseDocumentService] Error creating expense document, saving offline: {ex.Message}");
             await SaveOfflineAsync(request);
-            return true; // Return true to allow checkout to proceed offline
+            return ExpenseDocumentOutcome.Enqueued(); // Queued so checkout can proceed offline
         }
+    }
+
+    /// <summary>Digs the sale's number out of the success envelope
+    /// (serializers.DocumentExpenseResult). Absent on older servers, hence the empty
+    /// fallback rather than a throw — the number is only ever printed, never acted on.</summary>
+    private static string ReadDocumentNumber(JsonElement root)
+    {
+        if (root.TryGetProperty("body", out var body)
+            && body.ValueKind == JsonValueKind.Object
+            && body.TryGetProperty("document_number", out var number)
+            && number.ValueKind == JsonValueKind.String)
+        {
+            return number.GetString() ?? string.Empty;
+        }
+        return string.Empty;
     }
 
     public async Task SyncOfflineDocumentsAsync()
