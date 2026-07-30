@@ -34,8 +34,10 @@ public class ReturnLineVmTest
     [Fact]
     public void LineRefund_IsQtyTimesUnitPrice()
     {
-        var vm = Make(3, 0, 50m);
+        // 150 is the line's after_discount total for the 3 units sold, i.e. 50 a unit.
+        var vm = Make(3, 0, 150m);
         vm.ReturnQty = 2;
+        Assert.Equal(50m, vm.UnitPrice);
         Assert.Equal(100m, vm.LineRefund);
     }
 

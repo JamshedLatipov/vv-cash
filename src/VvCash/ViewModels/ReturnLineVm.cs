@@ -13,6 +13,12 @@ public partial class ReturnLineVm : ObservableObject
     public int SoldQty { get; }
     public int AlreadyReturned { get; }
     public int MaxReturnable { get; }
+
+    /// <summary>Discounted price of a single unit. The API's <c>after_discount</c>
+    /// is the discounted total of the whole sold line, so it has to be spread over
+    /// the sold quantity — exactly how the server refunds it (refundPerUnit). Read
+    /// as a unit price it would multiply a line sold in twos or threes by that
+    /// quantity again.</summary>
     public decimal UnitPrice { get; }
     public bool IsReturnable => MaxReturnable > 0;
 
@@ -43,7 +49,9 @@ public partial class ReturnLineVm : ObservableObject
         SoldQty = line.Quantity;
         AlreadyReturned = line.QuantityReturned;
         MaxReturnable = Math.Max(0, line.Quantity - line.QuantityReturned);
-        UnitPrice = line.AfterDiscount;
+        // A non-positive sold quantity is malformed data; price it at zero rather
+        // than dividing by it.
+        UnitPrice = line.Quantity > 0 ? line.AfterDiscount / line.Quantity : 0m;
     }
 
     [RelayCommand]

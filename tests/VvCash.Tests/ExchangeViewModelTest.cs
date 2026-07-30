@@ -141,6 +141,31 @@ public class ExchangeViewModelTest
     }
 
     [Fact]
+    public void ReturnedTotal_LineSoldInMultiples_CreditsOnlyTheUnitsHandedBack()
+    {
+        // after_discount is the discounted total of the whole sold line, not a unit
+        // price: 3 sold for 240 is 80 a unit, so handing one back credits 80. The
+        // server's return leg spreads the same figure over the sold quantity
+        // (refundPerUnit), so reading it as per-unit shows the cashier a refund
+        // where the server computes money owed, and difference_payment goes out wrong.
+        var line = new ReturnLineVm(new ReturnDetailLine
+        {
+            Product = new ReturnProduct { Id = "p1" },
+            Quantity = 3, QuantityReturned = 0, AfterDiscount = 240m
+        });
+        line.ReturnQty = 1;
+
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[] { line });
+        vm.AddIssuedLine(MakeIssuedLine(100m));
+
+        Assert.Equal(80m, vm.ReturnedTotal);
+        Assert.Equal(20m, vm.Difference);
+        Assert.True(vm.CustomerPays);
+        Assert.False(vm.TillPays);
+    }
+
+    [Fact]
     public void ReplacementCheaper_TillRefundsTheAbsoluteAmount()
     {
         var vm = new ExchangeViewModel();

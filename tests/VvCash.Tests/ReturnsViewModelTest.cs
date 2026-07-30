@@ -72,10 +72,12 @@ public class ReturnsViewModelTest
         {
             Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z"
         };
+        // after_discount is the whole line's discounted total, so these are 50 and 10
+        // a unit respectively — the figures the assertions below are written against.
         vm.Lines.Add(new ReturnLineVm(new ReturnDetailLine
-        { Product = new ReturnProduct { Id = "pA" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 50 }));
+        { Product = new ReturnProduct { Id = "pA" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }));
         vm.Lines.Add(new ReturnLineVm(new ReturnDetailLine
-        { Product = new ReturnProduct { Id = "pB" }, Quantity = 2, QuantityReturned = 0, AfterDiscount = 10 }));
+        { Product = new ReturnProduct { Id = "pB" }, Quantity = 2, QuantityReturned = 0, AfterDiscount = 20 }));
         return vm;
     }
 
