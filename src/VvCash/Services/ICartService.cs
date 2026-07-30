@@ -43,6 +43,7 @@ public interface ICartService
     void IncreaseQuantity(CartItem item);
     void DecreaseQuantity(CartItem item);
     void SetQuantity(CartItem item, decimal quantity);
+    void SetQuantityInUnit(CartItem item, decimal amountInUnit);
     void ClearCart();
     void ApplyCoupon(Coupon coupon);
     void RemoveCoupon(string code);

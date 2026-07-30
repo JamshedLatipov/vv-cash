@@ -149,6 +149,8 @@ public class PosViewModelSellerGateTest
             CartChanged?.Invoke(this, EventArgs.Empty);
         }
 
+        public void SetQuantityInUnit(CartItem item, decimal amountInUnit) { }
+
         public PromotionOutcome? OfflinePromotion => null;
         public string? AppliedDiscountName => null;
         public MoneyPolicy MoneyPolicy => MoneyPolicy.Default;
