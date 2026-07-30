@@ -66,7 +66,13 @@ public class OfflineStorageService : IOfflineStorageService
                 DiscountPercent REAL,
                 ImagePath TEXT,
                 Barcode TEXT,
-                Tags TEXT
+                Tags TEXT,
+                UnitId TEXT,
+                UnitCode TEXT,
+                UnitShortName TEXT,
+                UnitFactor REAL,
+                IsDivisible INTEGER,
+                SellInSecondaryUnit INTEGER
             );
 
             -- Auto-applied promotions, stored as the raw server payload: the rules
@@ -135,6 +141,27 @@ public class OfflineStorageService : IOfflineStorageService
         }
         catch { /* column already exists */ }
 
+        // Migration: add the secondary-unit columns to Products if upgrading
+        // from an older DB. One ALTER per column, because a register may be
+        // upgrading from any point in this sequence.
+        foreach (var alter in new[]
+        {
+            "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
+            "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
+            "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
+            "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
+            "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
+            "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
+        })
+        {
+            try
+            {
+                command.CommandText = alter;
+                await command.ExecuteNonQueryAsync();
+            }
+            catch { /* column already exists */ }
+        }
+
         _isInitialized = true;
     }
 
@@ -148,8 +175,10 @@ public class OfflineStorageService : IOfflineStorageService
         command.Transaction = transaction;
 
         command.CommandText = @"
-            INSERT INTO Products (Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags)
-            VALUES ($Id, $Name, $Sku, $Category, $Price, $OriginalPrice, $DiscountPercent, $ImagePath, $Barcode, $Tags)
+            INSERT INTO Products (Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags,
+                                  UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit)
+            VALUES ($Id, $Name, $Sku, $Category, $Price, $OriginalPrice, $DiscountPercent, $ImagePath, $Barcode, $Tags,
+                    $UnitId, $UnitCode, $UnitShortName, $UnitFactor, $IsDivisible, $SellInSecondaryUnit)
             ON CONFLICT(Id) DO UPDATE SET
                 Name=excluded.Name,
                 Sku=excluded.Sku,
@@ -159,7 +188,13 @@ public class OfflineStorageService : IOfflineStorageService
                 DiscountPercent=excluded.DiscountPercent,
                 ImagePath=excluded.ImagePath,
                 Barcode=excluded.Barcode,
-                Tags=excluded.Tags;
+                Tags=excluded.Tags,
+                UnitId=excluded.UnitId,
+                UnitCode=excluded.UnitCode,
+                UnitShortName=excluded.UnitShortName,
+                UnitFactor=excluded.UnitFactor,
+                IsDivisible=excluded.IsDivisible,
+                SellInSecondaryUnit=excluded.SellInSecondaryUnit;
         ";
 
         var idParam = command.Parameters.Add("$Id", SqliteType.Text);
@@ -172,6 +207,12 @@ public class OfflineStorageService : IOfflineStorageService
         var imageParam = command.Parameters.Add("$ImagePath", SqliteType.Text);
         var barcodeParam = command.Parameters.Add("$Barcode", SqliteType.Text);
         var tagsParam = command.Parameters.Add("$Tags", SqliteType.Text);
+        var unitIdParam = command.Parameters.Add("$UnitId", SqliteType.Text);
+        var unitCodeParam = command.Parameters.Add("$UnitCode", SqliteType.Text);
+        var unitShortNameParam = command.Parameters.Add("$UnitShortName", SqliteType.Text);
+        var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Real);
+        var isDivisibleParam = command.Parameters.Add("$IsDivisible", SqliteType.Integer);
+        var sellInUnitParam = command.Parameters.Add("$SellInSecondaryUnit", SqliteType.Integer);
 
         foreach (var p in products)
         {
@@ -185,6 +226,12 @@ public class OfflineStorageService : IOfflineStorageService
             imageParam.Value = p.ImagePath ?? string.Empty;
             barcodeParam.Value = p.Barcode ?? string.Empty;
             tagsParam.Value = JsonSerializer.Serialize(p.TagIds ?? new List<string>());
+            unitIdParam.Value = p.UnitId ?? string.Empty;
+            unitCodeParam.Value = p.UnitCode ?? string.Empty;
+            unitShortNameParam.Value = p.UnitShortName ?? string.Empty;
+            unitFactorParam.Value = p.UnitFactor;
+            isDivisibleParam.Value = p.IsDivisible ? 1 : 0;
+            sellInUnitParam.Value = p.SellInSecondaryUnit ? 1 : 0;
 
             await command.ExecuteNonQueryAsync();
         }
@@ -205,7 +252,15 @@ public class OfflineStorageService : IOfflineStorageService
             DiscountPercent = reader.IsDBNull(6) ? null : reader.GetDecimal(6),
             ImagePath = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
             Barcode = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
-            TagIds = ReadTags(reader, 9)
+            TagIds = ReadTags(reader, 9),
+            // Rows written before the unit migration have NULL here, so every
+            // one of these falls back rather than throwing.
+            UnitId = reader.IsDBNull(10) ? string.Empty : reader.GetString(10),
+            UnitCode = reader.IsDBNull(11) ? string.Empty : reader.GetString(11),
+            UnitShortName = reader.IsDBNull(12) ? string.Empty : reader.GetString(12),
+            UnitFactor = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
+            IsDivisible = !reader.IsDBNull(14) && reader.GetBoolean(14),
+            SellInSecondaryUnit = !reader.IsDBNull(15) && reader.GetBoolean(15),
         };
     }
 
@@ -234,7 +289,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags FROM Products";
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products";
 
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -252,7 +307,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags FROM Products WHERE Category = $Category";
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE Category = $Category";
         command.Parameters.AddWithValue("$Category", categoryId);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -270,7 +325,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags FROM Products WHERE Barcode = $Barcode LIMIT 1";
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE Barcode = $Barcode LIMIT 1";
         command.Parameters.AddWithValue("$Barcode", barcode);
 
         using var reader = await command.ExecuteReaderAsync();
