@@ -180,6 +180,8 @@
   "SellerHashCorrupt": "Seller data is corrupt — refresh the list",
   "SellerNotOnRoster": "Seller not found on the list — refresh the list",
   "ConfirmWithPin": "Confirm with PIN",
+  "NoSellerWithRight": "No seller holds the right for this operation — contact an administrator",
+  "SellerRosterEmpty": "The seller list is empty — refresh it or assign sellers to this register",
   "CurrentSeller": "Seller",
   "SellerVerificationFailed": "Could not verify PIN. Try again",
   "CreatePin": "Create a PIN",

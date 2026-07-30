@@ -109,6 +109,32 @@ public partial class SellerSwitchViewModel : ViewModelBase
 
     public ObservableCollection<SellerInfo> Sellers { get; } = new();
 
+    /// <summary>True when an approval was requested but nobody on the roster holds the
+    /// right being escalated (see <see cref="OpenForApproval"/>) — e.g. opening returns
+    /// on a register where no seller has the refund permission. Without a notice for
+    /// this the overlay is a dead end: the tile grid renders zero tiles, the PIN pad
+    /// stays hidden (nothing can be selected), and all the cashier sees is a heading
+    /// and a close button over an empty card, with no hint that the missing piece is a
+    /// permission grant rather than a bug. The view still keeps its close control, so
+    /// the notice explains the dismissal rather than blocking it.</summary>
+    public bool HasNoApprover => IsApprovalMode && Sellers.Count == 0;
+
+    /// <summary>True when a plain seller switch found an empty roster — this register
+    /// has no sellers assigned, or the roster has never been loaded/cached (offline
+    /// first run). Distinct from <see cref="HasNoApprover"/> because the remedy is
+    /// different: assign sellers to the register / let the roster sync, rather than
+    /// grant a permission. Cancelling here is harmless — sales fall back to crediting
+    /// the shift owner, see <see cref="Cancel"/>.</summary>
+    public bool HasEmptyRoster => !IsApprovalMode && Sellers.Count == 0;
+
+    partial void OnIsApprovalModeChanged(bool value) => NotifyEmptyStateChanged();
+
+    private void NotifyEmptyStateChanged()
+    {
+        OnPropertyChanged(nameof(HasNoApprover));
+        OnPropertyChanged(nameof(HasEmptyRoster));
+    }
+
     /// <summary>Raised when an escalation PIN was accepted, carrying the approving seller.</summary>
     public event EventHandler<SellerInfo>? Approved;
 
@@ -116,6 +142,13 @@ public partial class SellerSwitchViewModel : ViewModelBase
     {
         _session = session;
         _rosterService = rosterService;
+
+        // Driven off the collection itself rather than a line at the end of Show():
+        // Show() rebuilds Sellers in two steps (Clear then Add per seller), so the
+        // empty-state notices must track the collection's real content at all times,
+        // not just whatever it happened to hold when the last explicit notification
+        // was raised.
+        Sellers.CollectionChanged += (_, _) => NotifyEmptyStateChanged();
     }
 
     /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.</summary>

@@ -103,6 +103,87 @@ public class SellerSwitchViewModelTest
         Assert.Equal("u-2", vm.Sellers[0].Id);
     }
 
+    // The overlay opening with an unsatisfiable filter is the real-world case behind
+    // this: opening returns on a register where nobody holds the refund permission
+    // (CanRefund comes from the backend's documents.MakeReturn grant). Before the
+    // notice, that rendered a heading and a close button over an empty white card.
+    [Fact]
+    public async Task OpenForApproval_WithNobodyHoldingTheRight_FlagsTheMissingApprover()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+
+        vm.OpenForApproval(s => s.CanRefund);
+
+        Assert.Empty(vm.Sellers);
+        Assert.True(vm.HasNoApprover);
+        // The switch-mode notice must stay off — an empty *filter result* is not an
+        // empty roster, and the two point at different remedies.
+        Assert.False(vm.HasEmptyRoster);
+        Assert.False(vm.IsPinEntry);
+        Assert.True(vm.IsVisible);
+    }
+
+    [Fact]
+    public async Task OpenForApproval_WithAnApproverAvailable_ShowsNoNotice()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+
+        vm.OpenForApproval(s => s.CanCloseShift);
+
+        Assert.False(vm.HasNoApprover);
+        Assert.False(vm.HasEmptyRoster);
+    }
+
+    [Fact]
+    public async Task Open_WithEmptyRoster_FlagsTheEmptyRoster()
+    {
+        var session = new SellerSession(() => new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc), TimeSpan.FromSeconds(90));
+        await session.LoadRosterAsync(new List<SellerInfo>());
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open();
+
+        Assert.True(vm.HasEmptyRoster);
+        Assert.False(vm.HasNoApprover);
+    }
+
+    // Reopening in the other mode must flip which notice is showing: the collection is
+    // empty in both of these, so only IsApprovalMode distinguishes them.
+    [Fact]
+    public async Task EmptyStateNotices_FollowTheModeTheOverlayReopensIn()
+    {
+        var session = new SellerSession(() => new DateTime(2026, 7, 27, 10, 0, 0, DateTimeKind.Utc), TimeSpan.FromSeconds(90));
+        await session.LoadRosterAsync(new List<SellerInfo>());
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open();
+        Assert.True(vm.HasEmptyRoster);
+
+        vm.OpenForApproval(s => s.CanRefund);
+        Assert.True(vm.HasNoApprover);
+        Assert.False(vm.HasEmptyRoster);
+
+        vm.Open();
+        Assert.True(vm.HasEmptyRoster);
+        Assert.False(vm.HasNoApprover);
+    }
+
+    // The view binds these, so a stale value is a silently wrong screen rather than a
+    // test-only concern: filling the tile grid must switch the notice off by itself.
+    [Fact]
+    public async Task EmptyStateNotices_RaisePropertyChanged_WhenSellersArePopulated()
+    {
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.Open();
+
+        Assert.Contains(nameof(vm.HasNoApprover), changed);
+        Assert.Contains(nameof(vm.HasEmptyRoster), changed);
+        Assert.False(vm.HasEmptyRoster);
+    }
+
     [Fact]
     public async Task IsApprovalMode_ReflectsWhichOpenMethodWasCalled()
     {

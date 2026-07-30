@@ -69,6 +69,22 @@
                                FontSize="26" FontWeight="Black" Foreground="{StaticResource Slate900Brush}"
                                HorizontalAlignment="Center" IsVisible="{Binding !IsApprovalMode}"/>
 
+                    <!-- Nothing to tap: the tile grid below would render an empty card
+                         with no explanation. Wording splits on the same IsApprovalMode
+                         flag as the heading, because the remedy differs — grant the
+                         right vs. assign/sync sellers. Same muted style as the other
+                         empty state in this app (ParkedSalesWindow.axaml:37). -->
+                    <TextBlock Text="{Binding [NoSellerWithRight], Source={x:Static services:I18nService.Instance}}"
+                               IsVisible="{Binding HasNoApprover}"
+                               FontSize="18" Foreground="{StaticResource Slate400Brush}"
+                               TextAlignment="Center" TextWrapping="Wrap" MaxWidth="440"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="{Binding [SellerRosterEmpty], Source={x:Static services:I18nService.Instance}}"
+                               IsVisible="{Binding HasEmptyRoster}"
+                               FontSize="18" Foreground="{StaticResource Slate400Brush}"
+                               TextAlignment="Center" TextWrapping="Wrap" MaxWidth="440"
+                               HorizontalAlignment="Center"/>
+
                     <ItemsControl ItemsSource="{Binding Sellers}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
