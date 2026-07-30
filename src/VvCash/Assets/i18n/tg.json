@@ -188,5 +188,18 @@
   "SellerPinSetupOffline": "Пайваст нест — PIN-ро баъдтар танзим кунед",
   "PinTooWeak": "PIN хеле содда аст — дигарашро санҷед",
   "SessionRevokedBanner": "Сессияи смена беэътибор аст. Чекҳо нигоҳ дошта мешаванд — пас аз мизоҷи ҷорӣ бори дигар ворид шавед.",
-  "SessionExpiredSignInAgain": "Сессия ба анҷом расид. Лутфан бори дигар ворид шавед."
+  "SessionExpiredSignInAgain": "Сессия ба анҷом расид. Лутфан бори дигар ворид шавед.",
+  "Exchange": "Иваз",
+  "ExchangeReturnedLabel": "Бозгашт:",
+  "ExchangeIssuedLabel": "Баровардан:",
+  "ExchangeCustomerPaysLabel": "Иловапулӣ:",
+  "ExchangeRefundDueLabel": "Бозгашти пул:",
+  "ExchangeOfflineWarning": "Иваз пайвастшавӣ ба сервер лозим аст",
+  "ExchangeExpiredWarning": "Мӯҳлати иваз барои ин чек гузаштааст",
+  "ExchangeAction": "Иваз кардан",
+  "SelectSaleToExchange": "Барои иваз чекро интихоб кунед",
+  "IssuedGoods": "Моли баровардашуда",
+  "SearchProductToIssue": "Ҷустуҷӯи мол аз рӯи ном ё штрихкод",
+  "ExchangeSuccess": "Иваз анҷом шуд",
+  "ExchangeFailed": "Хатои иваз"
 }

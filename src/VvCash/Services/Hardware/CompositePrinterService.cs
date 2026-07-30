@@ -137,4 +137,17 @@ public class CompositePrinterService : IPrinterService
         await Task.WhenAll(tasks);
         return tasks.Any(t => t.Result);
     }
+
+    public async Task<bool> PrintExchangeReceiptAsync(
+        IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
+        IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
+        decimal difference, string documentNumber)
+    {
+        if (!_printers.Any()) return false;
+        var returnedList = returned.ToList();
+        var issuedList = issued.ToList();
+        var tasks = _printers.Select(p => p.PrintExchangeReceiptAsync(returnedList, issuedList, difference, documentNumber)).ToList();
+        await Task.WhenAll(tasks);
+        return tasks.Any(t => t.Result);
+    }
 }

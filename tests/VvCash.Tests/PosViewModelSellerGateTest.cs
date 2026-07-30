@@ -223,6 +223,7 @@ public class PosViewModelSellerGateTest
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber) => Task.FromResult(true);
+        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber) => Task.FromResult(true);
     }
 
     private class FakeCustomerDisplayService : ICustomerDisplayService
@@ -308,6 +309,10 @@ public class PosViewModelSellerGateTest
         public Task SyncProductsAsync() => Task.CompletedTask;
         public Task FullReinitializeAsync() => Task.CompletedTask;
         public Task<bool> CheckSystemOnlineAsync() => Task.FromResult(true);
+
+        // Lets a test flip PosViewModel's IsSystemOnline the same way the real
+        // background ping does, without waiting on an actual timer.
+        public void RaiseSyncStatusChanged(bool isOnline) => SyncStatusChanged?.Invoke(this, isOnline);
     }
 
     /// <summary>Stands in for the real AuthService: records whether/how many times
@@ -455,6 +460,14 @@ public class PosViewModelSellerGateTest
         public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request) => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
     }
 
+    // No scenario below opens the exchange screen — CreateExchangeAsync throws loudly
+    // rather than silently returning fabricated data that would never be checked.
+    private class FakeExchangeService : IExchangeService
+    {
+        public Task<ExchangeOutcome> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+            => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
+    }
+
     private class FakeQuoteService : IQuoteService
     {
         public Task<QuoteResult?> QuoteAsync(QuoteRequest request, CancellationToken ct) => Task.FromResult<QuoteResult?>(null);
@@ -503,6 +516,7 @@ public class PosViewModelSellerGateTest
         public FakeCartService CartService { get; } = new();
         public FakeParkedSaleService ParkedSaleService { get; } = new();
         public FakeCashFeatureService Features { get; } = new();
+        public FakeSyncService SyncService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -518,12 +532,13 @@ public class PosViewModelSellerGateTest
             new FakeCustomerDisplayService(),
             deps.ShiftService,
             new FakeOfflineStorageService(),
-            new FakeSyncService(),
+            deps.SyncService,
             deps.SettingsService,
             deps.ExpenseDocumentService,
             new FakeCounterpartyService(),
             deps.ParkedSaleService,
             new FakeReturnService(),
+            new FakeExchangeService(),
             new FakeQuoteService(),
             new FakePromotionProvider(),
             new FakeSessionContext(),
@@ -1892,5 +1907,84 @@ public class PosViewModelSellerGateTest
 
         vm.OpenCouponModalCommand.Execute(null);
         Assert.True(vm.IsCouponModalVisible);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Exchange button: hidden behind its own flag, and additionally disabled offline —
+    // an exchange has no offline queue (see ExchangeService's own remarks), so the
+    // button must not promise something a disconnected register cannot deliver.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void IsExchangeVisible_FlagDisabled_HidesTheButtonRegardlessOfConnectivity()
+    {
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.Exchange, false));
+
+        Assert.False(vm.IsExchangeVisible);
+        Assert.False(vm.IsExchangeEnabled);
+    }
+
+    [Fact]
+    public void IsExchangeVisible_FlagArrivesDisabled_HidesTheButtonOnTheOpenScreen()
+    {
+        // The flag map lands after the screen is already up (see ApplyFeatures'
+        // remarks), and until it does an unconfigured code reads as enabled — so this
+        // is the normal path for a store that switched exchanges off, not an edge
+        // case. IsExchangeVisible is computed live from the map, which means only an
+        // explicit notification can move the binding: without one the button stays on
+        // screen for the whole session, and no cashier is going to restart the
+        // register to find out.
+        var pending = new TaskCompletionSource<bool>();
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.PendingRefresh = pending;
+            d.Features.SetAfterRefresh(CashFeatureCodes.Exchange, false);
+        });
+        Assert.True(vm.IsExchangeVisible); // the optimistic default; the real value hasn't landed
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (s, e) => raised.Add(e.PropertyName);
+
+        pending.SetResult(true); // the register's storage becomes ready and the fetch resolves
+
+        Assert.False(vm.IsExchangeVisible);
+        Assert.False(vm.IsExchangeEnabled);
+        Assert.Contains(nameof(vm.IsExchangeVisible), raised);
+        Assert.Contains(nameof(vm.IsExchangeEnabled), raised);
+    }
+
+    [Fact]
+    public void IsExchangeEnabled_FlagOnButOffline_False()
+    {
+        // CashFeatures.IsEnabled treats an unconfigured code as enabled, so a register
+        // that hasn't heard about this flag yet still shows the button — but offline is
+        // still offline.
+        using var vm = CreateViewModel(out var deps);
+
+        // OnSyncStatusChanged only posts the mutation (same Dispatcher.UIThread marshalling
+        // as OnSessionRevoked above), so the queue must be pumped explicitly.
+        deps.SyncService.RaiseSyncStatusChanged(false);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.True(vm.IsExchangeVisible);
+        Assert.False(vm.IsExchangeEnabled);
+    }
+
+    [Fact]
+    public void IsExchangeEnabled_FlagOnAndOnline_True_AndFollowsConnectivityLive()
+    {
+        // Unlike the snapshotted flags above (see ApplyFeatures' own remarks), this one
+        // must track IsSystemOnline for as long as the POS screen stays open — a stale
+        // "online" reading would offer an exchange the register can no longer send.
+        using var vm = CreateViewModel(out var deps);
+        Assert.True(vm.IsExchangeEnabled);
+
+        deps.SyncService.RaiseSyncStatusChanged(false);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.IsExchangeEnabled);
+
+        deps.SyncService.RaiseSyncStatusChanged(true);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsExchangeEnabled);
     }
 }

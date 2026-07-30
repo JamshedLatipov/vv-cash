@@ -181,6 +181,9 @@
                     <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenReturnsCommand}" IsVisible="{Binding IsReturnsEnabled}" ToolTip.Tip="{Binding [Returns], Source={x:Static services:I18nService.Instance}}">
                         <material:MaterialIcon Kind="BackupRestore" Width="22" Height="22"/>
                     </Button>
+                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenExchangeCommand}" IsVisible="{Binding IsExchangeVisible}" IsEnabled="{Binding IsExchangeEnabled}" ToolTip.Tip="{Binding [Exchange], Source={x:Static services:I18nService.Instance}}">
+                        <material:MaterialIcon Kind="SwapHorizontal" Width="22" Height="22"/>
+                    </Button>
                     <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenCustomerRegistrationCommand}" IsVisible="{Binding IsCustomerRegistrationEnabled}" ToolTip.Tip="{Binding [AddCustomer], Source={x:Static services:I18nService.Instance}}">
                         <material:MaterialIcon Kind="AccountPlusOutline" Width="22" Height="22"/>
                     </Button>

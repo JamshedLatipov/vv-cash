@@ -18,4 +18,12 @@ public interface IPrinterService
     System.Threading.Tasks.Task<bool> PrintReturnReceiptAsync(
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
         decimal totalRefund, string documentNumber);
+
+    /// <param name="difference">Positive: the customer owes the difference.
+    /// Negative: the till refunds it. Only its absolute value is printed — the
+    /// label carries the sign.</param>
+    System.Threading.Tasks.Task<bool> PrintExchangeReceiptAsync(
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
+        decimal difference, string documentNumber);
 }

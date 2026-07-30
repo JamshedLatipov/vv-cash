@@ -188,5 +188,18 @@
   "SellerPinSetupOffline": "Байланыс жоқ — PIN-ді кейінірек орнатыңыз",
   "PinTooWeak": "PIN тым қарапайым — басқасын байқаңыз",
   "SessionRevokedBanner": "Ауысым сеансы жарамсыз. Чектер сақталуда — ағымдағы клиенттен кейін қайта кіріңіз.",
-  "SessionExpiredSignInAgain": "Сеанстың мерзімі аяқталды. Қайта кіріңіз."
+  "SessionExpiredSignInAgain": "Сеанстың мерзімі аяқталды. Қайта кіріңіз.",
+  "Exchange": "Айырбас",
+  "ExchangeReturnedLabel": "Қайтару:",
+  "ExchangeIssuedLabel": "Беру:",
+  "ExchangeCustomerPaysLabel": "Қосымша төлем:",
+  "ExchangeRefundDueLabel": "Қайтарылатын сома:",
+  "ExchangeOfflineWarning": "Айырбас серверге қосылуды талап етеді",
+  "ExchangeExpiredWarning": "Бұл чек бойынша айырбас мерзімі өтті",
+  "ExchangeAction": "Айырбастау",
+  "SelectSaleToExchange": "Айырбастау үшін чекті таңдаңыз",
+  "IssuedGoods": "Берілетін тауар",
+  "SearchProductToIssue": "Атауы немесе штрихкод бойынша тауар іздеу",
+  "ExchangeSuccess": "Айырбас орындалды",
+  "ExchangeFailed": "Айырбас қатесі"
 }

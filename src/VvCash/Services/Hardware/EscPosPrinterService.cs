@@ -230,4 +230,62 @@ public class EscPosPrinterService : IPrinterService
             return false;
         }
     }
+
+    /// <summary>Same ReturnReceiptLine shape as BuildReturnReceipt, split into a
+    /// RETURNED and an ISSUED section, closed by a bold total line. The label
+    /// carries the direction of <paramref name="difference"/> (customer owes vs.
+    /// till refunds); only its absolute value is ever printed, so the cashier
+    /// never has to read out a minus sign.</summary>
+    public static byte[] BuildExchangeReceipt(
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
+        decimal difference, string documentNumber)
+    {
+        using var ms = new MemoryStream();
+        Write(ms, CmdInit);
+        Write(ms, CmdAlignCenter);
+        Write(ms, CmdDoubleSizeOn);
+        WriteLine(ms, "EXCHANGE / OBMEN");
+        Write(ms, CmdDoubleSizeOff);
+        WriteLine(ms, $"Doc #{documentNumber}");
+        WriteLine(ms, "----------------------------");
+        Write(ms, CmdAlignLeft);
+
+        WriteLine(ms, "RETURNED:");
+        foreach (var l in returned)
+            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", $"{l.LineRefund:F2}", 32));
+
+        WriteLine(ms, "ISSUED:");
+        foreach (var l in issued)
+            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", $"{l.LineRefund:F2}", 32));
+
+        WriteLine(ms, "----------------------------");
+        Write(ms, CmdBoldOn);
+        // An even swap owes nothing in either direction; without its own label it
+        // printed "REFUND: 0.00" and invited the customer to ask for the money.
+        var label = difference > 0 ? "AMOUNT DUE:" : difference < 0 ? "REFUND:" : "NO DIFFERENCE:";
+        WriteLine(ms, PadLine(label, $"{Math.Abs(difference):F2}", 32));
+        Write(ms, CmdBoldOff);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
+    public async Task<bool> PrintExchangeReceiptAsync(
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
+        System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
+        decimal difference, string documentNumber)
+    {
+        try
+        {
+            await SendAsync(BuildExchangeReceipt(returned, issued, difference, documentNumber));
+            return true;
+        }
+        catch
+        {
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
+    }
 }

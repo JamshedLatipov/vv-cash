@@ -37,6 +37,7 @@ public class ReturnsViewModelTest
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d) { Receipt++; return Task.FromResult(true); }
+        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber) => Task.FromResult(true);
     }
 
     private sealed class FakeSettings : ISettingsService
@@ -71,10 +72,12 @@ public class ReturnsViewModelTest
         {
             Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z"
         };
+        // after_discount is the whole line's discounted total, so these are 50 and 10
+        // a unit respectively — the figures the assertions below are written against.
         vm.Lines.Add(new ReturnLineVm(new ReturnDetailLine
-        { Product = new ReturnProduct { Id = "pA" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 50 }));
+        { Product = new ReturnProduct { Id = "pA" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }));
         vm.Lines.Add(new ReturnLineVm(new ReturnDetailLine
-        { Product = new ReturnProduct { Id = "pB" }, Quantity = 2, QuantityReturned = 0, AfterDiscount = 10 }));
+        { Product = new ReturnProduct { Id = "pB" }, Quantity = 2, QuantityReturned = 0, AfterDiscount = 20 }));
         return vm;
     }
 

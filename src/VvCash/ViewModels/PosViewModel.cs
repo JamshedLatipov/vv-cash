@@ -35,6 +35,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ICounterpartyService _counterpartyService;
     private readonly IParkedSaleService _parkedSaleService;
     private readonly IReturnService _returnService;
+    private readonly IExchangeService _exchangeService;
     private readonly IQuoteService _quoteService;
     private readonly IPromotionProvider _promotionProvider;
     private readonly ISessionContext _session;
@@ -110,6 +111,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [ObservableProperty] private bool _isCustomerDisplayEnabled = true;
     [ObservableProperty] private bool _isDiscountEnabled = true;
     [ObservableProperty] private bool _isCouponsEnabled = true;
+
+    /// <summary>Exchange is hidden when the store switched the function off, and
+    /// disabled while the register is offline: an exchange cannot be queued, so
+    /// offering the button without a connection would promise something the
+    /// register cannot deliver. Read live from the flag map rather than snapshotted
+    /// into a field like the flags above, so <see cref="IsSystemOnline"/> flipping
+    /// updates it on its own — which also means ApplyFeatures has to raise both
+    /// explicitly when the map lands, since no generated setter will.</summary>
+    public bool IsExchangeVisible => _features.Current.IsEnabled(CashFeatureCodes.Exchange);
+    public bool IsExchangeEnabled => IsExchangeVisible && IsSystemOnline;
 
     /// <summary>A display that was fed cart data before the flag actually loaded (see
     /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
@@ -237,6 +248,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SystemStatusText))]
+    [NotifyPropertyChangedFor(nameof(IsExchangeEnabled))]
     private bool _isSystemOnline = true;
 
     public string SystemStatusText => IsSystemOnline ? "SYSTEM ONLINE" : "SYSTEM OFFLINE";
@@ -545,6 +557,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ICounterpartyService counterpartyService,
         IParkedSaleService parkedSaleService,
         IReturnService returnService,
+        IExchangeService exchangeService,
         IQuoteService quoteService,
         IPromotionProvider promotionProvider,
         ISessionContext session,
@@ -568,6 +581,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _counterpartyService = counterpartyService;
         _parkedSaleService = parkedSaleService;
         _returnService = returnService;
+        _exchangeService = exchangeService;
         _quoteService = quoteService;
         _session = session;
         _httpClient = httpClient;
@@ -609,6 +623,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
         IsDiscountEnabled = features.IsEnabled(CashFeatureCodes.Discount);
         IsCouponsEnabled = features.IsEnabled(CashFeatureCodes.Coupons);
+
+        // These two read the map live instead of being snapshotted into a field, so
+        // nothing else would tell the view they just changed. Without this the
+        // constructor's optimistic pass — where an unconfigured code reads as
+        // enabled — is the only value the screen ever binds, and a store with
+        // cash_exchange_enabled off shows the button for the whole session.
+        OnPropertyChanged(nameof(IsExchangeVisible));
+        OnPropertyChanged(nameof(IsExchangeEnabled));
     }
 
 
@@ -1463,6 +1485,24 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
                 dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                await dialog.ShowDialog(mainWindow);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenExchange()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var mainWindow = desktop.MainWindow;
+            if (mainWindow != null)
+            {
+                var dialog = new VvCash.Views.ExchangeWindow();
+                dialog.DataContext = new ExchangeViewModel(
+                    dialog, _returnService, _exchangeService, _productService, _syncService,
+                    _printerService, _features,
+                    _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty, _sellerSession.Current?.Id, IsSystemOnline);
                 await dialog.ShowDialog(mainWindow);
             }
         }
