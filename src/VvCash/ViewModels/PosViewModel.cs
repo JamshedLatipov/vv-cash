@@ -115,9 +115,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// <summary>Exchange is hidden when the store switched the function off, and
     /// disabled while the register is offline: an exchange cannot be queued, so
     /// offering the button without a connection would promise something the
-    /// register cannot deliver. Read live (not snapshotted like the flags above)
-    /// so <see cref="IsSystemOnline"/> flipping updates it without needing its own
-    /// ApplyFeatures pass.</summary>
+    /// register cannot deliver. Read live from the flag map rather than snapshotted
+    /// into a field like the flags above, so <see cref="IsSystemOnline"/> flipping
+    /// updates it on its own — which also means ApplyFeatures has to raise both
+    /// explicitly when the map lands, since no generated setter will.</summary>
     public bool IsExchangeVisible => _features.Current.IsEnabled(CashFeatureCodes.Exchange);
     public bool IsExchangeEnabled => IsExchangeVisible && IsSystemOnline;
 
