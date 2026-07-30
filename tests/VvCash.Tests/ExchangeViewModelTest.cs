@@ -232,6 +232,20 @@ public class ExchangeViewModelTest
     }
 
     [Fact]
+    public async Task SubmitExchange_ReturnedGoodsWorthNothing_SkipsThePayoutInsteadOfPostingAZero()
+    {
+        // A fully discounted line comes back worth nothing. The server binds the payout
+        // amount as gt=0, so posting it would be a 400 — with the return already booked
+        // — over money that never had to leave the drawer.
+        var rig = BuildForSubmit(returnedPrice: 0m, issuedPrice: 100m);
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "return", "sale" }, rig.Log.Steps);
+        Assert.Equal(ExchangeViewModel.ExchangeDone, rig.Vm.SuccessMessage);
+    }
+
+    [Fact]
     public async Task SubmitExchange_PayoutFails_BasketsIntact_NothingPrinted_MessageNamesWhatWentThrough()
     {
         var rig = BuildForSubmit();

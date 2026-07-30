@@ -486,12 +486,19 @@ public partial class ExchangeViewModel : ViewModelBase
             }
 
             // ---- 2. the till payout --------------------------------------------
-            var payout = await _cashOperationService.CreateCashExpenseAsync(
-                BuildPayoutRequest(counterpartyId!, categoryId!));
-            if (!payout.Success)
+            // Nothing to hand over when the returned goods were worth nothing (a fully
+            // discounted line, say), and the server binds the amount as gt=0 — posting
+            // a zero would be a 400 with the return already booked, over money that
+            // never had to move.
+            if (ReturnedTotal > 0m)
             {
-                ErrorMessage = PayoutFailed(payout.Message);
-                return;
+                var payout = await _cashOperationService.CreateCashExpenseAsync(
+                    BuildPayoutRequest(counterpartyId!, categoryId!));
+                if (!payout.Success)
+                {
+                    ErrorMessage = PayoutFailed(payout.Message);
+                    return;
+                }
             }
 
             // ---- 3. the replacement sale ---------------------------------------
