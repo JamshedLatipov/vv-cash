@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -14,24 +15,111 @@ namespace VvCash.Tests;
 
 public class ExchangeViewModelTest
 {
-    // Records what was actually sent, and hands back a canned outcome. The default
-    // is the bleakest one — nothing answered at all — so a test that cares about
-    // success has to say so.
-    private sealed class FakeExchangeService : IExchangeService
+    // One shared log across all three fakes, so a test can assert on the order the
+    // calls actually happened in rather than merely on each having happened.
+    private sealed class CallLog
     {
-        public ExchangeOutcome Outcome = new();
-        public readonly List<ExchangeRequest> Requests = new();
-        public Task<ExchangeOutcome> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+        public readonly List<string> Steps = new();
+    }
+
+    private sealed class FakeReturnService : IReturnService
+    {
+        private readonly CallLog _log;
+        public bool Result = true;
+        public Exception? Throw;
+        public readonly List<ReturnRequest> Requests = new();
+        public int ReloadCount;
+
+        public FakeReturnService(CallLog log) => _log = log;
+
+        public Task<ExpenseListResponse> GetSalesAsync(int page = 1) => Task.FromResult(new ExpenseListResponse());
+
+        public Task<ReturnDetailBody> GetReturnableLinesAsync(string expenseId)
         {
+            ReloadCount++;
+            return Task.FromResult(new ReturnDetailBody());
+        }
+
+        public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request)
+        {
+            _log.Steps.Add("return");
+            Requests.Add(request);
+            if (Throw != null) throw Throw;
+            return Task.FromResult(Result);
+        }
+    }
+
+    private sealed class FakeCashOperationService : ICashOperationService
+    {
+        private readonly CallLog _log;
+        public CashOpOutcome Outcome = CashOpOutcome.Ok();
+        public readonly List<CashExpenseRequest> Requests = new();
+
+        public FakeCashOperationService(CallLog log) => _log = log;
+
+        public Task<CashOpOutcome> CreateCashExpenseAsync(CashExpenseRequest request)
+        {
+            _log.Steps.Add("payout");
             Requests.Add(request);
             return Task.FromResult(Outcome);
         }
+    }
 
-        public static ExchangeOutcome Booked(string documentNumber, decimal difference) => new()
+    private sealed class FakeExpenseDocumentService : IExpenseDocumentService
+    {
+        private readonly CallLog _log;
+        public ExpenseDocumentOutcome Outcome = ExpenseDocumentOutcome.Sent("77");
+        public Exception? Throw;
+        public readonly List<DocumentRequest> Requests = new();
+
+        public FakeExpenseDocumentService(CallLog log) => _log = log;
+
+        public Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
+            => Task.FromResult(true);
+
+        public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
         {
-            StatusCode = 200,
-            Body = new ExchangeResponseBody { ExpenseDocumentNumber = documentNumber, Difference = difference },
-        };
+            _log.Steps.Add("sale");
+            Requests.Add(request);
+            if (Throw != null) throw Throw;
+            return Task.FromResult(Outcome);
+        }
+
+        public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
+        public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
+        public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }
+        public event EventHandler? SessionRevoked { add { } remove { } }
+    }
+
+    private sealed class FakeCounterpartyService : ICounterpartyService
+    {
+        public string? SystemId = "cp-system";
+        public int Calls;
+        public Task<CounterpartyResponse?> CreateCounterpartyAsync(CounterpartyCreateRequest request)
+            => Task.FromResult<CounterpartyResponse?>(null);
+        public Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query)
+            => Task.FromResult<List<CounterpartyResponse>?>(new List<CounterpartyResponse>());
+        public Task<string?> GetSystemCounterpartyIdAsync()
+        {
+            Calls++;
+            return Task.FromResult(SystemId);
+        }
+    }
+
+    private sealed class FakeSettings : ISettingsService
+    {
+        public string BackendUrl { get; set; } = "https://example.test/api/v1/";
+        public string CashRegisterToken { get; set; } = "";
+        public string AuthToken { get; set; } = "";
+        public DateTime? AuthTokenExpiresAt { get; set; }
+        public int SyncIntervalMinutes { get; set; } = 10;
+        public string Language { get; set; } = "ru";
+        public List<PrinterConfig> Printers { get; set; } = new();
+        public bool ReturnOpenCashDrawer { get; set; } = true;
+        public bool ReturnPrintReceipt { get; set; } = true;
+        public string ExchangePayoutCategoryId { get; set; } = "cat-1";
+        public event EventHandler? SettingsChanged { add { } remove { } }
+        public void Save() { }
     }
 
     // Counts calls the same way ReturnsViewModelTest's own CountingPrinter does
@@ -44,7 +132,7 @@ public class ExchangeViewModelTest
         public decimal? LastDifference;
         public string? LastDocumentNumber;
         public PrinterStatus Status => PrinterStatus.Ready;
-        public event System.EventHandler<PrinterStatus>? StatusChanged;
+        public event System.EventHandler<PrinterStatus>? StatusChanged { add { } remove { } }
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
@@ -65,119 +153,264 @@ public class ExchangeViewModelTest
         public Task RefreshAsync() => Task.CompletedTask;
     }
 
-    private static ExchangeViewModel BuildForSubmit(
-        FakeExchangeService exchange, CountingPrinter printer, ICashFeatureService features,
-        decimal returnedPrice = 80m, decimal issuedPrice = 100m)
+    /// <summary>Everything the submit path touches, wired to one call log.</summary>
+    private sealed class Rig
     {
-        var vm = new ExchangeViewModel(exchangeService: exchange, printerService: printer, features: features, isOnline: true);
-        vm.SelectedSale = new ExpenseListItem { Id = "doc1", DocumentNumber = "9" };
-        vm.SetReturnedLines(new[] { MakeReturnedLine(returnedPrice) });
-        vm.AddIssuedLine(MakeIssuedLine(issuedPrice));
-        return vm;
+        public readonly CallLog Log = new();
+        public FakeReturnService Returns = null!;
+        public FakeCashOperationService Payout = null!;
+        public FakeExpenseDocumentService Sale = null!;
+        public FakeCounterpartyService Counterparties = null!;
+        public FakeSettings Settings = null!;
+        public CountingPrinter Printer = null!;
+        public ExchangeViewModel Vm = null!;
+    }
+
+    private static Rig BuildForSubmit(decimal returnedPrice = 80m, decimal issuedPrice = 100m,
+        string? payoutCategoryId = "cat-1", string? cashId = "cash-1")
+    {
+        var rig = new Rig();
+        rig.Returns = new FakeReturnService(rig.Log);
+        rig.Payout = new FakeCashOperationService(rig.Log);
+        rig.Sale = new FakeExpenseDocumentService(rig.Log);
+        rig.Counterparties = new FakeCounterpartyService();
+        rig.Settings = new FakeSettings { ExchangePayoutCategoryId = payoutCategoryId ?? string.Empty };
+        rig.Printer = new CountingPrinter();
+
+        rig.Vm = new ExchangeViewModel(
+            returnService: rig.Returns,
+            cashOperationService: rig.Payout,
+            expenseDocumentService: rig.Sale,
+            counterpartyService: rig.Counterparties,
+            settingsService: rig.Settings,
+            printerService: rig.Printer,
+            features: new FakeCashFeatureService(),
+            cashId: cashId,
+            isOnline: true);
+
+        rig.Vm.SelectedSale = new ExpenseListItem { Id = "doc1", DocumentNumber = "9" };
+        rig.Vm.SetReturnedLines(new[] { MakeReturnedLine(returnedPrice) });
+        rig.Vm.AddIssuedLine(MakeIssuedLine(issuedPrice));
+        return rig;
     }
 
     [Fact]
-    public async Task SubmitExchange_Success_WithDifference_PrintsOnceWithServerDocumentNumber_AndOpensDrawer()
+    public async Task SubmitExchange_RunsReturnThenPayoutThenSale_InThatOrder()
     {
-        var exchange = new FakeExchangeService { Outcome = FakeExchangeService.Booked("77", 20m) };
-        var printer = new CountingPrinter();
-        var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService()); // returned 80, issued 100
+        // The order is load-bearing, not cosmetic: the processing queue is drained by
+        // run_order, so the return has to be in before the sale or exchanging one size
+        // for another of the same product drives the remain negative.
+        var rig = BuildForSubmit();
 
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.Equal(1, printer.ExchangeReceipt);
-        Assert.Equal("77", printer.LastDocumentNumber); // from the server response, not invented locally
-        Assert.Equal(20m, printer.LastDifference);
-        Assert.Equal(1, printer.Drawer); // money actually moved
+        Assert.Equal(new[] { "return", "payout", "sale" }, rig.Log.Steps);
     }
 
     [Fact]
-    public async Task SubmitExchange_ServerRefuses_NoPrint_NoDrawer_BasketsUntouched()
+    public async Task SubmitExchange_PaysOutTheWholeReturnedTotal_AndSellsTheReplacementInFull()
     {
-        var exchange = new FakeExchangeService
-        {
-            Outcome = new ExchangeOutcome { StatusCode = 400, Message = "declared total 100.00 does not match the calculated total 80.00" }
-        };
-        var printer = new CountingPrinter();
-        var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService());
+        // The till hands back everything the return was worth and then takes the full
+        // price of the replacement; it nets to the difference without either document
+        // being anything other than ordinary.
+        var rig = BuildForSubmit(returnedPrice: 80m, issuedPrice: 100m);
 
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.Equal(0, printer.ExchangeReceipt);
-        Assert.Equal(0, printer.Drawer);
-        Assert.Single(vm.IssuedLines); // left exactly as the cashier built it, so they can retry
-        Assert.Equal(1, vm.ReturnedLines.Single().ReturnQty);
+        var payout = Assert.Single(rig.Payout.Requests);
+        Assert.Equal("expense", payout.OperationType);
+        Assert.Equal("cash-1", payout.Cash);
+        Assert.Equal("cp-system", payout.Counterparty);
+        var detail = Assert.Single(payout.Details);
+        Assert.Equal("cat-1", detail.PaymentCategory);
+        Assert.Equal(80m, detail.Amount);   // the whole returned total, not the 20 difference
+
+        var sale = Assert.Single(rig.Sale.Requests);
+        Assert.Equal(100m, sale.Payment.ToPay);
+        Assert.Equal(100m, sale.Payment.PaidInCash);
+        Assert.Equal(0m, sale.Payment.Remained);
     }
 
     [Fact]
-    public async Task SubmitExchange_RetryOfTheSameBaskets_SendsTheSameDocumentHash()
+    public async Task SubmitExchange_ReturnedGoodsWorthNothing_SkipsThePayoutInsteadOfPostingAZero()
+    {
+        // A fully discounted line comes back worth nothing. The server binds the payout
+        // amount as gt=0, so posting it would be a 400 — with the return already booked
+        // — over money that never had to leave the drawer.
+        var rig = BuildForSubmit(returnedPrice: 0m, issuedPrice: 100m);
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "return", "sale" }, rig.Log.Steps);
+        Assert.Equal(ExchangeViewModel.ExchangeDone, rig.Vm.SuccessMessage);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_PayoutFails_BasketsIntact_NothingPrinted_MessageNamesWhatWentThrough()
+    {
+        var rig = BuildForSubmit();
+        rig.Payout.Outcome = CashOpOutcome.Failed("cash balance would go negative");
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        // Nothing beyond the payout was attempted.
+        Assert.Equal(new[] { "return", "payout" }, rig.Log.Steps);
+        Assert.Empty(rig.Sale.Requests);
+
+        // No receipt, no drawer, no success.
+        Assert.Equal(0, rig.Printer.ExchangeReceipt);
+        Assert.Equal(0, rig.Printer.Drawer);
+        Assert.Null(rig.Vm.SuccessMessage);
+
+        // Both baskets exactly as the cashier built them.
+        Assert.Single(rig.Vm.IssuedLines);
+        Assert.Equal(1, rig.Vm.ReturnedLines.Single().ReturnQty);
+
+        // And the message says which leg is booked and which is not — the only thing
+        // that lets the back office find the discrepancy.
+        var msg = rig.Vm.ErrorMessage;
+        Assert.NotNull(msg);
+        Assert.Contains("Возврат проведён", msg);
+        Assert.Contains("выдача из кассы не прошла", msg);
+        Assert.Contains("продажа не проводилась", msg);
+        Assert.Contains("cash balance would go negative", msg);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_PayoutCategoryUnset_RefusesBeforeAnyCallIsMade()
+    {
+        var rig = BuildForSubmit(payoutCategoryId: null);
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Empty(rig.Log.Steps);            // nothing was booked, not even the return
+        Assert.Equal(0, rig.Counterparties.Calls);
+        Assert.Equal(ExchangeViewModel.PayoutCategoryNotConfigured, rig.Vm.ErrorMessage);
+        Assert.False(rig.Vm.IsPayoutCategoryConfigured);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_CashUnknown_RefusesBeforeAnyCallIsMade()
+    {
+        var rig = BuildForSubmit(cashId: null);
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Empty(rig.Log.Steps);
+        Assert.Equal(ExchangeViewModel.CashNotKnown, rig.Vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_CounterpartyUnresolved_RefusesBeforeAnyCallIsMade()
+    {
+        var rig = BuildForSubmit();
+        rig.Counterparties.SystemId = null;
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Empty(rig.Log.Steps);
+        Assert.Equal(ExchangeViewModel.CounterpartyNotResolved, rig.Vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_ReturnFails_NothingElseRuns_AndSaysNothingWasCreated()
+    {
+        var rig = BuildForSubmit();
+        rig.Returns.Result = false;
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(new[] { "return" }, rig.Log.Steps);
+        Assert.Equal(0, rig.Printer.ExchangeReceipt);
+        Assert.Null(rig.Vm.SuccessMessage);
+        Assert.Contains("Возврат не прошёл", rig.Vm.ErrorMessage);
+        Assert.Contains("ни один документ не создан", rig.Vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_RetryOfTheSameBaskets_SendsTheSameDocumentHash_AndDoesNotRepeatTheReturn()
     {
         // The dangerous case is a first attempt that commits server-side while its
         // reply is lost, so the cashier presses submit again. A hash minted per press
-        // makes that second press a brand new exchange — a second return plus a
-        // second sale for the same goods; the same hash gets 409 from the server
-        // instead. The refusal below stands in for that lost reply: it leaves both
-        // baskets exactly as they were, which is the state a retry happens from.
-        var exchange = new FakeExchangeService(); // nothing answered: the lost reply
-        var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
+        // makes that second press a brand new sale for the same goods; the same hash
+        // lets the server recognise the duplicate. And the return, which has no undo
+        // at all, must not be booked twice either.
+        var rig = BuildForSubmit();
+        rig.Sale.Throw = new System.Net.Http.HttpRequestException("connection reset"); // the lost reply
 
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.Equal(2, exchange.Requests.Count);
-        Assert.NotEmpty(exchange.Requests[0].DocumentHash);
-        Assert.Equal(exchange.Requests[0].DocumentHash, exchange.Requests[1].DocumentHash);
+        Assert.Single(rig.Returns.Requests);            // booked once; the retry did not repeat it
+        Assert.Equal(2, rig.Sale.Requests.Count);
+        Assert.NotEmpty(rig.Sale.Requests[0].DocumentHash);
+        Assert.Equal(rig.Sale.Requests[0].DocumentHash, rig.Sale.Requests[1].DocumentHash);
 
-        // A changed basket is a different exchange and must not inherit the key —
-        // otherwise the server would refuse it as a duplicate of the one above.
-        vm.AddIssuedLine(MakeIssuedLine(30m));
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        // A changed basket is a different exchange: new key, and a return of its own.
+        rig.Vm.AddIssuedLine(MakeIssuedLine(30m));
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.Equal(3, exchange.Requests.Count);
-        Assert.NotEqual(exchange.Requests[1].DocumentHash, exchange.Requests[2].DocumentHash);
+        Assert.Equal(3, rig.Sale.Requests.Count);
+        Assert.NotEqual(rig.Sale.Requests[1].DocumentHash, rig.Sale.Requests[2].DocumentHash);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_Success_PrintsOnceWithServerDocumentNumber_AndOpensDrawer()
+    {
+        var rig = BuildForSubmit(returnedPrice: 80m, issuedPrice: 100m);
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, rig.Printer.ExchangeReceipt);
+        Assert.Equal("77", rig.Printer.LastDocumentNumber); // from the sale's own reply
+        Assert.Equal(20m, rig.Printer.LastDifference);
+        Assert.Equal(1, rig.Printer.Drawer);               // money actually moved
+        Assert.Empty(rig.Vm.IssuedLines);
+        Assert.Equal(ExchangeViewModel.ExchangeDone, rig.Vm.SuccessMessage);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_SaleQueuedOffline_SucceedsButSaysSo()
+    {
+        // CreateExpenseDocumentDetailedAsync queueing is an acceptable outcome — the
+        // document will sync — but claiming the sale went through would send the
+        // cashier looking for a document that is not there yet.
+        var rig = BuildForSubmit();
+        rig.Sale.Outcome = ExpenseDocumentOutcome.Enqueued();
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, rig.Printer.ExchangeReceipt);
+        Assert.Equal(ExchangeViewModel.ExchangeDoneSaleQueued, rig.Vm.SuccessMessage);
+        Assert.Contains("сохранена локально", rig.Vm.SuccessMessage);
+        Assert.Null(rig.Vm.ErrorMessage);
     }
 
     [Fact]
     public async Task SubmitExchange_ExactPriceMatch_PrintsReceipt_ButDoesNotOpenDrawer()
     {
-        var exchange = new FakeExchangeService { Outcome = FakeExchangeService.Booked("5", 0m) };
-        var printer = new CountingPrinter();
-        var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService(), returnedPrice: 80m, issuedPrice: 80m);
+        var rig = BuildForSubmit(returnedPrice: 80m, issuedPrice: 80m);
 
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.Equal(1, printer.ExchangeReceipt);
-        Assert.Equal(0, printer.Drawer); // nothing for the drawer to hand over or collect
+        Assert.Equal(1, rig.Printer.ExchangeReceipt);
+        Assert.Equal(0, rig.Printer.Drawer); // nothing for the drawer to hand over or collect
     }
 
     [Fact]
-    public async Task SubmitExchange_RefusedWithAReason_ShowsThatReason_NotAGenericFailure()
+    public async Task SubmitExchange_ReturnRequestCarriesOnlyTheLinesHandedBack()
     {
-        // "Срок обмена истёк" and "этот обмен уже проведён" call for opposite
-        // reactions from the cashier, and neither is a connection problem — a screen
-        // that collapses all three into one message hides the only information that
-        // tells them what to do next.
-        const string reason = "exchange period of 14 days has expired for this sale";
-        var exchange = new FakeExchangeService { Outcome = new ExchangeOutcome { StatusCode = 400, Message = reason } };
-        var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
+        var rig = BuildForSubmit();
 
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.Equal(reason, vm.ErrorMessage);
+        var req = Assert.Single(rig.Returns.Requests);
+        var line = Assert.Single(req.Details);
+        Assert.Equal("p1", line.Product);
+        Assert.Equal(1, line.Quantity);
+        Assert.Equal(DateTime.Today.ToString("yyyy-MM-dd"), req.SelectedDate);
     }
 
-    [Fact]
-    public async Task SubmitExchange_NothingAnswered_ReportsNoConnection()
-    {
-        // The other side of the test above: no status at all is the one case where
-        // the request may never have reached the server.
-        var exchange = new FakeExchangeService(); // no body, no status, no message
-        var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
-
-        await vm.SubmitExchangeCommand.ExecuteAsync(null);
-
-        Assert.Equal(I18nService.Instance["NoConnection"], vm.ErrorMessage);
-    }
     // Same shape ReturnsViewModel uses to build a ReturnLineVm: one unit sold,
     // none returned yet, priced at `price` after discount.
     private static ReturnLineVm MakeReturnedLine(decimal price)
@@ -213,9 +446,8 @@ public class ExchangeViewModelTest
     {
         // after_discount is the discounted total of the whole sold line, not a unit
         // price: 3 sold for 240 is 80 a unit, so handing one back credits 80. The
-        // server's return leg spreads the same figure over the sold quantity
-        // (refundPerUnit), so reading it as per-unit shows the cashier a refund
-        // where the server computes money owed, and difference_payment goes out wrong.
+        // till payout is that same figure, so reading it per-unit would hand the
+        // customer the wrong money out of the drawer.
         var line = new ReturnLineVm(new ReturnDetailLine
         {
             Product = new ReturnProduct { Id = "p1" },
@@ -251,8 +483,7 @@ public class ExchangeViewModelTest
     /// itself (documents.calculateDiscountedPrice, summed into calculated_to_pay):
     /// with discount_type "percent" it takes each line's discount_percent off
     /// sell_price × quantity, with "cash" it subtracts the document-level discount as
-    /// money. The exchange endpoint compares the result against the declared
-    /// payment.to_pay and answers 400 when the two disagree.</summary>
+    /// money. A plain sale is flagged as suspicious when the two disagree.</summary>
     private static decimal ServerCalculatedTotal(DocumentRequest doc) =>
         doc.Products.Sum(p =>
         {
@@ -263,12 +494,12 @@ public class ExchangeViewModelTest
         }) - (doc.Payment.DiscountType == "cash" ? doc.Payment.Discount : 0m);
 
     [Fact]
-    public void BuildRequest_IssuedProductWithCatalogDiscount_DeclaredTotalSurvivesTheServersOwnRecalculation()
+    public void BuildSaleRequest_IssuedProductWithCatalogDiscount_DeclaredTotalSurvivesTheServersOwnRecalculation()
     {
         // Product.Price is the already-discounted price the screen prices the line at,
         // so the request must not also ask for the catalog percent to be taken off
-        // again — the server's total would land below the declared to_pay and the
-        // exchange endpoint refuses the whole exchange over that gap.
+        // again — the server's total would land below the declared to_pay and the sale
+        // would be booked as suspicious.
         var vm = new ExchangeViewModel();
         vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
         vm.AddIssuedLine(new CartItem
@@ -281,30 +512,25 @@ public class ExchangeViewModelTest
             Quantity = 2
         });
 
-        var req = vm.BuildRequest();
+        var req = vm.BuildSaleRequest();
 
-        Assert.Equal(160m, vm.IssuedTotal);                      // what the cashier is shown
-        Assert.Equal(vm.IssuedTotal, req.Issued.Payment.ToPay);  // and what is declared
-        Assert.Equal(req.Issued.Payment.ToPay, ServerCalculatedTotal(req.Issued));
+        Assert.Equal(160m, vm.IssuedTotal);               // what the cashier is shown
+        Assert.Equal(vm.IssuedTotal, req.Payment.ToPay);  // and what is declared
+        Assert.Equal(req.Payment.ToPay, ServerCalculatedTotal(req));
     }
 
     [Fact]
-    public void CanSubmit_RequiresOnline_Allowed_AndBothBasketsFilled()
+    public void CanSubmit_RequiresOnline_AndBothBasketsFilled()
     {
         var vm = new ExchangeViewModel();
         vm.SetReturnedLines(new[] { MakeReturnedLine(80m) });
         vm.AddIssuedLine(MakeIssuedLine(100m));
 
         vm.IsOnline = false;
-        vm.ExchangeAllowed = true;
-        Assert.False(vm.CanSubmit); // offline: an exchange cannot be queued
+        Assert.False(vm.CanSubmit); // offline: neither the return nor the payout can be queued
 
         vm.IsOnline = true;
-        vm.ExchangeAllowed = false;
-        Assert.False(vm.CanSubmit); // exchange window on this receipt has expired
-
-        vm.ExchangeAllowed = true;
-        Assert.True(vm.CanSubmit); // baseline: online, allowed, both baskets non-empty
+        Assert.True(vm.CanSubmit); // baseline: online, both baskets non-empty
 
         vm.SetReturnedLines(System.Array.Empty<ReturnLineVm>());
         Assert.False(vm.CanSubmit); // nothing selected to return

@@ -26,6 +26,7 @@ public class SyncServiceTest
         public List<PrinterConfig> Printers { get; set; } = new();
         public bool ReturnOpenCashDrawer { get; set; } = true;
         public bool ReturnPrintReceipt { get; set; } = true;
+        public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged;
         public void Save() => SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -112,6 +113,8 @@ public class SyncServiceTest
     private sealed class FakeExpenseDocuments : IExpenseDocumentService
     {
         public Task<bool> CreateExpenseDocumentAsync(Models.Api.DocumentRequest request) => Task.FromResult(true);
+        public Task<Models.Api.ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(Models.Api.DocumentRequest request)
+            => Task.FromResult(Models.Api.ExpenseDocumentOutcome.Sent("1"));
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }

@@ -26,6 +26,13 @@ public interface ISettingsService
     /// CashFeatureCodes.ReturnPrintReceipt instead.</summary>
     bool ReturnPrintReceipt { get; set; }
 
+    /// <summary>Id of the payment category the exchange screen files its till payout
+    /// under (POST /documents/money/expense/create/ requires one and the server has no
+    /// default). Empty until an administrator picks one on the settings screen, and the
+    /// exchange button refuses outright while it is — refusing costs nothing, whereas
+    /// discovering it at the payout step leaves a return already booked.</summary>
+    string ExchangePayoutCategoryId { get; set; }
+
     event EventHandler? SettingsChanged;
 
     void Save();

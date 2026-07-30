@@ -55,6 +55,26 @@ public class ShiftService : IShiftService
         return null;
     }
 
+    /// <summary>Extracts the cash id from the same untyped cash-session body. The
+    /// server serialises it as a flat "cash" string; "cash_id" and a nested object are
+    /// accepted for the same reason ExtractWarehouseId accepts three shapes — this
+    /// client outlives individual server versions.</summary>
+    public static string? ExtractCashId(JsonElement body)
+    {
+        if (body.ValueKind != JsonValueKind.Object) return null;
+
+        if (body.TryGetProperty("cash_id", out var cid) && cid.ValueKind == JsonValueKind.String)
+            return cid.GetString();
+
+        if (body.TryGetProperty("cash", out var c))
+        {
+            if (c.ValueKind == JsonValueKind.String) return c.GetString();
+            if (c.ValueKind == JsonValueKind.Object && c.TryGetProperty("id", out var nid) && nid.ValueKind == JsonValueKind.String)
+                return nid.GetString();
+        }
+        return null;
+    }
+
     private string GetBaseUrl()
     {
         var baseUrl = _settingsService.BackendUrl;
@@ -106,6 +126,8 @@ public class ShiftService : IShiftService
                     {
                         var wh = ExtractWarehouseId(bodyElement);
                         if (!string.IsNullOrEmpty(wh)) _session.WarehouseId = wh;
+                        var cash = ExtractCashId(bodyElement);
+                        if (!string.IsNullOrEmpty(cash)) _session.CashId = cash;
                         return idElement.GetString();
                     }
                 }
@@ -190,6 +212,8 @@ public class ShiftService : IShiftService
                         {
                             var wh = ExtractWarehouseId(bodyElement);
                             if (!string.IsNullOrEmpty(wh)) _session.WarehouseId = wh;
+                            var cash = ExtractCashId(bodyElement);
+                            if (!string.IsNullOrEmpty(cash)) _session.CashId = cash;
                             return idElement.GetString();
                         }
                     }

@@ -337,6 +337,7 @@ public class PosViewModelSellerGateTest
         public List<PrinterConfig> Printers { get; set; } = new();
         public bool ReturnOpenCashDrawer { get; set; }
         public bool ReturnPrintReceipt { get; set; }
+        public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged;
         public void Save() { }
     }
@@ -349,6 +350,12 @@ public class PosViewModelSellerGateTest
         {
             LastRequest = request;
             return Task.FromResult(true);
+        }
+
+        public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
+        {
+            LastRequest = request;
+            return Task.FromResult(ExpenseDocumentOutcome.Sent("1"));
         }
 
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
@@ -366,6 +373,7 @@ public class PosViewModelSellerGateTest
     {
         public Task<CounterpartyResponse?> CreateCounterpartyAsync(CounterpartyCreateRequest request) => Task.FromResult<CounterpartyResponse?>(null);
         public Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query) => Task.FromResult<List<CounterpartyResponse>?>(new List<CounterpartyResponse>());
+        public Task<string?> GetSystemCounterpartyIdAsync() => Task.FromResult<string?>(null);
     }
 
     /// <summary>Mirrors the real ParkedSaleService's own park/resume round trip (park
@@ -460,11 +468,11 @@ public class PosViewModelSellerGateTest
         public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request) => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
     }
 
-    // No scenario below opens the exchange screen — CreateExchangeAsync throws loudly
+    // No scenario below opens the exchange screen — the till payout throws loudly
     // rather than silently returning fabricated data that would never be checked.
-    private class FakeExchangeService : IExchangeService
+    private class FakeCashOperationService : ICashOperationService
     {
-        public Task<ExchangeOutcome> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+        public Task<CashOpOutcome> CreateCashExpenseAsync(CashExpenseRequest request)
             => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
     }
 
@@ -487,6 +495,7 @@ public class PosViewModelSellerGateTest
     private class FakeSessionContext : ISessionContext
     {
         public string? WarehouseId { get; set; }
+        public string? CashId { get; set; }
     }
 
     private class FakePromotionProvider : IPromotionProvider
@@ -550,7 +559,7 @@ public class PosViewModelSellerGateTest
             new FakeCounterpartyService(),
             deps.ParkedSaleService,
             new FakeReturnService(),
-            new FakeExchangeService(),
+            new FakeCashOperationService(),
             deps.QuoteService,
             new FakePromotionProvider(),
             new FakeSessionContext(),

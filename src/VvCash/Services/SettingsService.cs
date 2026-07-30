@@ -17,6 +17,7 @@ public class SettingsData
     public List<PrinterConfig> Printers { get; set; } = new();
     public bool ReturnOpenCashDrawer { get; set; } = true;
     public bool ReturnPrintReceipt { get; set; } = true;
+    public string ExchangePayoutCategoryId { get; set; } = string.Empty;
 }
 
 public class SettingsService : ISettingsService
@@ -80,6 +81,12 @@ public class SettingsService : ISettingsService
         set => _data.ReturnPrintReceipt = value;
     }
 
+    public string ExchangePayoutCategoryId
+    {
+        get => _data.ExchangePayoutCategoryId;
+        set => _data.ExchangePayoutCategoryId = value ?? string.Empty;
+    }
+
     public SettingsService()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -109,6 +116,10 @@ public class SettingsService : ISettingsService
                 if (_data.Printers == null)
                 {
                     _data.Printers = new List<PrinterConfig>();
+                }
+                if (_data.ExchangePayoutCategoryId == null)
+                {
+                    _data.ExchangePayoutCategoryId = string.Empty;
                 }
             }
             catch

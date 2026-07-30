@@ -35,7 +35,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ICounterpartyService _counterpartyService;
     private readonly IParkedSaleService _parkedSaleService;
     private readonly IReturnService _returnService;
-    private readonly IExchangeService _exchangeService;
+    private readonly ICashOperationService _cashOperationService;
     private readonly IQuoteService _quoteService;
     private readonly IPromotionProvider _promotionProvider;
     private readonly ISessionContext _session;
@@ -557,7 +557,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ICounterpartyService counterpartyService,
         IParkedSaleService parkedSaleService,
         IReturnService returnService,
-        IExchangeService exchangeService,
+        ICashOperationService cashOperationService,
         IQuoteService quoteService,
         IPromotionProvider promotionProvider,
         ISessionContext session,
@@ -581,7 +581,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _counterpartyService = counterpartyService;
         _parkedSaleService = parkedSaleService;
         _returnService = returnService;
-        _exchangeService = exchangeService;
+        _cashOperationService = cashOperationService;
         _quoteService = quoteService;
         _session = session;
         _httpClient = httpClient;
@@ -1528,9 +1528,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             {
                 var dialog = new VvCash.Views.ExchangeWindow();
                 dialog.DataContext = new ExchangeViewModel(
-                    dialog, _returnService, _exchangeService, _productService, _syncService,
+                    dialog, _returnService, _cashOperationService, _expenseDocumentService,
+                    _counterpartyService, _settingsService, _productService, _syncService,
                     _printerService, _features,
-                    _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty, _sellerSession.Current?.Id, IsSystemOnline);
+                    _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty,
+                    _sellerSession.Current?.Id, _session.CashId, IsSystemOnline);
                 await dialog.ShowDialog(mainWindow);
             }
         }

@@ -29,6 +29,7 @@ public class ShiftServiceTest
         public List<PrinterConfig> Printers { get; set; } = new();
         public bool ReturnOpenCashDrawer { get; set; } = true;
         public bool ReturnPrintReceipt { get; set; } = true;
+        public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged;
         public void Save() => SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -36,6 +37,7 @@ public class ShiftServiceTest
     private sealed class FakeSessionContext : ISessionContext
     {
         public string? WarehouseId { get; set; }
+        public string? CashId { get; set; }
     }
 
     private static ShiftService CreateService(StubHttpMessageHandler handler, out FakeSessionContext session)
@@ -97,6 +99,38 @@ public class ShiftServiceTest
         Assert.Equal("shift-1", result);
         Assert.Equal("wh-1", session.WarehouseId);
         Assert.Equal(0, revokedCount);
+    }
+
+    [Fact]
+    public async Task GetShiftStateAsync_Success_LearnsTheCashId()
+    {
+        // The till payout is the one call that makes the client name its own cash
+        // (every other endpoint reads it off the token), and the shift reply is where
+        // that id comes from. Without it the exchange screen has to refuse.
+        var handler = new StubHttpMessageHandler(req =>
+            (HttpStatusCode.OK, """{"status":0,"body":{"id":"shift-1","cash":"cash-7"}}"""));
+        var svc = CreateService(handler, out var session);
+
+        var result = await svc.GetShiftStateAsync();
+
+        Assert.Equal("shift-1", result);
+        Assert.Equal("cash-7", session.CashId);
+    }
+
+    [Fact]
+    public void ExtractCashId_AcceptsFlatString_FlatIdField_AndNestedObject()
+    {
+        Assert.Equal("c1", ShiftService.ExtractCashId(Body("""{"id":"s","cash":"c1"}""")));
+        Assert.Equal("c2", ShiftService.ExtractCashId(Body("""{"id":"s","cash_id":"c2"}""")));
+        Assert.Equal("c3", ShiftService.ExtractCashId(Body("""{"id":"s","cash":{"id":"c3"}}""")));
+        Assert.Null(ShiftService.ExtractCashId(Body("""{"id":"s"}""")));
+    }
+
+    // Clone so the element stays valid after the JsonDocument is disposed.
+    private static System.Text.Json.JsonElement Body(string json)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 
     [Fact]

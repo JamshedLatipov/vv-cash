@@ -133,7 +133,8 @@ public partial class App : Application
                 var settingsService = Services.GetRequiredService<ISettingsService>();
                 var offlineStorage = Services.GetRequiredService<IOfflineStorageService>();
                 var featuresForSettings = Services.GetRequiredService<ICashFeatureService>();
-                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage, featuresForSettings);
+                var paymentCategories = Services.GetRequiredService<IPaymentCategoryService>();
+                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage, featuresForSettings, paymentCategories);
                 settingsVm.NavigationRequest = mainVm.NavigateTo;
                 mainVm.NavigateTo(settingsVm);
             };
@@ -224,7 +225,8 @@ public partial class App : Application
         services.AddHttpClient<ExpenseDocumentService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<IExpenseDocumentService>(sp => sp.GetRequiredService<ExpenseDocumentService>());
         services.AddHttpClient<IReturnService, ReturnService>().AddHttpMessageHandler<AuthHeaderHandler>();
-        services.AddHttpClient<IExchangeService, ExchangeService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<ICashOperationService, CashOperationService>().AddHttpMessageHandler<AuthHeaderHandler>();
+        services.AddHttpClient<IPaymentCategoryService, PaymentCategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ISyncService, SyncService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // POS Services

@@ -123,4 +123,24 @@ public class CounterpartyService : ICounterpartyService
         }
         return null;
     }
+
+    /// <summary>The only route a register token is guaranteed to reach counterparties
+    /// through is the unfiltered cash search, so this asks for everything and picks the
+    /// row whose form is "system". Called once per exchange screen at most (the caller
+    /// caches it), never on the sale path, because on a store with a large customer
+    /// book the reply is not small.</summary>
+    public async Task<string?> GetSystemCounterpartyIdAsync()
+    {
+        var all = await SearchCounterpartiesAsync(string.Empty);
+        if (all == null) return null;
+        foreach (var c in all)
+        {
+            if (string.Equals(c.Form, "system", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(c.Id))
+            {
+                return c.Id;
+            }
+        }
+        return null;
+    }
 }
