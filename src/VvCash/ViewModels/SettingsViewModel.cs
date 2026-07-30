@@ -6,7 +6,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Constants;
 using VvCash.Models;
+using VvCash.Models.Api;
 using VvCash.Services;
+using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Hardware;
 
@@ -79,6 +81,7 @@ public partial class SettingsViewModel : ViewModelBase
     private readonly ISettingsService _settingsService;
     private readonly IOfflineStorageService _offlineStorageService;
     private readonly ICashFeatureService _features;
+    private readonly IPaymentCategoryService? _paymentCategories;
 
     [ObservableProperty]
     private string _backendUrl = string.Empty;
@@ -101,6 +104,15 @@ public partial class SettingsViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _returnPrintReceipt = true;
+
+    /// <summary>Payment categories offered for the exchange payout, loaded from
+    /// GET /documents/payment/categories/. Empty when the register is offline or the
+    /// role lacks documents.PaymentCategoryList — in which case the previously saved id
+    /// is left alone rather than being cleared by an empty dropdown (see Save).</summary>
+    public ObservableCollection<PaymentCategory> PaymentCategories { get; } = new();
+
+    [ObservableProperty]
+    private PaymentCategory? _selectedPaymentCategory;
 
     /// <summary>What the register will actually do, which is the server's answer.
     /// The local fields behind the old checkboxes are kept and still saved, but no
@@ -131,12 +143,14 @@ public partial class SettingsViewModel : ViewModelBase
     private ViewModelBase _previousViewModel;
 
     public SettingsViewModel(ViewModelBase previousViewModel, ISettingsService settingsService,
-        IOfflineStorageService offlineStorageService, ICashFeatureService features)
+        IOfflineStorageService offlineStorageService, ICashFeatureService features,
+        IPaymentCategoryService? paymentCategories = null)
     {
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
         _offlineStorageService = offlineStorageService;
         _features = features;
+        _paymentCategories = paymentCategories;
 
         // Load existing settings
         BackendUrl = _settingsService.BackendUrl;
@@ -158,6 +172,18 @@ public partial class SettingsViewModel : ViewModelBase
             vm.UpdateAvailableConnections();
             Printers.Add(vm);
         }
+
+        _ = LoadPaymentCategoriesAsync();
+    }
+
+    private async Task LoadPaymentCategoriesAsync()
+    {
+        if (_paymentCategories == null) return;
+        var categories = await _paymentCategories.GetPaymentCategoriesAsync();
+        PaymentCategories.Clear();
+        foreach (var c in categories) PaymentCategories.Add(c);
+        SelectedPaymentCategory = PaymentCategories
+            .FirstOrDefault(c => c.Id == _settingsService.ExchangePayoutCategoryId);
     }
 
     [RelayCommand]
@@ -227,6 +253,12 @@ public partial class SettingsViewModel : ViewModelBase
 
         _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
         _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;
+
+        // Only when the list actually loaded: an offline settings visit shows an empty
+        // dropdown and a null selection, and writing that through would silently
+        // disable exchanges on a register that was configured correctly.
+        if (SelectedPaymentCategory != null)
+            _settingsService.ExchangePayoutCategoryId = SelectedPaymentCategory.Id;
 
         _settingsService.Printers = Printers.Select(p => new PrinterConfig
         {

@@ -167,6 +167,13 @@
                         <TextBlock Text="{Binding [SyncIntervalMinutes], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
                         <TextBox Classes="SettingsInput" Text="{Binding SyncIntervalText, Mode=TwoWay}" Watermark="{Binding [eg10], Source={x:Static services:I18nService.Instance}}" Margin="0,8,0,32"/>
 
+                        <!-- Exchange payout category: the expense heading the till payout of an
+                             exchange is filed under. The server requires one and has no default,
+                             so the exchange button refuses while this is unset. -->
+                        <TextBlock Text="{Binding [ExchangePayoutCategory], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                        <ComboBox ItemsSource="{Binding PaymentCategories}" SelectedItem="{Binding SelectedPaymentCategory, Mode=TwoWay}"
+                                  DisplayMemberBinding="{Binding Name}" Classes="SettingsCombo"/>
+
                         <!-- Return Post-Action Toggles: read-only, showing what the register will
                              actually do — these are now decided by the server (see ReturnsViewModel /
                              SettingsViewModel's Effective properties), not by this checkbox. -->
