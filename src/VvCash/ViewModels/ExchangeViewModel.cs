@@ -370,15 +370,24 @@ public partial class ExchangeViewModel : ViewModelBase
         try
         {
             var request = BuildRequest();
-            var result = await _exchangeService.CreateExchangeAsync(SelectedSale.Id, request);
-            if (result == null)
+            var outcome = await _exchangeService.CreateExchangeAsync(SelectedSale.Id, request);
+            if (outcome.Body == null)
             {
                 // No exchange happened server-side: nothing gets printed, the
                 // drawer stays shut, and both baskets are left exactly as the
                 // cashier built them so they can retry or cancel — see
                 // ExchangeService's own remarks on why there is no offline
                 // fallback to fall back to.
-                ErrorMessage = I18nService.Instance["ExchangeFailed"];
+                //
+                // The server's own reason wins over a generic message: "the
+                // exchange window has expired" and "this exchange was already
+                // processed" call for opposite reactions, and only the second is
+                // worth a retry. A refusal with no reason at all still reads as a
+                // failed exchange, while nothing answering (no status) is reported
+                // as what it is — no connection.
+                ErrorMessage = !string.IsNullOrWhiteSpace(outcome.Message)
+                    ? outcome.Message
+                    : I18nService.Instance[outcome.StatusCode == null ? "NoConnection" : "ExchangeFailed"];
                 return;
             }
 
@@ -394,10 +403,10 @@ public partial class ExchangeViewModel : ViewModelBase
             // number below comes from it and not from the screen: a price-drift
             // audit or a rounding difference could make its figure differ from
             // what this screen computed before the request went out.
-            var difference = result.Difference;
+            var difference = outcome.Body.Difference;
             // The document that carries the exchange — from the server, never
             // invented locally.
-            var documentNumber = result.ExpenseDocumentNumber ?? string.Empty;
+            var documentNumber = outcome.Body.ExpenseDocumentNumber ?? string.Empty;
 
             await RunPostExchangeActionsAsync(returnedReceiptLines, issuedReceiptLines, difference, documentNumber);
 

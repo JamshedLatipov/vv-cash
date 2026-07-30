@@ -14,18 +14,24 @@ namespace VvCash.Tests;
 
 public class ExchangeViewModelTest
 {
-    // Records what was actually sent, and hands back a canned response — null
-    // stands in for the server refusing the exchange (see ExchangeService's own
-    // remarks: any refusal or transport failure comes back as null).
+    // Records what was actually sent, and hands back a canned outcome. The default
+    // is the bleakest one — nothing answered at all — so a test that cares about
+    // success has to say so.
     private sealed class FakeExchangeService : IExchangeService
     {
-        public ExchangeResponseBody? Response;
+        public ExchangeOutcome Outcome = new();
         public readonly List<ExchangeRequest> Requests = new();
-        public Task<ExchangeResponseBody?> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+        public Task<ExchangeOutcome> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
         {
             Requests.Add(request);
-            return Task.FromResult(Response);
+            return Task.FromResult(Outcome);
         }
+
+        public static ExchangeOutcome Booked(string documentNumber, decimal difference) => new()
+        {
+            StatusCode = 200,
+            Body = new ExchangeResponseBody { ExpenseDocumentNumber = documentNumber, Difference = difference },
+        };
     }
 
     // Counts calls the same way ReturnsViewModelTest's own CountingPrinter does
@@ -73,8 +79,7 @@ public class ExchangeViewModelTest
     [Fact]
     public async Task SubmitExchange_Success_WithDifference_PrintsOnceWithServerDocumentNumber_AndOpensDrawer()
     {
-        var exchange = new FakeExchangeService
-        { Response = new ExchangeResponseBody { ExpenseDocumentNumber = "77", Difference = 20m } };
+        var exchange = new FakeExchangeService { Outcome = FakeExchangeService.Booked("77", 20m) };
         var printer = new CountingPrinter();
         var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService()); // returned 80, issued 100
 
@@ -89,7 +94,10 @@ public class ExchangeViewModelTest
     [Fact]
     public async Task SubmitExchange_ServerRefuses_NoPrint_NoDrawer_BasketsUntouched()
     {
-        var exchange = new FakeExchangeService { Response = null }; // server refusal / transport failure
+        var exchange = new FakeExchangeService
+        {
+            Outcome = new ExchangeOutcome { StatusCode = 400, Message = "declared total 100.00 does not match the calculated total 80.00" }
+        };
         var printer = new CountingPrinter();
         var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService());
 
@@ -110,7 +118,7 @@ public class ExchangeViewModelTest
         // second sale for the same goods; the same hash gets 409 from the server
         // instead. The refusal below stands in for that lost reply: it leaves both
         // baskets exactly as they were, which is the state a retry happens from.
-        var exchange = new FakeExchangeService { Response = null };
+        var exchange = new FakeExchangeService(); // nothing answered: the lost reply
         var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
 
         await vm.SubmitExchangeCommand.ExecuteAsync(null);
@@ -132,8 +140,7 @@ public class ExchangeViewModelTest
     [Fact]
     public async Task SubmitExchange_ExactPriceMatch_PrintsReceipt_ButDoesNotOpenDrawer()
     {
-        var exchange = new FakeExchangeService
-        { Response = new ExchangeResponseBody { ExpenseDocumentNumber = "5", Difference = 0m } };
+        var exchange = new FakeExchangeService { Outcome = FakeExchangeService.Booked("5", 0m) };
         var printer = new CountingPrinter();
         var vm = BuildForSubmit(exchange, printer, new FakeCashFeatureService(), returnedPrice: 80m, issuedPrice: 80m);
 
@@ -141,6 +148,35 @@ public class ExchangeViewModelTest
 
         Assert.Equal(1, printer.ExchangeReceipt);
         Assert.Equal(0, printer.Drawer); // nothing for the drawer to hand over or collect
+    }
+
+    [Fact]
+    public async Task SubmitExchange_RefusedWithAReason_ShowsThatReason_NotAGenericFailure()
+    {
+        // "Срок обмена истёк" and "этот обмен уже проведён" call for opposite
+        // reactions from the cashier, and neither is a connection problem — a screen
+        // that collapses all three into one message hides the only information that
+        // tells them what to do next.
+        const string reason = "exchange period of 14 days has expired for this sale";
+        var exchange = new FakeExchangeService { Outcome = new ExchangeOutcome { StatusCode = 400, Message = reason } };
+        var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
+
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(reason, vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_NothingAnswered_ReportsNoConnection()
+    {
+        // The other side of the test above: no status at all is the one case where
+        // the request may never have reached the server.
+        var exchange = new FakeExchangeService(); // no body, no status, no message
+        var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
+
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(I18nService.Instance["NoConnection"], vm.ErrorMessage);
     }
     // Same shape ReturnsViewModel uses to build a ReturnLineVm: one unit sold,
     // none returned yet, priced at `price` after discount.

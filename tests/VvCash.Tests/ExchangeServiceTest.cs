@@ -36,38 +36,61 @@ public class ExchangeServiceTest
             (HttpStatusCode.OK, """{"status":0,"body":{"difference":50,"return_document_number":"7","expense_document_number":"8"}}"""));
         var svc = Build(handler);
 
-        var body = await svc.CreateExchangeAsync("doc1", new ExchangeRequest { SelectedDate = "2026-06-06" });
+        var outcome = await svc.CreateExchangeAsync("doc1", new ExchangeRequest { SelectedDate = "2026-06-06" });
 
-        Assert.NotNull(body);
-        Assert.Equal(50m, body!.Difference);
-        Assert.Equal("7", body.ReturnDocumentNumber);
-        Assert.Equal("8", body.ExpenseDocumentNumber);
+        Assert.NotNull(outcome.Body);
+        Assert.Equal(50m, outcome.Body!.Difference);
+        Assert.Equal("7", outcome.Body.ReturnDocumentNumber);
+        Assert.Equal("8", outcome.Body.ExpenseDocumentNumber);
         Assert.Contains("documents/exchange/doc1/", handler.LastRequest!.RequestUri!.ToString());
     }
 
     [Fact]
-    public async Task CreateExchangeAsync_ReturnsNullOnServerRejection()
+    public async Task CreateExchangeAsync_WindowExpired_SurfacesTheServersOwnReason()
     {
+        // Exactly the shape this endpoint refuses with: a bare JSON string, not the
+        // envelope the success path uses. Parsing the body before checking the status
+        // throws on it, which is what used to turn every refusal into a nameless
+        // failure the cashier could not act on.
         var handler = new StubHttpMessageHandler(_ =>
-            (HttpStatusCode.BadRequest, """{"status":1,"message":"exchange window of 14 days has expired for this sale"}"""));
+            (HttpStatusCode.BadRequest, "\"exchange period of 14 days has expired for this sale\""));
         var svc = Build(handler);
 
-        var body = await svc.CreateExchangeAsync("doc1", new ExchangeRequest { SelectedDate = "2026-06-06" });
+        var outcome = await svc.CreateExchangeAsync("doc1", new ExchangeRequest { SelectedDate = "2026-06-06" });
 
         // The goods are already in the customer's hands by the time this call
         // returns, and nothing offline can undo that. A rejection must therefore
-        // never read as success — null is the only safe result.
-        Assert.Null(body);
+        // never read as success — no body is the only safe result.
+        Assert.Null(outcome.Body);
+        Assert.Equal(400, outcome.StatusCode);
+        Assert.Equal("exchange period of 14 days has expired for this sale", outcome.Message);
     }
 
     [Fact]
-    public async Task CreateExchangeAsync_ReturnsNullWhenTheServerIsUnreachable()
+    public async Task CreateExchangeAsync_AlreadyProcessed_IsTellableApartFromADeadNetwork()
+    {
+        // 409 means the exchange is already booked — pressing submit again would only
+        // be refused again. A transport failure is the opposite: nothing may have
+        // reached the server at all. The two must never look the same.
+        var duplicate = await Build(new StubHttpMessageHandler(_ =>
+                (HttpStatusCode.Conflict, "\"duplicate document: this exchange was already processed\"")))
+            .CreateExchangeAsync("doc1", new ExchangeRequest());
+
+        Assert.Null(duplicate.Body);
+        Assert.Equal(409, duplicate.StatusCode);
+        Assert.Contains("already processed", duplicate.Message);
+    }
+
+    [Fact]
+    public async Task CreateExchangeAsync_ServerUnreachable_HasNoBodyAndNoStatus()
     {
         var handler = new StubHttpMessageHandler(_ => throw new HttpRequestException("connection refused"));
         var svc = Build(handler);
 
-        var body = await svc.CreateExchangeAsync("doc1", new ExchangeRequest { SelectedDate = "2026-06-06" });
+        var outcome = await svc.CreateExchangeAsync("doc1", new ExchangeRequest { SelectedDate = "2026-06-06" });
 
-        Assert.Null(body);
+        Assert.Null(outcome.Body);
+        Assert.Null(outcome.StatusCode); // nothing answered, so nothing to report but silence
+        Assert.Null(outcome.Message);
     }
 }

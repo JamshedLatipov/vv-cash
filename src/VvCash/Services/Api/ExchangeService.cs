@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using VvCash.Models.Api;
 
@@ -31,24 +32,63 @@ public class ExchangeService : IExchangeService
         return baseUrl;
     }
 
-    public async Task<ExchangeResponseBody?> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+    public async Task<ExchangeOutcome> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
     {
         try
         {
             var url = $"{GetBaseUrl()}documents/exchange/{expenseDocumentId}/";
             var response = await _httpClient.PostAsJsonAsync(url, request);
+
+            // The status is checked before the body is parsed, and a refusal is read
+            // as text: this endpoint writes its reason as a bare JSON string rather
+            // than the usual envelope, so parsing it as one throws — which used to
+            // make an expired window, an already-processed exchange and a dead
+            // network all look identical to the cashier.
+            if (!response.IsSuccessStatusCode)
+                return new ExchangeOutcome
+                {
+                    StatusCode = (int)response.StatusCode,
+                    Message = ReadErrorMessage(await response.Content.ReadAsStringAsync()),
+                };
+
             var res = await response.Content.ReadFromJsonAsync<ExchangeResponse>();
-            if (!response.IsSuccessStatusCode || res == null || res.Status != 0)
-                return null;
-            return res.Body;
+            if (res?.Body == null || res.Status != 0)
+                return new ExchangeOutcome { StatusCode = (int)response.StatusCode, Message = res?.Message };
+
+            return new ExchangeOutcome { Body = res.Body, StatusCode = (int)response.StatusCode };
         }
         catch (Exception ex)
         {
             // Network unreachable, DNS failure, timeout, etc. There is no offline
-            // fallback for an exchange (see class remarks), so any failure here
-            // must surface as null rather than throw.
+            // fallback for an exchange (see class remarks), so this must not throw —
+            // and it leaves StatusCode null, the one case where the server may never
+            // have seen the request at all.
             Debug.WriteLine($"[ExchangeService] Error creating exchange: {ex.Message}");
-            return null;
+            return new ExchangeOutcome();
         }
+    }
+
+    /// <summary>Pulls the human-readable reason out of a refusal body. The exchange
+    /// endpoint writes a bare JSON string; the shared middleware (an expired token,
+    /// say) writes the usual envelope instead, so both shapes are handled and
+    /// anything else is passed through verbatim rather than being dropped.</summary>
+    private static string? ReadErrorMessage(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.String)
+                return doc.RootElement.GetString();
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("message", out var message)
+                && message.ValueKind == JsonValueKind.String)
+                return message.GetString();
+        }
+        catch (JsonException)
+        {
+            // Not JSON at all (a proxy's HTML error page, for instance).
+        }
+        return body.Trim();
     }
 }

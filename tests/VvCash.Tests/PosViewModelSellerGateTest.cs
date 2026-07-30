@@ -464,7 +464,7 @@ public class PosViewModelSellerGateTest
     // rather than silently returning fabricated data that would never be checked.
     private class FakeExchangeService : IExchangeService
     {
-        public Task<ExchangeResponseBody?> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
+        public Task<ExchangeOutcome> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
             => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
     }
 
