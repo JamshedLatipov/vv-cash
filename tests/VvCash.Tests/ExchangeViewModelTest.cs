@@ -20,8 +20,12 @@ public class ExchangeViewModelTest
     private sealed class FakeExchangeService : IExchangeService
     {
         public ExchangeResponseBody? Response;
+        public readonly List<ExchangeRequest> Requests = new();
         public Task<ExchangeResponseBody?> CreateExchangeAsync(string expenseDocumentId, ExchangeRequest request)
-            => Task.FromResult(Response);
+        {
+            Requests.Add(request);
+            return Task.FromResult(Response);
+        }
     }
 
     // Counts calls the same way ReturnsViewModelTest's own CountingPrinter does
@@ -95,6 +99,34 @@ public class ExchangeViewModelTest
         Assert.Equal(0, printer.Drawer);
         Assert.Single(vm.IssuedLines); // left exactly as the cashier built it, so they can retry
         Assert.Equal(1, vm.ReturnedLines.Single().ReturnQty);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_RetryOfTheSameBaskets_SendsTheSameDocumentHash()
+    {
+        // The dangerous case is a first attempt that commits server-side while its
+        // reply is lost, so the cashier presses submit again. A hash minted per press
+        // makes that second press a brand new exchange — a second return plus a
+        // second sale for the same goods; the same hash gets 409 from the server
+        // instead. The refusal below stands in for that lost reply: it leaves both
+        // baskets exactly as they were, which is the state a retry happens from.
+        var exchange = new FakeExchangeService { Response = null };
+        var vm = BuildForSubmit(exchange, new CountingPrinter(), new FakeCashFeatureService());
+
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, exchange.Requests.Count);
+        Assert.NotEmpty(exchange.Requests[0].DocumentHash);
+        Assert.Equal(exchange.Requests[0].DocumentHash, exchange.Requests[1].DocumentHash);
+
+        // A changed basket is a different exchange and must not inherit the key —
+        // otherwise the server would refuse it as a duplicate of the one above.
+        vm.AddIssuedLine(MakeIssuedLine(30m));
+        await vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(3, exchange.Requests.Count);
+        Assert.NotEqual(exchange.Requests[1].DocumentHash, exchange.Requests[2].DocumentHash);
     }
 
     [Fact]

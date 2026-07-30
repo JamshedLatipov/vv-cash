@@ -43,6 +43,15 @@ public partial class ExchangeViewModel : ViewModelBase
     private readonly string _shiftId;
     private readonly string? _sellerId;
 
+    /// <summary>Idempotency key for the whole exchange, minted once per basket
+    /// state and not per submit press. When the first attempt commits server-side
+    /// but its reply is lost (timeout, proxy, dropped wifi), the cashier presses
+    /// submit again — with the same hash the server answers 409, whereas a fresh
+    /// one books a second return plus a second sale for the same goods. Cleared
+    /// whenever either basket changes, so a genuinely different exchange never
+    /// reuses it.</summary>
+    private string? _documentHash;
+
     [ObservableProperty] private ObservableCollection<ReturnLineVm> _returnedLines = new();
     [ObservableProperty] private ObservableCollection<CartItem> _issuedLines = new();
 
@@ -275,6 +284,9 @@ public partial class ExchangeViewModel : ViewModelBase
 
     private void RaiseTotalsChanged()
     {
+        // The single funnel every basket edit goes through, so also where a
+        // changed basket stops being a retry of the previous exchange.
+        _documentHash = null;
         OnPropertyChanged(nameof(ReturnedTotal));
         OnPropertyChanged(nameof(IssuedTotal));
         OnPropertyChanged(nameof(Difference));
@@ -292,16 +304,23 @@ public partial class ExchangeViewModel : ViewModelBase
             ? dto.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
             : (date ?? string.Empty);
 
+        _documentHash ??= Guid.NewGuid().ToString();
+
         return new ExchangeRequest
         {
-            DocumentHash = Guid.NewGuid().ToString(),
+            DocumentHash = _documentHash,
             SelectedDate = dateOnly,
             Returned = ReturnedLines.Where(l => l.ReturnQty > 0)
                 .Select(l => new ReturnLineRequest { Product = l.ProductId, Quantity = l.ReturnQty })
                 .ToList(),
             Issued = new DocumentRequest
             {
-                DocumentHash = Guid.NewGuid().ToString(),
+                // The server derives the replacement sale's own hash from the
+                // exchange's and ignores whatever is sent here; the field is only
+                // populated because the sale body requires it. Deliberately the
+                // same value rather than a fresh Guid, so a retry sends a byte-for-byte
+                // identical request.
+                DocumentHash = _documentHash,
                 SellerId = _sellerId,
                 ShiftId = _shiftId,
                 SoldSource = SoldSourcesEnum.CASH,
