@@ -208,13 +208,27 @@ public class CartService : ICartService
     public void ApplyQuote(QuoteResult result)
     {
         Quote = result;
+        ApplyQuotedPrices(result);
         RaiseCartChanged();
     }
 
     public void ClearQuote()
     {
         Quote = null;
+        ApplyQuotedPrices(null);
         RaiseCartChanged();
+    }
+
+    /// <summary>Stamps the server's per-line unit price onto the cart, so the screen, the
+    /// customer display and the receipt all show what the customer is actually charged
+    /// rather than this register's possibly stale cached price. Matched by product id, the
+    /// same way <see cref="QuoteLineResolver"/> matches — <see cref="AddProduct"/> merges
+    /// repeats of a product onto one line, so the id is unambiguous here. A null result,
+    /// or a line the server did not price, falls back to the cached price.</summary>
+    private void ApplyQuotedPrices(QuoteResult? result)
+    {
+        foreach (var item in _items)
+            item.QuotedUnitPrice = result?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id)?.UnitPrice;
     }
 
     public void ClearCustomerDiscount()
@@ -245,6 +259,9 @@ public class CartService : ICartService
         // (online) or falls back to the flat customer % (offline).
         Quote = null;
         foreach (var item in items) _items.Add(item);
+        // A parked line may carry the price quoted when it was parked; with no quote
+        // restored alongside it, that price would outlive the snapshot that justified it.
+        ApplyQuotedPrices(null);
         foreach (var coupon in coupons) _appliedCoupons.Add(coupon);
         ManualDiscountPercent = manualDiscountPercent;
         ManualDiscountAmount = manualDiscountAmount;

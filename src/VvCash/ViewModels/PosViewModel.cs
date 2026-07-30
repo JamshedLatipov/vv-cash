@@ -895,6 +895,25 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         await RequoteAsync(cts);
     }
 
+    /// <summary>Quotes the cart immediately, skipping the debounce, and awaits the answer.
+    /// Used right before payment: the debounced requote can still be pending when the
+    /// cashier hits Pay, and the sale must report the quote it was actually priced from.
+    /// Never lets a quote failure block a sale — the cart falls back to local pricing.</summary>
+    private async Task RequoteNowAsync()
+    {
+        try
+        {
+            _quoteCts?.Cancel();
+            var cts = new System.Threading.CancellationTokenSource();
+            _quoteCts = cts;
+            await RequoteAsync(cts);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Pre-payment requote failed: {ex}");
+        }
+    }
+
     // Triggers all originate on the UI thread and the codebase never uses
     // ConfigureAwait(false), so these continuations resume on the UI thread —
     // required because applying a quote raises CartChanged, which rebuilds
@@ -906,20 +925,29 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         // No card / no code is NOT a reason to skip the quote: auto-applied
         // promotions have no cashier input at all, and the server can only put
-        // them into best-deal if it is asked to price the cart.
-        if (!IsSystemOnline || _cartService.Items.Count == 0 || string.IsNullOrWhiteSpace(_session.WarehouseId))
+        // them into best-deal if it is asked to price the cart. Neither is a missing
+        // warehouse id — the register never learns one, and the server resolves it
+        // from the cash token (gating on it here is what kept this call from ever
+        // being made).
+        if (!IsSystemOnline || _cartService.Items.Count == 0)
         {
+            // Logged, because the silent version of this branch is precisely how an
+            // always-skipped quote went unnoticed: the cart just kept pricing locally.
+            if (_cartService.Items.Count > 0)
+                System.Diagnostics.Debug.WriteLine("[PosViewModel] Requote skipped: system offline.");
             if (IsCurrentQuote(cts)) ApplyQuoteGuarded(() => _cartService.ClearQuote());
             return;
         }
 
-        var request = QuoteRequestBuilder.Build(_cartService.Items, _session.WarehouseId!, cardId, _activePromoCode);
+        var request = QuoteRequestBuilder.Build(_cartService.Items, _session.WarehouseId, cardId, _activePromoCode);
         var result = await _quoteService.QuoteAsync(request, ct);
         if (!IsCurrentQuote(cts)) return; // a newer requote superseded this one
 
         if (result == null)
         {
-            // Network failure / offline: fall back to flat %.
+            // Network failure / rejected request: fall back to local pricing. QuoteService
+            // logs why; without that this fallback is indistinguishable from being offline.
+            System.Diagnostics.Debug.WriteLine("[PosViewModel] Requote returned no quote — pricing the cart locally.");
             ApplyQuoteGuarded(() => _cartService.ClearQuote());
             return;
         }
@@ -1602,7 +1630,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    private void Pay()
+    private async Task Pay()
     {
         if (!CartItems.Any()) return;
 
@@ -1615,6 +1643,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         if (NavigationRequest != null)
         {
+            // Before the amount to collect is shown, not after: the payment screen is
+            // built from TotalAmount, so quoting afterwards would take money against a
+            // price the server never agreed to.
+            await RequoteNowAsync();
+
             var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result, cashAmount, cardAmount) =>
             {
                 if (result)
@@ -1647,7 +1680,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 Name = item.Product.Name,
                                 ProductId = item.Product.Id,
                                 Quantity = item.Quantity,
-                                SellPrice = item.Product.Price,
+                                // The quoted price when a quote priced this line, the cached
+                                // one otherwise. The server flags a line is_suspicious when
+                                // sell_price differs from its catalog price, so sending a
+                                // stale cached price would flag every honest sale.
+                                SellPrice = item.UnitPrice,
                                 PriceBeforeDiscount = before,
                                 DiscountPercent = pct
                             };
