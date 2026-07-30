@@ -36,43 +36,52 @@ public class EscPosPrinterService : IPrinterService
         _connectionString = connectionString;
     }
 
+    /// <summary>Builds the sale receipt bytes. Static and separate from sending
+    /// so the layout can be asserted on, exactly as BuildReturnReceipt is.</summary>
+    public static byte[] BuildSaleReceipt(
+        IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
+        string? discountName = null)
+    {
+        using var ms = new MemoryStream();
+        Write(ms, CmdInit);
+        Write(ms, CmdAlignCenter);
+        Write(ms, CmdDoubleSizeOn);
+        WriteLine(ms, "VV CASH POS");
+        Write(ms, CmdDoubleSizeOff);
+        WriteLine(ms, "----------------------------");
+        Write(ms, CmdAlignLeft);
+        foreach (var item in items)
+        {
+            var line = $"{item.Product.Name} x{item.QuantityDisplay}";
+            var price = $"${item.LineTotal:F2}";
+            WriteLine(ms, PadLine(line, price, 32));
+        }
+        WriteLine(ms, "----------------------------");
+        WriteLine(ms, PadLine("Subtotal:", $"${subtotal:F2}", 32));
+        if (discount > 0)
+        {
+            WriteLine(ms, PadLine("Discount:", $"-${discount:F2}", 32));
+            if (!string.IsNullOrWhiteSpace(discountName))
+                WriteLine(ms, Truncate(discountName!, 32));
+        }
+
+        Write(ms, CmdBoldOn);
+        WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
+        Write(ms, CmdBoldOff);
+        WriteLine(ms, "----------------------------");
+        Write(ms, CmdAlignCenter);
+        WriteLine(ms, "Thank you for shopping!");
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
     public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null)
     {
         try
         {
-            using var ms = new MemoryStream();
-            Write(ms, CmdInit);
-            Write(ms, CmdAlignCenter);
-            Write(ms, CmdDoubleSizeOn);
-            WriteLine(ms, "VV CASH POS");
-            Write(ms, CmdDoubleSizeOff);
-            WriteLine(ms, "----------------------------");
-            Write(ms, CmdAlignLeft);
-            foreach (var item in items)
-            {
-                var line = $"{item.Product.Name} x{item.QuantityDisplay}";
-                var price = $"${item.LineTotal:F2}";
-                WriteLine(ms, PadLine(line, price, 32));
-            }
-            WriteLine(ms, "----------------------------");
-            WriteLine(ms, PadLine("Subtotal:", $"${subtotal:F2}", 32));
-            if (discount > 0)
-            {
-                WriteLine(ms, PadLine("Discount:", $"-${discount:F2}", 32));
-                if (!string.IsNullOrWhiteSpace(discountName))
-                    WriteLine(ms, Truncate(discountName!, 32));
-            }
-
-            Write(ms, CmdBoldOn);
-            WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
-            Write(ms, CmdBoldOff);
-            WriteLine(ms, "----------------------------");
-            Write(ms, CmdAlignCenter);
-            WriteLine(ms, "Thank you for shopping!");
-            Write(ms, CmdLineFeed);
-            Write(ms, CmdLineFeed);
-            Write(ms, CmdCut);
-            await SendAsync(ms.ToArray());
+            await SendAsync(BuildSaleReceipt(items, subtotal, discount, total, discountName));
             return true;
         }
         catch (Exception ex)
