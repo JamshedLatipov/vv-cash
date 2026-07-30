@@ -195,11 +195,10 @@
   "ExchangeCustomerPaysLabel": "Иловапулӣ:",
   "ExchangeRefundDueLabel": "Бозгашти пул:",
   "ExchangeOfflineWarning": "Иваз пайвастшавӣ ба сервер лозим аст",
-  "ExchangeExpiredWarning": "Мӯҳлати иваз барои ин чек гузаштааст",
+  "ExchangePayoutCategoryWarning": "Моддаи хароҷот барои додани пул аз касса интихоб нашудааст — иваз дастрас нест",
+  "ExchangePayoutCategory": "Моддаи хароҷот барои додани пул аз касса (иваз)",
   "ExchangeAction": "Иваз кардан",
   "SelectSaleToExchange": "Барои иваз чекро интихоб кунед",
   "IssuedGoods": "Моли баровардашуда",
-  "SearchProductToIssue": "Ҷустуҷӯи мол аз рӯи ном ё штрихкод",
-  "ExchangeSuccess": "Иваз анҷом шуд",
-  "ExchangeFailed": "Хатои иваз"
+  "SearchProductToIssue": "Ҷустуҷӯи мол аз рӯи ном ё штрихкод"
 }

@@ -195,11 +195,10 @@
   "ExchangeCustomerPaysLabel": "Qo'shimcha to'lov:",
   "ExchangeRefundDueLabel": "Qaytariladigan summa:",
   "ExchangeOfflineWarning": "Almashtirish uchun serverga ulanish kerak",
-  "ExchangeExpiredWarning": "Ushbu chek bo'yicha almashtirish muddati tugagan",
+  "ExchangePayoutCategoryWarning": "Kassadan pul berish uchun xarajat moddasi tanlanmagan — almashtirish mavjud emas",
+  "ExchangePayoutCategory": "Kassadan pul berish xarajat moddasi (almashtirish)",
   "ExchangeAction": "Almashtirish",
   "SelectSaleToExchange": "Almashtirish uchun chekni tanlang",
   "IssuedGoods": "Beriladigan mahsulot",
-  "SearchProductToIssue": "Nomi yoki shtrix-kod bo'yicha mahsulot qidirish",
-  "ExchangeSuccess": "Almashtirish bajarildi",
-  "ExchangeFailed": "Almashtirishda xatolik"
+  "SearchProductToIssue": "Nomi yoki shtrix-kod bo'yicha mahsulot qidirish"
 }

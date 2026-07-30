@@ -195,11 +195,10 @@
   "ExchangeCustomerPaysLabel": "Қосымша төлем:",
   "ExchangeRefundDueLabel": "Қайтарылатын сома:",
   "ExchangeOfflineWarning": "Айырбас серверге қосылуды талап етеді",
-  "ExchangeExpiredWarning": "Бұл чек бойынша айырбас мерзімі өтті",
+  "ExchangePayoutCategoryWarning": "Кассадан ақша беру үшін шығыс бабы таңдалмаған — айырбас қолжетімсіз",
+  "ExchangePayoutCategory": "Кассадан ақша беру шығыс бабы (айырбас)",
   "ExchangeAction": "Айырбастау",
   "SelectSaleToExchange": "Айырбастау үшін чекті таңдаңыз",
   "IssuedGoods": "Берілетін тауар",
-  "SearchProductToIssue": "Атауы немесе штрихкод бойынша тауар іздеу",
-  "ExchangeSuccess": "Айырбас орындалды",
-  "ExchangeFailed": "Айырбас қатесі"
+  "SearchProductToIssue": "Атауы немесе штрихкод бойынша тауар іздеу"
 }

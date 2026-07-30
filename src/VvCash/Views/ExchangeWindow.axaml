@@ -147,7 +147,7 @@
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
             <TextBlock Text="{Binding SuccessMessage}" Foreground="{StaticResource PrimaryBrush}" IsVisible="{Binding SuccessMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
             <TextBlock Text="{Binding [ExchangeOfflineWarning], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding !IsOnline}"/>
-            <TextBlock Text="{Binding [ExchangeExpiredWarning], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding !ExchangeAllowed}"/>
+            <TextBlock Text="{Binding [ExchangePayoutCategoryWarning], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding !IsPayoutCategoryConfigured}"/>
 
             <StackPanel Orientation="Horizontal" Spacing="16">
               <StackPanel Orientation="Horizontal" Spacing="6">

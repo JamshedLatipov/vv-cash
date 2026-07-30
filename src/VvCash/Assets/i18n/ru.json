@@ -174,11 +174,10 @@
   "ExchangeCustomerPaysLabel": "К доплате:",
   "ExchangeRefundDueLabel": "К выдаче:",
   "ExchangeOfflineWarning": "Обмен требует связи с сервером",
-  "ExchangeExpiredWarning": "Срок обмена по этому чеку истёк",
+  "ExchangePayoutCategoryWarning": "Не выбрана статья расхода для выдачи из кассы — обмен недоступен",
+  "ExchangePayoutCategory": "Статья расхода для выдачи из кассы (обмен)",
   "ExchangeAction": "Обменять",
   "SelectSaleToExchange": "Выберите чек для обмена",
   "IssuedGoods": "Выдача товара",
-  "SearchProductToIssue": "Поиск товара по названию или штрихкоду",
-  "ExchangeSuccess": "Обмен выполнен",
-  "ExchangeFailed": "Ошибка обмена"
+  "SearchProductToIssue": "Поиск товара по названию или штрихкоду"
 }

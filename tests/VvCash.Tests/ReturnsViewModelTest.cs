@@ -51,6 +51,7 @@ public class ReturnsViewModelTest
         public List<PrinterConfig> Printers { get; set; } = new();
         public bool ReturnOpenCashDrawer { get; set; } = true;
         public bool ReturnPrintReceipt { get; set; } = true;
+        public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public event System.EventHandler? SettingsChanged;
         public void Save() => SettingsChanged?.Invoke(this, System.EventArgs.Empty);
     }

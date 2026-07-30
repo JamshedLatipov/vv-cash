@@ -195,11 +195,10 @@
   "ExchangeCustomerPaysLabel": "Customer pays:",
   "ExchangeRefundDueLabel": "Refund due:",
   "ExchangeOfflineWarning": "Exchange requires a server connection",
-  "ExchangeExpiredWarning": "The exchange window for this receipt has expired",
+  "ExchangePayoutCategoryWarning": "No payout expense category is configured — exchange is unavailable",
+  "ExchangePayoutCategory": "Cash payout expense category (exchange)",
   "ExchangeAction": "Exchange",
   "SelectSaleToExchange": "Select a receipt to exchange",
   "IssuedGoods": "Goods issued",
-  "SearchProductToIssue": "Search product by name or barcode",
-  "ExchangeSuccess": "Exchange completed",
-  "ExchangeFailed": "Exchange failed"
+  "SearchProductToIssue": "Search product by name or barcode"
 }
