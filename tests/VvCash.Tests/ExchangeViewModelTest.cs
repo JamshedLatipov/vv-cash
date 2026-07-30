@@ -211,6 +211,47 @@ public class ExchangeViewModelTest
         Assert.Equal(40m, vm.RefundDue);
     }
 
+    /// <summary>What the backend computes for the replacement sale out of the request
+    /// itself (documents.calculateDiscountedPrice, summed into calculated_to_pay):
+    /// with discount_type "percent" it takes each line's discount_percent off
+    /// sell_price × quantity, with "cash" it subtracts the document-level discount as
+    /// money. The exchange endpoint compares the result against the declared
+    /// payment.to_pay and answers 400 when the two disagree.</summary>
+    private static decimal ServerCalculatedTotal(DocumentRequest doc) =>
+        doc.Products.Sum(p =>
+        {
+            var lineTotal = p.SellPrice * p.Quantity;
+            return doc.Payment.DiscountType == "percent"
+                ? lineTotal - lineTotal * p.DiscountPercent / 100m
+                : lineTotal;
+        }) - (doc.Payment.DiscountType == "cash" ? doc.Payment.Discount : 0m);
+
+    [Fact]
+    public void BuildRequest_IssuedProductWithCatalogDiscount_DeclaredTotalSurvivesTheServersOwnRecalculation()
+    {
+        // Product.Price is the already-discounted price the screen prices the line at,
+        // so the request must not also ask for the catalog percent to be taken off
+        // again — the server's total would land below the declared to_pay and the
+        // exchange endpoint refuses the whole exchange over that gap.
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
+        vm.AddIssuedLine(new CartItem
+        {
+            Product = new Product
+            {
+                Id = "p9", Name = "Discounted", Price = 80m,
+                OriginalPrice = 100m, DiscountPercent = 20m
+            },
+            Quantity = 2
+        });
+
+        var req = vm.BuildRequest();
+
+        Assert.Equal(160m, vm.IssuedTotal);                      // what the cashier is shown
+        Assert.Equal(vm.IssuedTotal, req.Issued.Payment.ToPay);  // and what is declared
+        Assert.Equal(req.Issued.Payment.ToPay, ServerCalculatedTotal(req.Issued));
+    }
+
     [Fact]
     public void CanSubmit_RequiresOnline_Allowed_AndBothBasketsFilled()
     {

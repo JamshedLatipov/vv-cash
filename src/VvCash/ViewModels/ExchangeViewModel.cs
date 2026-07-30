@@ -324,7 +324,21 @@ public partial class ExchangeViewModel : ViewModelBase
                 SellerId = _sellerId,
                 ShiftId = _shiftId,
                 SoldSource = SoldSourcesEnum.CASH,
-                Payment = new Payment { ToPay = IssuedTotal },
+                // Mirrors what the register's own plain sale sends (PosViewModel.Pay):
+                // SellPrice below is already the discounted price, so the
+                // document-level discount is declared in money and is zero here —
+                // this screen has no manual-discount control, and the per-line
+                // DiscountPercent stays informational. Left at the default
+                // "percent", the server took each line's catalog percent off an
+                // already-discounted price, so its computed total came out under the
+                // declared to_pay: a plain sale only flags that, an exchange is
+                // refused with 400, making every discounted product unexchangeable.
+                Payment = new Payment
+                {
+                    ToPay = IssuedTotal,
+                    DiscountType = "cash",
+                    Discount = 0m,
+                },
                 Products = IssuedLines.Select(l => new DocumentProduct
                 {
                     ProductId = l.Product.Id,
