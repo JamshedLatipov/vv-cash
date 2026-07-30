@@ -261,7 +261,9 @@ public class EscPosPrinterService : IPrinterService
 
         WriteLine(ms, "----------------------------");
         Write(ms, CmdBoldOn);
-        var label = difference > 0 ? "AMOUNT DUE:" : "REFUND:";
+        // An even swap owes nothing in either direction; without its own label it
+        // printed "REFUND: 0.00" and invited the customer to ask for the money.
+        var label = difference > 0 ? "AMOUNT DUE:" : difference < 0 ? "REFUND:" : "NO DIFFERENCE:";
         WriteLine(ms, PadLine(label, $"{Math.Abs(difference):F2}", 32));
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);

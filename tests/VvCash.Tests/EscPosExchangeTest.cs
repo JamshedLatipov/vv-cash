@@ -38,4 +38,20 @@ public class EscPosExchangeTest
         // The sign belongs to the label, not the number the cashier reads out.
         Assert.DoesNotContain("-40", text);
     }
+
+    [Fact]
+    public void ExchangeReceiptBuffer_EvenSwap_DoesNotPrintARefundOfZero()
+    {
+        var returned = new List<ReturnReceiptLine> { new("Old Shirt", 1, 90m) };
+        var issued = new List<ReturnReceiptLine> { new("New Shirt", 1, 90m) };
+
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(returned, issued, 0m, "9");
+        var text = Encoding.UTF8.GetString(bytes);
+
+        // Nothing is owed either way, so neither label applies — "REFUND: 0.00" reads
+        // as a refund the customer never gets.
+        Assert.DoesNotContain("REFUND", text);
+        Assert.DoesNotContain("DUE", text);
+        Assert.Contains("NO DIFFERENCE", text);
+    }
 }

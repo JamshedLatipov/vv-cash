@@ -145,7 +145,21 @@ public partial class ExchangeViewModel : ViewModelBase
             _syncService.SyncStatusChanged += OnSyncStatusChanged;
 
         if (window != null)
+        {
+            window.Closed += OnWindowClosed;
             _ = LoadSalesAsync();
+        }
+    }
+
+    /// <summary>The Close button is only one way out of this dialog — the window
+    /// chrome, Alt+F4 and the owner closing are others, and every one of them must
+    /// drop the sync subscription. Wired to Closed rather than to the command so a
+    /// closed screen's view model stops being kept alive by SyncService for the rest
+    /// of the register's uptime.</summary>
+    private void OnWindowClosed(object? sender, EventArgs e)
+    {
+        if (_syncService != null) _syncService.SyncStatusChanged -= OnSyncStatusChanged;
+        if (_window != null) _window.Closed -= OnWindowClosed;
     }
 
     private void OnSyncStatusChanged(object? sender, bool isOnline)
@@ -298,18 +312,16 @@ public partial class ExchangeViewModel : ViewModelBase
 
     public ExchangeRequest BuildRequest()
     {
-        var date = SelectedSale?.SelectedDate;
-        var dateOnly = DateTimeOffset.TryParse(date, CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal, out var dto)
-            ? dto.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-            : (date ?? string.Empty);
-
         _documentHash ??= Guid.NewGuid().ToString();
 
         return new ExchangeRequest
         {
             DocumentHash = _documentHash,
-            SelectedDate = dateOnly,
+            // Today, not the original sale's date: this dates the return leg, while
+            // the server dates the replacement sale itself — carrying the old date
+            // here split one exchange across two reporting periods. The server binds
+            // this as datetime=2006-01-02, so the format is not negotiable.
+            SelectedDate = DateTime.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             Returned = ReturnedLines.Where(l => l.ReturnQty > 0)
                 .Select(l => new ReturnLineRequest { Product = l.ProductId, Quantity = l.ReturnQty })
                 .ToList(),
@@ -369,8 +381,21 @@ public partial class ExchangeViewModel : ViewModelBase
         SuccessMessage = null;
         try
         {
-            var request = BuildRequest();
-            var outcome = await _exchangeService.CreateExchangeAsync(SelectedSale.Id, request);
+            ExchangeOutcome outcome;
+            // Only the call itself is guarded. Everything below it runs with the
+            // exchange already booked server-side, and reporting a printer fault or a
+            // failed basket reload as "no connection" is exactly what talks a cashier
+            // into pressing submit a second time.
+            try
+            {
+                outcome = await _exchangeService.CreateExchangeAsync(SelectedSale.Id, BuildRequest());
+            }
+            catch (Exception)
+            {
+                ErrorMessage = I18nService.Instance["NoConnection"];
+                return;
+            }
+
             if (outcome.Body == null)
             {
                 // No exchange happened server-side: nothing gets printed, the
@@ -410,13 +435,11 @@ public partial class ExchangeViewModel : ViewModelBase
 
             await RunPostExchangeActionsAsync(returnedReceiptLines, issuedReceiptLines, difference, documentNumber);
 
-            SuccessMessage = I18nService.Instance["ExchangeSuccess"];
             foreach (var item in IssuedLines.ToList()) RemoveIssuedLine(item);
             await LoadLinesAsync(SelectedSale.Id);
-        }
-        catch (Exception)
-        {
-            ErrorMessage = I18nService.Instance["NoConnection"];
+            // After the reload, not before it: LoadLinesAsync clears SuccessMessage on
+            // its way in, so a confirmation set any earlier never reaches the screen.
+            SuccessMessage = I18nService.Instance["ExchangeSuccess"];
         }
         finally
         {
@@ -465,10 +488,8 @@ public partial class ExchangeViewModel : ViewModelBase
         await LoadSalesAsync();
     }
 
+    /// <summary>Closing the window is enough — OnWindowClosed is what unsubscribes,
+    /// so every other way of dismissing the dialog cleans up identically.</summary>
     [RelayCommand]
-    private void Close()
-    {
-        if (_syncService != null) _syncService.SyncStatusChanged -= OnSyncStatusChanged;
-        _window?.Close();
-    }
+    private void Close() => _window?.Close();
 }
