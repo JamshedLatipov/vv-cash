@@ -55,6 +55,12 @@ public class EscPosPrinterService : IPrinterService
             var line = $"{item.Product.Name} x{item.QuantityDisplay}";
             var price = $"${item.LineTotal:F2}";
             WriteLine(ms, PadLine(line, price, 32));
+
+            // A unit line prints both figures: the customer asked for square
+            // metres and is billed for whole tiles, and showing only one of the
+            // two makes the round-up look like an error.
+            if (item.Product.HasSecondaryUnit)
+                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
         }
         WriteLine(ms, "----------------------------");
         WriteLine(ms, PadLine("Subtotal:", $"${subtotal:F2}", 32));
@@ -103,7 +109,11 @@ public class EscPosPrinterService : IPrinterService
             WriteLine(ms, "----------------------------");
             Write(ms, CmdAlignLeft);
             foreach (var item in items)
+            {
                 WriteLine(ms, $"  {item.Product.Name} x{item.QuantityDisplay}");
+                if (item.Product.HasSecondaryUnit)
+                    WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
+            }
             WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
             Write(ms, CmdLineFeed);
             Write(ms, CmdCut);
