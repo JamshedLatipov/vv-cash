@@ -38,4 +38,27 @@ public partial class CartItem : ObservableObject
     public string QuantityDisplay => Quantity == decimal.Truncate(Quantity)
         ? decimal.Truncate(Quantity).ToString(CultureInfo.InvariantCulture)
         : Quantity.ToString("0.###", CultureInfo.InvariantCulture);
+
+    /// <summary>Which unit the cashier typed this line in. Drives the quantity
+    /// pad and how the line reads on screen and on the receipt; it never
+    /// affects money, which is always pieces × unit price.</summary>
+    [ObservableProperty]
+    private bool _enteredInUnit;
+
+    /// <summary>The line's amount in the product's secondary unit.
+    ///
+    /// Stored rather than derived from Quantity × factor, because for a
+    /// divisible product the two differ: 12.5 m² becomes 52.083333 pieces,
+    /// which multiplies back to 12.49999992. The server accepts either inside
+    /// its tolerance, but the customer must see the 12.5 they asked for. For an
+    /// indivisible product the two agree exactly.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QuantityInUnitDisplay))]
+    private decimal _quantityInUnit;
+
+    /// <summary>Amount in the secondary unit without trailing zeros, so a line
+    /// reads "12.72" and not "12.720".</summary>
+    public string QuantityInUnitDisplay => QuantityInUnit == decimal.Truncate(QuantityInUnit)
+        ? decimal.Truncate(QuantityInUnit).ToString(CultureInfo.InvariantCulture)
+        : QuantityInUnit.ToString("0.######", CultureInfo.InvariantCulture);
 }
