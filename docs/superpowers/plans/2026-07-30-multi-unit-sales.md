@@ -26,7 +26,7 @@ Never run `dotnet build` against the default output directory — a running app 
 cd /c/work/vv-cash && dotnet build src/VvCash/VvCash.csproj -o build/verify
 ```
 
-The working tree carries unrelated uncommitted work in `src/VvCash/Models/CartItem.cs`, `src/VvCash/Services/CartService.cs` and `tests/VvCash.Tests/CartServiceQuoteTest.cs`. Stage files by name in every commit below. Never use `git add -A` or `git commit -a`.
+Stage files by name in every commit below — never `git add -A` or `git commit -a`. This repository's main branch regularly carries unrelated work in progress, and a blanket stage sweeps it into your commit.
 
 ## File structure
 
@@ -2062,7 +2062,7 @@ git commit -m "feat(units): quantity pad and unit display on the register"
 
 - [ ] Full suite green: `powershell -NoProfile -Command "& ./run-tests.ps1"`
 - [ ] A real sale of a unit product reaches the server and is accepted. If the server answers `unit_id ... does not match the product's unit`, the sync is not carrying `unit_id` — check the backend change in `cashes/cash_repo.go` is deployed to that tenant.
-- [ ] The unrelated working-tree changes in `CartItem.cs`, `CartService.cs` and `CartServiceQuoteTest.cs` are still uncommitted, or were committed separately on purpose.
+- [ ] `git log` shows only this feature's commits — nothing unrelated was swept in by a blanket stage.
 
 ## Known gap, by design
 
