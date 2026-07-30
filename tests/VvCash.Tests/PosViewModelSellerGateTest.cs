@@ -2006,26 +2006,25 @@ public class PosViewModelSellerGateTest
     // never called at all and every sale was priced locally.
     // ---------------------------------------------------------------------------------
 
-    /// <summary>Waits out RequoteDebouncedAsync's 300 ms debounce. Polls instead of
-    /// sleeping a fixed span so a passing test costs only as long as it must, and pumps
-    /// the dispatcher because applying a quote posts back onto the UI thread.</summary>
-    private static async Task WaitForQuotesAsync(FakeQuoteService svc, int atLeast)
+    /// <summary>Blocks until the debounced requote (300 ms) has reached the quote service.
+    /// Deliberately does NOT pump the dispatcher: Avalonia's headless dispatcher is not
+    /// thread-safe, and RunJobs() from a post-await continuation — which lands on a
+    /// thread-pool thread — races PosViewModel's own Dispatcher.Post calls and corrupts
+    /// the priority queue. Everything asserted here is recorded by the fake, so the
+    /// dispatcher does not need draining at all.</summary>
+    private static void WaitForQuotes(FakeQuoteService svc, int atLeast)
     {
-        for (var i = 0; i < 100 && svc.CallCount < atLeast; i++)
-        {
-            await Task.Delay(20);
-            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-        }
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (svc.CallCount < atLeast && DateTime.UtcNow < deadline) Thread.Sleep(10);
     }
 
     [Fact]
-    public async Task CartChange_QuotesTheCart_EvenWithNoWarehouseInSession()
+    public void CartChange_QuotesTheCart_EvenWithNoWarehouseInSession()
     {
         using var vm = CreateViewModel(out var deps);
 
         deps.CartService.AddProduct(MakeProduct("p1", 100m));
-        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-        await WaitForQuotesAsync(deps.QuoteService, 1);
+        WaitForQuotes(deps.QuoteService, 1);
 
         Assert.Equal(1, deps.QuoteService.CallCount);
         Assert.Equal("p1", deps.QuoteService.Requests[0].Lines[0].ProductId);
@@ -2035,13 +2034,11 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public async Task Pay_QuotesTheCartBeforeOpeningThePaymentScreen()
+    public void Pay_QuotesTheCartBeforeOpeningThePaymentScreen()
     {
         using var vm = CreateViewModel(out var deps);
-        vm.CurrentShiftId = "shift-1";
         deps.CartService.AddProduct(MakeProduct("p1", 100m));
-        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-        await WaitForQuotesAsync(deps.QuoteService, 1);
+        WaitForQuotes(deps.QuoteService, 1);
 
         var quotesWhenPaymentOpened = -1;
         vm.NavigationRequest = target =>
@@ -2050,11 +2047,38 @@ public class PosViewModelSellerGateTest
         };
 
         var before = deps.QuoteService.CallCount;
-        await vm.PayCommand.ExecuteAsync(null);
+        vm.PayCommand.Execute(null);
 
         // The debounced requote can still be pending when the cashier hits Pay, so the
         // amount presented for payment must come from a quote taken right then.
         Assert.True(quotesWhenPaymentOpened > before,
             $"expected a fresh quote before the payment screen opened; before={before}, atOpen={quotesWhenPaymentOpened}");
+    }
+
+    [Fact]
+    public void Pay_SendsTheQuotedUnitPriceAsSellPrice()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        // Set directly rather than through a quote: this fake cart service does not
+        // implement ApplyQuote, and the stamping itself is CartServiceQuoteTest's job.
+        // What matters here is which of the two prices the outgoing document carries.
+        deps.CartService.Items[0].QuotedUnitPrice = 90m;
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        // The server marks a line is_suspicious when sell_price differs from its catalog
+        // price, so reporting the register's stale cached price would flag every honest
+        // sale and bury the drift the check exists to catch.
+        Assert.Equal(90m, deps.ExpenseDocumentService.LastRequest!.Products[0].SellPrice);
     }
 }

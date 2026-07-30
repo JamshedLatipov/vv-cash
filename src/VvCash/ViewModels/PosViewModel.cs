@@ -1678,7 +1678,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 Name = item.Product.Name,
                                 ProductId = item.Product.Id,
                                 Quantity = item.Quantity,
-                                SellPrice = item.Product.Price,
+                                // The quoted price when a quote priced this line, the cached
+                                // one otherwise. The server flags a line is_suspicious when
+                                // sell_price differs from its catalog price, so sending a
+                                // stale cached price would flag every honest sale.
+                                SellPrice = item.UnitPrice,
                                 PriceBeforeDiscount = before,
                                 DiscountPercent = pct
                             };
