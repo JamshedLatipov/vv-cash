@@ -532,16 +532,14 @@ public partial class CustomerSearchViewModel : ViewModelBase
     /// подменить целиком. Сегодня этого никто не делает, но без перевешивания
     /// подписки такая подмена сломала бы пустое состояние молча.
     ///
-    /// oldValue не проверяется на null: поле инициализировано `= new()`, а
-    /// инициализатор поля идёт мимо сеттера, поэтому этот метод не может быть
-    /// вызван, пока коллекции нет. Сигнатура повторяет сгенерированную
-    /// объявленную partial-часть дословно, включая nullability — расхождение
-    /// в аннотациях даёт CS8826.</summary>
+    /// oldValue объявлен nullable вслед за сгенерированным объявлением partial-метода;
+    /// разойтись с ним в аннотациях — это CS8611. На практике null здесь не приходит:
+    /// поле инициализировано `= new()`, а инициализатор поля идёт мимо сеттера.</summary>
     partial void OnSearchResultsChanged(
-        ObservableCollection<CounterpartyResponse> oldValue,
+        ObservableCollection<CounterpartyResponse>? oldValue,
         ObservableCollection<CounterpartyResponse> newValue)
     {
-        oldValue.CollectionChanged -= OnSearchResultsCollectionChanged;
+        if (oldValue != null) oldValue.CollectionChanged -= OnSearchResultsCollectionChanged;
         newValue.CollectionChanged += OnSearchResultsCollectionChanged;
         OnPropertyChanged(nameof(HasNoResults));
     }
@@ -555,6 +553,10 @@ public partial class CustomerSearchViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(SearchQuery))
         {
+            // Пустой запрос — это «не искали», а не «не нашли», в том числе
+            // когда до него был успешный поиск: иначе очистка строки оставляла
+            // бы «Клиент не найден» висеть над пустым запросом.
+            HasSearched = false;
             SearchResults.Clear();
             return;
         }
@@ -776,8 +778,8 @@ git commit -m "feat(customer): prefill the registration form from a search query
 & ./run-tests.ps1
 ```
 
-Ожидается: сборка проходит, `Failed: 0`. Тесты из Task 1 и Task 2 (12 + 11)
-теперь зелёные вместе с остальными.
+Ожидается: сборка проходит, `Failed: 0`. Тесты из Task 1 и Task 2 (16 + 12 —
+см. «Правки по ходу исполнения») теперь зелёные вместе с остальными.
 
 - [ ] **Step 3: Коммит**
 
@@ -986,6 +988,31 @@ dotnet run --project src/VvCash/VvCash.csproj
 описании PR, а не молча пропустить.
 
 ---
+
+## Правки по ходу исполнения
+
+То, что ревью нашло уже после того, как план был написан. Блоки кода выше
+исправлены; счётчики тестов в шагах — нет, актуальные здесь.
+
+**Task 1 — `CustomerPrefill`.** Была мёртвая ветка `if (words.Length == 0) return Empty;`:
+гард `IsNullOrWhiteSpace` выше уже гарантирует непустой результат `Split`, потому
+что оба используют один и тот же набор пробельных символов. Убрана (`1fbae4d`).
+Добавлены четыре краевых теста — двадцать цифр, разделитель-таб, цифра внутри
+слова, строка из одной пунктуации. Итог: **16 тестов**, не 12. Первая версия
+теста на двадцать цифр брала `"12345678901234567890"` — это `"1234567890"`
+дважды, поэтому срез `[..10]` дал бы тот же ответ, что и `[^10..]`, и тест не
+проверял направление. Строка заменена на асимметричную (`1bd31ca`).
+
+**Task 2 — пустой запрос после удачного поиска.** `SearchAsync` в ветке пустого
+запроса чистил список, но не сбрасывал `HasSearched`, и «Клиент не найден»
+оставалось висеть над пустым запросом. Добавлено `HasSearched = false;` плюс
+регресс-тест `ClearingQueryAfterSearch_DropsEmptyState`. Итог: **12 тестов**,
+не 11 (`e6f41e0`).
+
+**Task 2 — nullability сгенерированного partial-метода.** План утверждал, что
+`OnSearchResultsChanged` объявлен с non-nullable `oldValue` и что расхождение
+даёт CS8826. Оба утверждения неверны: генератор объявляет `oldValue` nullable, а
+расхождение даёт **CS8611**. Сигнатура и комментарий исправлены.
 
 ## Self-review
 
