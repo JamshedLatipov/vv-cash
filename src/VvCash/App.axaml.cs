@@ -63,12 +63,14 @@ public partial class App : Application
                 // decouples PosViewModel from the mechanics of navigation.
                 var sellerSwitchVm = Services.GetRequiredService<SellerSwitchViewModel>();
                 posVm.SellerSwitchViewModel = sellerSwitchVm;
-                // canSignOut is read fresh at the moment the overlay opens, from
-                // PosViewModel.CanEndSellerSession (true only on an empty cart — the
-                // same rule EndReceipt itself enforces). This is the one thing this
-                // wiring hands the overlay beyond "open"; PosViewModel still never
-                // learns SellerSwitchViewModel exists.
-                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open(posVm.CanEndSellerSession);
+                // e.CanSignOut is decided by whichever PosViewModel method raised the
+                // event, at the moment it raised it (see SellerSwitchRequest's own
+                // remarks) — not read here from CanEndSellerSession, because by the time
+                // this handler runs for AddToCart/ResumeParkedSale the cart is about to
+                // gain an item that wasn't there yet when the gate fired. This wiring just
+                // forwards the decision; PosViewModel still never learns
+                // SellerSwitchViewModel exists.
+                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open(e.CanSignOut);
 
                 // Closing a shift without CanCloseShift escalates through the same
                 // overlay, in approval mode (see SellerSwitchViewModel.OpenForApproval).

@@ -609,6 +609,28 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
+    public void AddToCart_EmptyCartAndStaleSession_NeverGrantsSignOut()
+    {
+        // Critical fix: AddToCart's gate fires while the cart is still empty by
+        // construction (its own condition requires !_cartService.Items.Any()), but the
+        // product lands one line later — so by the time the overlay is actually showing,
+        // the cart has an item. CanEndSellerSession read at this instant would be true
+        // (the cart genuinely is empty right now) but would be a lie by the time it
+        // matters, which is exactly what let the sign-out button show over a mid-receipt
+        // cart. The event must carry a hard false here regardless of the cart's
+        // momentary state, never PosViewModel.CanEndSellerSession.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.TimedOut = true;
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
+    }
+
+    [Fact]
     public void AddToCart_EmptyCartButSessionNotStale_DoesNotRaise()
     {
         // IsStale is false only once a seller has actually been confirmed (Current != null)
@@ -676,6 +698,43 @@ public class PosViewModelSellerGateTest
         vm.OpenSellerSwitchCommand.Execute(null);
 
         Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void OpenSellerSwitch_WithEmptyCart_GrantsSignOut()
+    {
+        // The manual chip tap is the one raise site allowed to offer sign-out at all —
+        // and only because, unlike AddToCart/ResumeParkedSale, nothing is about to fill
+        // the cart right after this: tapping the chip does not add anything. Grants
+        // permission by reading PosViewModel.CanEndSellerSession at the moment of the
+        // tap, true here since the cart is genuinely (and durably) empty.
+        using var vm = CreateViewModel(out var deps);
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        vm.OpenSellerSwitchCommand.Execute(null);
+
+        Assert.NotNull(request);
+        Assert.True(request!.CanSignOut);
+    }
+
+    [Fact]
+    public void OpenSellerSwitch_MidReceipt_WithdrawsSignOut()
+    {
+        // The same tap, but with an item already rung up: CanEndSellerSession is false,
+        // so the manual open must withdraw the permission too, not just the two
+        // automatic gates — proves this reads the live cart state rather than always
+        // granting it.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "s0", FirstName = "Prior", LastName = "Seller" });
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        vm.OpenSellerSwitchCommand.Execute(null);
+
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
     }
 
     // ---------------------------------------------------------------------------------
@@ -1467,6 +1526,28 @@ public class PosViewModelSellerGateTest
         // The gate does not block the resume itself — the parked items still land in the
         // cart; the overlay is a request the host opens on top, not a hard stop here.
         Assert.Single(deps.CartService.Items);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_SessionStale_NeverGrantsSignOut()
+    {
+        // Same shape as AddToCart_EmptyCartAndStaleSession_NeverGrantsSignOut: the gate
+        // fires while the cart is momentarily empty (either it started empty, or the
+        // auto-park branch above just emptied it), but the parked snapshot's items land
+        // in the cart moments later — so CanEndSellerSession read right now would read
+        // true and be stale by the time it matters. Must be a hard false.
+        using var vm = CreateViewModel(out var deps);
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
     }
 
     [Fact]
