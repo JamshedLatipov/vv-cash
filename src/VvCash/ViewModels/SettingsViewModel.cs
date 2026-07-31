@@ -104,8 +104,13 @@ public partial class SettingsViewModel : ViewModelBase
     /// подгружать его нечем и незачем.</summary>
     public IReadOnlyList<PhoneFormat> AvailablePhoneFormats { get; } = PhoneFormats.All;
 
+    /// <summary>Nullable, как и SelectedPaymentCategory рядом: SelectingItemsControl
+    /// приводит SelectedItem к null и пишет его обратно через TwoWay-привязку, если
+    /// присвоенного значения не нашлось в ItemsSource. Сегодня оно находится всегда —
+    /// но лишь потому, что Resolve возвращает экземпляры из All, а PhoneFormat не
+    /// переопределяет Equals; на этот незаписанный инвариант опираться не стоит.</summary>
     [ObservableProperty]
-    private PhoneFormat _selectedPhoneFormat = PhoneFormats.Default;
+    private PhoneFormat? _selectedPhoneFormat = PhoneFormats.Default;
 
     [ObservableProperty]
     private bool _returnOpenCashDrawer = true;
@@ -260,7 +265,10 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsService.Language = SelectedLanguage;
         I18nService.Instance.Initialize(SelectedLanguage);
 
-        _settingsService.PhoneFormatId = SelectedPhoneFormat.Id;
+        // Как и с категорией платежа ниже: пустой выбор — это не «формат сбросили»,
+        // и записывать его поверх настроенной кассы нельзя.
+        if (SelectedPhoneFormat != null)
+            _settingsService.PhoneFormatId = SelectedPhoneFormat.Id;
 
         _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
         _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;

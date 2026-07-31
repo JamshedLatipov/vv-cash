@@ -41,6 +41,11 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
 
     public string FormattedPhoneNumber => _phoneFormat.Format(PhoneNumber);
 
+    /// <summary>Сколько цифр ждёт это окно. Наружу — чтобы строку поиска
+    /// разбирал тот же формат, которым живёт форма: разойдись они, окно открылось
+    /// бы с номером, который нумпад не может дописать, а «Сохранить» отвергает.</summary>
+    public int PhoneDigitCount => _phoneFormat.DigitCount;
+
     public CustomerRegistrationViewModel(
         Action<CounterpartyResponse?> close,
         ICounterpartyService counterpartyService,

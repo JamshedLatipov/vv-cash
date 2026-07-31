@@ -1541,11 +1541,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// владельцем окна и наличием строки для префилла.</summary>
     private async Task<CounterpartyResponse?> ShowCustomerRegistrationAsync(Avalonia.Controls.Window owner, string searchQuery)
     {
-        var phoneFormat = PhoneFormats.Resolve(_settingsService.PhoneFormatId);
-
         var dialog = new VvCash.Views.CustomerRegistrationWindow();
         var vm = new CustomerRegistrationViewModel(result => dialog.Close(result), _counterpartyService, _settingsService);
-        vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery, phoneFormat.DigitCount));
+        // Формат спрашиваем у самой view model, а не разрешаем второй раз здесь:
+        // два независимых Resolve согласованы только по совпадению, а разойдясь —
+        // дали бы форму с номером, который нельзя ни дописать, ни сохранить.
+        vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery, vm.PhoneDigitCount));
         dialog.DataContext = vm;
 
         // as, а не каст: окно закрывается либо созданным клиентом, либо null, но

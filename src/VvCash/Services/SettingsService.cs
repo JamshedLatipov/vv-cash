@@ -128,6 +128,10 @@ public class SettingsService : ISettingsService
                 {
                     _data.ExchangePayoutCategoryId = string.Empty;
                 }
+                if (_data.PhoneFormatId == null)
+                {
+                    _data.PhoneFormatId = string.Empty;
+                }
             }
             catch
             {
