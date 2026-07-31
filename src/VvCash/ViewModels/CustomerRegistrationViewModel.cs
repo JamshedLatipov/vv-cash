@@ -56,6 +56,10 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
 
     partial void OnPhoneNumberChanged(string value)
     {
+        // Правка номера снимает и сообщение о нём: иначе кассир, дописавший
+        // девятую цифру, продолжает видеть «введён не полностью» над номером,
+        // который уже полон, и читает это как «форма застряла».
+        ErrorMessage = null;
         OnPropertyChanged(nameof(FormattedPhoneNumber));
     }
 
