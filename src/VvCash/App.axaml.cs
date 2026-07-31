@@ -14,6 +14,7 @@ using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
+using VvCash.Services.Update;
 using VvCash.ViewModels;
 using VvCash.Views;
 
@@ -36,6 +37,12 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // The view model asks; the host decides how. Shutdown() rather than
+            // MainWindow.Close() because the installer is already running and every
+            // window has to go, not just the main one.
+            var updateViewModel = Services.GetRequiredService<UpdateViewModel>();
+            updateViewModel.ShutdownRequested = () => desktop.Shutdown();
+
             var initSettingsService = Services.GetRequiredService<ISettingsService>();
             I18nService.Instance.Initialize(string.IsNullOrEmpty(initSettingsService.Language) ? "ru" : initSettingsService.Language);
 
@@ -255,6 +262,14 @@ public partial class App : Application
         services.AddHttpClient<IPaymentCategoryService, PaymentCategoryService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddHttpClient<ISyncService, SyncService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
+        // Update services. Note the missing AddHttpMessageHandler<AuthHeaderHandler>():
+        // every other client here talks to the register's own backend, but this one
+        // talks to proffi.io, and the register's bearer token has no business going
+        // to a host that is not our API.
+        services.AddSingleton<IAppVersionProvider, AssemblyAppVersionProvider>();
+        services.AddSingleton<IInstallerLauncher, ProcessInstallerLauncher>();
+        services.AddHttpClient<IUpdateService, UpdateService>();
+
         // POS Services
         services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddSingleton<IPromotionProvider, PromotionProvider>();
@@ -276,6 +291,10 @@ public partial class App : Application
         // captures it for its own disposal — see that call site's own remarks. A
         // registration here would be dead (nothing resolves it through the container) and
         // would misleadingly suggest the container manages this type's lifetime.
+        //
+        // Singleton, unlike PosViewModel: a discovered update must survive navigation,
+        // otherwise the badge disappears the moment the cashier opens returns.
+        services.AddSingleton<UpdateViewModel>();
         services.AddSingleton<MainViewModel>();
     }
 }

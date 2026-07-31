@@ -581,7 +581,32 @@ public class PosViewModelSellerGateTest
             deps.SellerSession,
             deps.RosterService,
             deps.AuthService,
-            deps.Features);
+            deps.Features,
+            new UpdateViewModel(
+                new NoUpdateService(),
+                new NoInstallerLauncher(),
+                deps.CartService,
+                new FixedVersionProvider()));
+    }
+
+    private sealed class NoUpdateService : VvCash.Services.Update.IUpdateService
+    {
+        public Task<VvCash.Services.Update.UpdateInfo?> CheckAsync(CancellationToken ct)
+            => Task.FromResult<VvCash.Services.Update.UpdateInfo?>(null);
+
+        public Task<string?> DownloadAsync(
+            VvCash.Services.Update.UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
+            => Task.FromResult<string?>(null);
+    }
+
+    private sealed class NoInstallerLauncher : VvCash.Services.Update.IInstallerLauncher
+    {
+        public void Launch(string installerPath) { }
+    }
+
+    private sealed class FixedVersionProvider : VvCash.Services.Update.IAppVersionProvider
+    {
+        public Version Current { get; } = new Version(1, 0, 0);
     }
 
     private static Product MakeProduct(string id, decimal price) => new()

@@ -17,6 +17,7 @@ using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
+using VvCash.Services.Update;
 
 namespace VvCash.ViewModels;
 
@@ -327,6 +328,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// overlay view model PosView hosts and binds its DataContext to. PosViewModel doesn't
     /// own its lifecycle, only asks for it to open via <see cref="SellerSwitchRequested"/>.</summary>
     public SellerSwitchViewModel? SellerSwitchViewModel { get; set; }
+
+    /// <summary>Update badge and modal state. Injected rather than built here because it
+    /// is a singleton: PosViewModel is transient, and an update found before the cashier
+    /// visited returns must still be on screen when they come back.</summary>
+    public UpdateViewModel Update { get; }
 
     /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay —
     /// either because the register requires a fresh seller confirmation at the start of a
@@ -671,7 +677,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ISellerSession sellerSession,
         ISellerRosterService rosterService,
         IAuthService authService,
-        ICashFeatureService features)
+        ICashFeatureService features,
+        UpdateViewModel update)
     {
         _promotionProvider = promotionProvider;
         _productService = productService;
@@ -695,6 +702,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _rosterService = rosterService;
         _authService = authService;
         _features = features;
+        Update = update;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
@@ -750,6 +758,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             DateTime lastSyncTime = DateTime.MinValue;
 
+            // Deliberately not MinValue: the first check waits a minute so it does not
+            // compete with login and the first catalogue sync for the same connection.
+            DateTime lastUpdateCheck = DateTime.Now - TimeSpan.FromMinutes(59);
+
             while (!token.IsCancellationRequested)
             {
                 // Ping the server every 10 seconds to update IsSystemOnline status
@@ -778,6 +790,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         async () => await _sellerSession.LoadRosterAsync(roster));
 
                     lastSyncTime = DateTime.Now;
+                }
+
+                // Once an hour is plenty: releases are cut by hand, and the register
+                // stays on all day. CheckAsync never throws and marshals its own state
+                // changes to the UI thread.
+                if (DateTime.Now - lastUpdateCheck >= TimeSpan.FromHours(1))
+                {
+                    lastUpdateCheck = DateTime.Now;
+                    await Update.CheckAsync(token);
                 }
 
                 try
