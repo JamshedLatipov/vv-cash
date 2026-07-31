@@ -411,14 +411,14 @@ public class SellerSwitchViewModelTest
     // ---------------------------------------------------------------------------------
 
     [Fact]
-    public async Task SignOut_ClearsCurrentSeller_AndHidesOverlay()
+    public async Task SignOutSeller_ClearsCurrentSeller_AndHidesOverlay()
     {
         var session = await SessionWithRoster();
         await session.SwitchAsync("u-1", "4821");
         var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
         vm.Open();
 
-        vm.SignOutCommand.Execute(null);
+        vm.SignOutSellerCommand.Execute(null);
 
         Assert.Null(session.Current);
         Assert.False(vm.IsVisible);
@@ -472,10 +472,10 @@ public class SellerSwitchViewModelTest
     }
 
     [Fact]
-    public async Task SignOut_WhileSubmitIsPending_IsANoOp()
+    public async Task SignOutSeller_WhileSubmitIsPending_IsANoOp()
     {
-        // Same shape as Cancel_WhileSubmitIsPending_IsANoOp above: SignOut must respect
-        // the _isBusy guard like every other mutating entry point in this class.
+        // Same shape as Cancel_WhileSubmitIsPending_IsANoOp above: SignOutSeller must
+        // respect the _isBusy guard like every other mutating entry point in this class.
         var roster = new List<SellerInfo>
         {
             new() { Id = "u-1", FirstName = "Азиз", CanSell = true }
@@ -489,8 +489,8 @@ public class SellerSwitchViewModelTest
         await vm.AppendDigitCommand.ExecuteAsync("3");
         var submitting = vm.AppendDigitCommand.ExecuteAsync("4"); // now mid-submit (_isBusy == true)
 
-        vm.SignOutCommand.Execute(null);
-        Assert.True(vm.IsVisible); // SignOut is a no-op while busy, same as Cancel/Back/Open
+        vm.SignOutSellerCommand.Execute(null);
+        Assert.True(vm.IsVisible); // SignOutSeller is a no-op while busy, same as Cancel/Back/Open
 
         session.CompleteSwitch(SwitchResult.Ok, vm.Sellers[0]);
         await submitting;

@@ -346,8 +346,13 @@ public partial class SellerSwitchViewModel : ViewModelBase
     /// <see cref="HideAndReset"/> — plus the one thing Cancel deliberately never does:
     /// actually clearing <see cref="ISellerSession.Current"/>. A no-op while
     /// <see cref="_isBusy"/>, same as every other mutating entry point in this class.</summary>
+    // Named SignOutSeller, not SignOut: PosViewModel already has its own SignOutCommand
+    // meaning "log out of the app entirely and navigate away". Same bare name on two
+    // view models with materially different blast radius is exactly the kind of thing
+    // that gets mis-wired later — unlike Cancel/Back, which really are the same concept
+    // reused per view, these two are not.
     [RelayCommand]
-    private void SignOut()
+    private void SignOutSeller()
     {
         if (_isBusy) return;
 

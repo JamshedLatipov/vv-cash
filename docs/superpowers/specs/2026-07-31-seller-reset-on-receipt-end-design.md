@@ -212,8 +212,11 @@ xUnit, по образцу `PosViewModelSellerGateTest` (фейковый `ISell
   `true`, только если не режим апрува, вызывающий разрешил (`canSignOut`) и
   кто-то действительно подтверждён (`_session.Current != null`). Апрув никогда
   не предлагает выход — апрув проверяет чужой PIN и не трогает `Current`.
-- `SellerSwitchViewModel.SignOutCommand` — вызывает `ISellerSession.Clear()` и
-  закрывает оверлей так же, как `Cancel`.
+- `SellerSwitchViewModel.SignOutSellerCommand` — вызывает `ISellerSession.Clear()`
+  и закрывает оверлей так же, как `Cancel`. Названа не `SignOutCommand`: у
+  `PosViewModel` уже есть команда с этим именем и другим смыслом («выйти из
+  приложения целиком»), одинаковое имя для двух команд с разным радиусом
+  поражения — то, что рано или поздно приведёт к путанице при биндинге.
 - `App.axaml.cs` передаёт `posVm.CanEndSellerSession` в `Open(...)` при
   обычном переключении; `PosViewModel` по-прежнему ничего не знает про
   `SellerSwitchViewModel`.
