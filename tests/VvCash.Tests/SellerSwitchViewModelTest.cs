@@ -185,10 +185,15 @@ public class SellerSwitchViewModelTest
         Assert.False(vm.HasEmptyRoster);
     }
 
-    // Same concern as the notice above, but for canSignOut specifically: it is state
-    // Show() owns outright (its own parameter), not derived from the roster, so it needs
-    // its own coverage rather than riding along on Sellers repopulating — see Show()'s own
-    // remarks on the explicit NotifyEmptyStateChanged() call this pins down.
+    // Extends the notice above to CanSignOut specifically, covering it alongside
+    // HasNoApprover/HasEmptyRoster rather than only when a roster happens to repopulate:
+    // reopening with a different canSignOut must actually notify, not just change the
+    // property's live value underneath a stale binding. Not a test of Show()'s explicit
+    // NotifyEmptyStateChanged() call in isolation — the roster here is non-empty in both
+    // opens, so Sellers.Clear()+Add() also fires CollectionChanged both times (Clear()
+    // raises a Reset unconditionally, roster or no roster), and that alone would already
+    // make this pass. See Show()'s own remarks for why the explicit call still earns its
+    // place regardless of that overlap.
     [Fact]
     public async Task CanSignOut_RaisesPropertyChanged_WhenReopenedWithADifferentPermission()
     {
@@ -482,13 +487,31 @@ public class SellerSwitchViewModelTest
     }
 
     [Fact]
+    public async Task Open_WithNoArgument_DefaultsToNotGrantingSignOut()
+    {
+        // The permissive default was exactly the shape of the raise-site bug the
+        // critical fix closed: after that fix, the rule is that only a caller which
+        // actually checked its own permission may grant sign-out, so a caller that
+        // forgets the argument entirely must not get it for free. Someone is confirmed
+        // here specifically to isolate the default from CanSignOut_FalseWhenNobodyConfirmed
+        // above, which would pass regardless of the default since Current stays null there.
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open();
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
     public async Task CanSignOut_TrueWhenAllowedAndSomeoneConfirmed()
     {
         var session = await SessionWithRoster();
         await session.SwitchAsync("u-1", "4821");
         var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
 
-        vm.Open(); // canSignOut defaults to true
+        vm.Open(canSignOut: true);
 
         Assert.True(vm.CanSignOut);
     }
@@ -534,7 +557,7 @@ public class SellerSwitchViewModelTest
         var session = await SessionWithRoster();
         await session.SwitchAsync("u-1", "4821");
         var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
-        vm.Open();
+        vm.Open(canSignOut: true);
         Assert.True(vm.CanSignOut); // sanity check on the premise
         var changed = new List<string?>();
         vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);

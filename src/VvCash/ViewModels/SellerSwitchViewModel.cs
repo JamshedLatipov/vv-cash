@@ -200,9 +200,15 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.
     /// <paramref name="canSignOut"/> is the caller's permission for whether the manual
     /// sign-out control should be offered at all this time (see <see cref="CanSignOut"/>)
-    /// — PosViewModel passes its own <c>CanEndSellerSession</c>, true only on an empty
-    /// cart, for the same reason EndReceipt itself is guarded there.</summary>
-    public void Open(bool canSignOut = true) => Show(_ => true, approvalMode: false, canSignOut: canSignOut);
+    /// — defaults to <c>false</c>, not <c>true</c>: after the fix for the raise-site bug
+    /// (see <see cref="SellerSwitchRequest"/>'s own remarks), the rule is that only a
+    /// caller which actually checked its own permission may grant this, so the permissive
+    /// value must never be what a forgotten argument silently produces. PosViewModel's
+    /// <c>OpenSellerSwitch</c> is the one caller that passes its own
+    /// <c>CanEndSellerSession</c> (true only on an empty cart, for the same reason
+    /// EndReceipt itself is guarded there) — every other caller either omits the argument
+    /// on purpose or passes <c>false</c> explicitly.</summary>
+    public void Open(bool canSignOut = false) => Show(_ => true, approvalMode: false, canSignOut: canSignOut);
 
     /// <summary>Opens the overlay to approve an operation the current seller lacks
     /// <paramref name="hasRight"/> for. Lists only sellers holding that right, and a
@@ -210,13 +216,15 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// raises <see cref="Approved"/> and, if given, invokes <paramref name="onApproved"/>
     /// with the approving seller. <paramref name="onApproved"/> is how the caller's own
     /// operation actually resumes — see <see cref="_onApproved"/> for why each call owns
-    /// its own continuation instead of every caller sharing one event. Never offers the
-    /// sign-out control — see <see cref="CanSignOut"/> for why approval mode rules it out
-    /// regardless of what a caller here would pass.</summary>
+    /// its own continuation instead of every caller sharing one event. Passes
+    /// <c>canSignOut: false</c> explicitly as defence in depth — <see cref="CanSignOut"/>'s
+    /// own <c>!IsApprovalMode</c> check already rules the control out regardless of what
+    /// gets passed here, but this way the rule holds even if that check is ever removed
+    /// or narrowed.</summary>
     public void OpenForApproval(Func<SellerInfo, bool> hasRight, Func<SellerInfo, Task>? onApproved = null)
-        => Show(hasRight, approvalMode: true, onApproved);
+        => Show(hasRight, approvalMode: true, onApproved, canSignOut: false);
 
-    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onApproved = null, bool canSignOut = true)
+    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onApproved = null, bool canSignOut = false)
     {
         // A fresh Open()/OpenForApproval() while a submit is in flight would
         // reset SelectedSeller/Pin/Sellers out from under SubmitAsync's still-
