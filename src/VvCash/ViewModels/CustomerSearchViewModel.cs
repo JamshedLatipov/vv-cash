@@ -65,16 +65,14 @@ public partial class CustomerSearchViewModel : ViewModelBase
     /// подменить целиком. Сегодня этого никто не делает, но без перевешивания
     /// подписки такая подмена сломала бы пустое состояние молча.
     ///
-    /// oldValue не проверяется на null: поле инициализировано `= new()`, а
-    /// инициализатор поля идёт мимо сеттера, поэтому этот метод не может быть
-    /// вызван, пока коллекции нет. Сигнатура повторяет сгенерированную
-    /// объявленную partial-часть дословно, включая nullability — расхождение
-    /// в аннотациях даёт CS8826.</summary>
+    /// oldValue объявлен nullable вслед за сгенерированным объявлением partial-метода;
+    /// разойтись с ним в аннотациях — это CS8611. На практике null здесь не приходит:
+    /// поле инициализировано `= new()`, а инициализатор поля идёт мимо сеттера.</summary>
     partial void OnSearchResultsChanged(
-        ObservableCollection<CounterpartyResponse> oldValue,
+        ObservableCollection<CounterpartyResponse>? oldValue,
         ObservableCollection<CounterpartyResponse> newValue)
     {
-        oldValue.CollectionChanged -= OnSearchResultsCollectionChanged;
+        if (oldValue != null) oldValue.CollectionChanged -= OnSearchResultsCollectionChanged;
         newValue.CollectionChanged += OnSearchResultsCollectionChanged;
         OnPropertyChanged(nameof(HasNoResults));
     }
