@@ -32,7 +32,16 @@ public class ExchangeViewModelTest
 
         public FakeReturnService(CallLog log) => _log = log;
 
-        public Task<ExpenseListResponse> GetSalesAsync(int page = 1) => Task.FromResult(new ExpenseListResponse());
+        /// <summary>What a receipt-number lookup finds. Empty by default — the tests below
+        /// set SelectedSale directly rather than going through the search.</summary>
+        public readonly List<ExpenseListItem> Found = new();
+        public readonly List<string?> SearchedNumbers = new();
+
+        public Task<ExpenseListResponse> GetSalesAsync(int page = 1, string? documentNumber = null)
+        {
+            SearchedNumbers.Add(documentNumber);
+            return Task.FromResult(new ExpenseListResponse { Body = Found.ToList() });
+        }
 
         public Task<ReturnDetailBody> GetReturnableLinesAsync(string expenseId)
         {
@@ -132,6 +141,7 @@ public class ExchangeViewModelTest
         public int ExchangeReceipt;
         public decimal? LastDifference;
         public string? LastDocumentNumber;
+        public List<ReturnReceiptLine>? LastIssuedLines;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged { add { } remove { } }
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
@@ -143,6 +153,7 @@ public class ExchangeViewModelTest
             ExchangeReceipt++;
             LastDifference = difference;
             LastDocumentNumber = documentNumber;
+            LastIssuedLines = issued.ToList();
             return Task.FromResult(true);
         }
     }
@@ -164,11 +175,15 @@ public class ExchangeViewModelTest
         public FakeCounterpartyService Counterparties = null!;
         public FakeSettings Settings = null!;
         public CountingPrinter Printer = null!;
+        public FakeQuoteService Quotes = null!;
         public ExchangeViewModel Vm = null!;
     }
 
+    /// <param name="quote">What the server prices the issued basket at. Null — the
+    /// default — is the unpriced case every test written before this screen quoted at all
+    /// relies on: no discount, so the issued total stays the catalog one.</param>
     private static Rig BuildForSubmit(decimal returnedPrice = 80m, decimal issuedPrice = 100m,
-        string? payoutCategoryId = "cat-1", string? cashId = "cash-1")
+        string? payoutCategoryId = "cat-1", string? cashId = "cash-1", QuoteResult? quote = null)
     {
         var rig = new Rig();
         rig.Returns = new FakeReturnService(rig.Log);
@@ -177,6 +192,7 @@ public class ExchangeViewModelTest
         rig.Counterparties = new FakeCounterpartyService();
         rig.Settings = new FakeSettings { ExchangePayoutCategoryId = payoutCategoryId ?? string.Empty };
         rig.Printer = new CountingPrinter();
+        rig.Quotes = new FakeQuoteService { Result = quote };
 
         rig.Vm = new ExchangeViewModel(
             returnService: rig.Returns,
@@ -186,6 +202,7 @@ public class ExchangeViewModelTest
             settingsService: rig.Settings,
             printerService: rig.Printer,
             features: new FakeCashFeatureService(),
+            quoteService: rig.Quotes,
             cashId: cashId,
             isOnline: true);
 
@@ -575,5 +592,278 @@ public class ExchangeViewModelTest
         await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
         Assert.False(rig.Vm.HasBookedDocument);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Pricing the replacement goods. The bug: this screen priced them straight off the
+    // register's cached catalog, so a shirt bought under a running -50% promotion cost
+    // its full 100 back when the customer came to exchange it for the same shirt —
+    // the promotion was still on, the exchange just never asked the server about it.
+    // ---------------------------------------------------------------------------------
+
+    private sealed class FakeQuoteService : IQuoteService
+    {
+        public readonly List<QuoteRequest> Requests = new();
+        public QuoteResult? Result;
+
+        /// <summary>Every await in this file's fakes completes synchronously so the view
+        /// model's fire-and-forget requote has finished by the time the caller's next line
+        /// runs — the same deterministic-fakes trick PosViewModelSellerGateTest documents.</summary>
+        public Task<QuoteResult?> QuoteAsync(QuoteRequest request, System.Threading.CancellationToken ct)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Result);
+        }
+    }
+
+    /// <summary>A server reply that takes <paramref name="percent"/> off a single line of
+    /// <paramref name="unitPrice"/>. unit_price echoes the price BEFORE the discount —
+    /// that is what the real endpoint returns (discounts/quote.go), and reading it as the
+    /// discounted price is what would make the register declare the discount twice.</summary>
+    private static QuoteResult MakeQuote(string productId, decimal unitPrice, decimal quantity, decimal percent)
+    {
+        var subtotal = unitPrice * quantity;
+        var discount = subtotal * percent / 100m;
+        return new QuoteResult
+        {
+            QuoteId = "q-1",
+            Subtotal = subtotal,
+            DiscountTotal = discount,
+            Total = subtotal - discount,
+            Lines =
+            {
+                new QuoteLineResult
+                {
+                    ProductId = productId,
+                    Quantity = quantity,
+                    UnitPrice = unitPrice,
+                    LineSubtotal = subtotal,
+                    DiscountAmount = discount,
+                    DiscountPercent = percent,
+                    FinalLineTotal = subtotal - discount,
+                },
+            },
+        };
+    }
+
+    private static (ExchangeViewModel vm, FakeQuoteService quotes) BuildForPricing()
+    {
+        var quotes = new FakeQuoteService();
+        var vm = new ExchangeViewModel(quoteService: quotes, isOnline: true);
+        return (vm, quotes);
+    }
+
+    [Fact]
+    public void IssuedBasket_ServerDiscountsIt_TotalIsTheDiscountedOne()
+    {
+        // The reported bug, as arithmetic: a 100 shirt under a running -50% promotion is
+        // 50 to issue, not 100 — and the customer who handed back the same shirt they
+        // bought for 50 owes nothing.
+        var (vm, quotes) = BuildForPricing();
+        quotes.Result = MakeQuote("p2", unitPrice: 100m, quantity: 1m, percent: 50m);
+        vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
+
+        vm.AddIssuedLine(MakeIssuedLine(100m));
+
+        Assert.Equal(100m, vm.IssuedSubtotal);
+        Assert.Equal(50m, vm.IssuedDiscount);
+        Assert.True(vm.HasIssuedDiscount);
+        Assert.Equal(50m, vm.IssuedTotal);
+        Assert.Equal(0m, vm.Difference);
+    }
+
+    [Fact]
+    public void IssuedBasket_NoQuote_FallsBackToCatalogPricing()
+    {
+        // A failed or absent quote must never block the exchange — the basket just
+        // prices locally, exactly as the POS cart does. Nothing is discounted, so the
+        // discount row stays off the screen rather than showing a zero.
+        var (vm, quotes) = BuildForPricing();
+        quotes.Result = null;
+
+        vm.AddIssuedLine(MakeIssuedLine(100m));
+
+        Assert.Equal(100m, vm.IssuedSubtotal);
+        Assert.Equal(0m, vm.IssuedDiscount);
+        Assert.False(vm.HasIssuedDiscount);
+        Assert.Equal(100m, vm.IssuedTotal);
+    }
+
+    [Fact]
+    public void IssuedBasket_Offline_IsNotQuotedAtAll()
+    {
+        // Nothing to ask and nothing to ask it of. CanSubmit already refuses offline, so
+        // this only has to avoid a pointless round trip, not price anything.
+        var quotes = new FakeQuoteService();
+        var vm = new ExchangeViewModel(quoteService: quotes, isOnline: false);
+
+        vm.AddIssuedLine(MakeIssuedLine(100m));
+
+        Assert.Empty(quotes.Requests);
+        Assert.Equal(100m, vm.IssuedTotal);
+    }
+
+    [Fact]
+    public void IssuedBasket_EmptiedAgain_DropsTheDiscountWithIt()
+    {
+        // The discount belongs to a basket, not to the screen: removing the goods it
+        // applied to must not leave the figure behind, or the next basket inherits a
+        // discount nobody granted it.
+        var (vm, quotes) = BuildForPricing();
+        quotes.Result = MakeQuote("p2", unitPrice: 100m, quantity: 1m, percent: 50m);
+        var line = MakeIssuedLine(100m);
+        vm.AddIssuedLine(line);
+        Assert.Equal(50m, vm.IssuedDiscount);
+
+        vm.RemoveIssuedLine(line);
+
+        Assert.Equal(0m, vm.IssuedDiscount);
+        Assert.False(vm.HasIssuedDiscount);
+        Assert.Equal(0m, vm.IssuedTotal);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_DiscountedReplacement_DeclaresTheDiscountInMoneyOnce()
+    {
+        // How the sale has to reach the server: sell_price is the price BEFORE the
+        // discount and the discount is declared once, document-level, as cash. Sending
+        // the discounted price here *and* the discount would have the server subtract it
+        // a second time and book the line at zero.
+        var rig = BuildForSubmit(returnedPrice: 50m, issuedPrice: 100m,
+            quote: MakeQuote("p2", unitPrice: 100m, quantity: 1m, percent: 50m));
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        var sale = Assert.Single(rig.Sale.Requests);
+        Assert.Equal(50m, sale.Payment.ToPay);
+        Assert.Equal(50m, sale.Payment.PaidInCash);
+        Assert.Equal("cash", sale.Payment.DiscountType);
+        Assert.Equal(50m, sale.Payment.Discount);
+        Assert.Equal("q-1", sale.QuoteId);
+
+        var product = Assert.Single(sale.Products);
+        Assert.Equal(100m, product.SellPrice);            // before the discount
+        Assert.Equal(100m, product.PriceBeforeDiscount);
+        Assert.Equal(50m, product.DiscountPercent);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Finding the receipt. This screen used to open on a browsable page of every sale
+    // the register had rung, and it pays the whole returned total out of the till — so
+    // a cashier could pick an arbitrary receipt and move drawer money against it. The
+    // list is gone; a number off the customer's slip is the only way in.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchSale_FoundByNumber_SelectsItAndLoadsItsLines()
+    {
+        var log = new CallLog();
+        var returns = new FakeReturnService(log);
+        returns.Found.Add(new ExpenseListItem { Id = "doc1", DocumentNumber = "1042" });
+        var vm = new ExchangeViewModel(returnService: returns, isOnline: true)
+        {
+            DocumentNumberQuery = "1042",
+        };
+
+        await vm.SearchSaleCommand.ExecuteAsync(null);
+
+        Assert.NotNull(vm.SelectedSale);
+        Assert.Equal("1042", vm.SelectedSale!.DocumentNumber);
+        Assert.Equal("1042", Assert.Single(returns.SearchedNumbers));
+        Assert.Equal(1, returns.ReloadCount);  // selecting it loaded the returnable lines
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SearchSale_NoSuchNumber_SaysSoAndSelectsNothing()
+    {
+        var returns = new FakeReturnService(new CallLog());  // Found stays empty
+        var vm = new ExchangeViewModel(returnService: returns, isOnline: true)
+        {
+            DocumentNumberQuery = "9999",
+        };
+
+        await vm.SearchSaleCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.SelectedSale);
+        Assert.False(vm.HasSelectedSale);
+        Assert.NotNull(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SearchSale_BlankNumber_AsksTheServerForNothingAtAll()
+    {
+        // Sending a blank through would ask for an unfiltered page — the browsable list
+        // this screen exists without. Nothing may leave the register for an empty box.
+        var returns = new FakeReturnService(new CallLog());
+        var vm = new ExchangeViewModel(returnService: returns, isOnline: true)
+        {
+            DocumentNumberQuery = "   ",
+        };
+
+        await vm.SearchSaleCommand.ExecuteAsync(null);
+
+        Assert.Empty(returns.SearchedNumbers);
+        Assert.Null(vm.SelectedSale);
+    }
+
+    [Fact]
+    public async Task SearchSale_ForAnotherReceipt_DropsTheIssuedBasketBuiltForThePreviousOne()
+    {
+        // The replacement goods belong to the exchange that was being built, not to the
+        // screen. Carrying them over would price a new receipt's exchange against a
+        // basket assembled for a different customer.
+        var returns = new FakeReturnService(new CallLog());
+        returns.Found.Add(new ExpenseListItem { Id = "doc1", DocumentNumber = "1042" });
+        var vm = new ExchangeViewModel(returnService: returns, isOnline: true)
+        {
+            DocumentNumberQuery = "1042",
+        };
+        await vm.SearchSaleCommand.ExecuteAsync(null);
+        vm.AddIssuedLine(MakeIssuedLine(100m));
+        Assert.Single(vm.IssuedLines);
+
+        returns.Found.Clear();          // the next number matches nothing
+        vm.DocumentNumberQuery = "9999";
+        await vm.SearchSaleCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.IssuedLines);
+        Assert.Equal(0m, vm.IssuedTotal);
+    }
+
+    [Fact]
+    public async Task ClearSearch_EmptiesTheBoxTheReceiptAndTheBasket()
+    {
+        var returns = new FakeReturnService(new CallLog());
+        returns.Found.Add(new ExpenseListItem { Id = "doc1", DocumentNumber = "1042" });
+        var vm = new ExchangeViewModel(returnService: returns, isOnline: true)
+        {
+            DocumentNumberQuery = "1042",
+        };
+        await vm.SearchSaleCommand.ExecuteAsync(null);
+        vm.AddIssuedLine(MakeIssuedLine(100m));
+
+        vm.ClearSearchCommand.Execute(null);
+
+        Assert.Equal(string.Empty, vm.DocumentNumberQuery);
+        Assert.Null(vm.SelectedSale);
+        Assert.Empty(vm.IssuedLines);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_DiscountedReplacement_ReceiptLinesAddUpToWhatWasCharged()
+    {
+        // The slip prints the issued lines and then the difference, with no discount line
+        // of its own — so the lines have to be the discounted ones or the customer's copy
+        // does not add up.
+        var rig = BuildForSubmit(returnedPrice: 50m, issuedPrice: 100m,
+            quote: MakeQuote("p2", unitPrice: 100m, quantity: 1m, percent: 50m));
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, rig.Printer.ExchangeReceipt);
+        Assert.Equal(0m, rig.Printer.LastDifference);     // 50 issued against 50 returned
+        var issued = Assert.Single(rig.Printer.LastIssuedLines!);
+        Assert.Equal(50m, issued.LineRefund);
     }
 }

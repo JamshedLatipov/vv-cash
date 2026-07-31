@@ -45,6 +45,11 @@ public partial class ReturnsViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HasMorePages))]
     private int _pageCount = 1;
 
+    /// <summary>What the cashier typed into the receipt-number box. Not applied as they
+    /// type — <see cref="SearchSales"/> is what sends it, so a half-typed number never
+    /// costs a round trip and never empties the list mid-keystroke.</summary>
+    [ObservableProperty] private string _documentNumberQuery = string.Empty;
+
     public bool HasSelectedSale => SelectedSale != null;
     public bool HasMorePages => CurrentPage < PageCount;
     public decimal TotalRefund => Lines.Sum(l => l.LineRefund);
@@ -83,7 +88,7 @@ public partial class ReturnsViewModel : ViewModelBase
         ErrorMessage = null;
         try
         {
-            var res = await _returnService.GetSalesAsync(CurrentPage);
+            var res = await _returnService.GetSalesAsync(CurrentPage, DocumentNumberQuery);
             Sales = new ObservableCollection<ExpenseListItem>(res.Body);
             PageCount = Math.Max(1, res.PageCount);
         }
@@ -95,6 +100,26 @@ public partial class ReturnsViewModel : ViewModelBase
         {
             IsLoadingSales = false;
         }
+    }
+
+    /// <summary>Runs the receipt-number search. Resets to page 1 first: the page the
+    /// cashier happened to be browsing has nothing to do with where the searched-for
+    /// receipt lands, and asking for page 3 of a one-result search returns nothing.</summary>
+    [RelayCommand]
+    private async Task SearchSales()
+    {
+        CurrentPage = 1;
+        SelectedSale = null;
+        await LoadSalesAsync();
+    }
+
+    /// <summary>Clears the search and goes back to browsing.</summary>
+    [RelayCommand]
+    private async Task ClearSearch()
+    {
+        if (string.IsNullOrEmpty(DocumentNumberQuery)) return;
+        DocumentNumberQuery = string.Empty;
+        await SearchSales();
     }
 
     partial void OnSelectedSaleChanged(ExpenseListItem? value)

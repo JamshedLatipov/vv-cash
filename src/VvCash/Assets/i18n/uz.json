@@ -205,7 +205,9 @@
   "ExchangePayoutCategoryWarning": "Kassadan pul berish uchun xarajat moddasi tanlanmagan — almashtirish mavjud emas",
   "ExchangePayoutCategory": "Kassadan pul berish xarajat moddasi (almashtirish)",
   "ExchangeAction": "Almashtirish",
-  "SelectSaleToExchange": "Almashtirish uchun chekni tanlang",
+  "SelectSaleToExchange": "Chekni raqami bo'yicha toping",
   "IssuedGoods": "Beriladigan mahsulot",
+  "SearchByReceiptNumber": "Chek raqami",
+  "ReceiptNotFound": "Bunday raqamli chek topilmadi",
   "SearchProductToIssue": "Nomi yoki shtrix-kod bo'yicha mahsulot qidirish"
 }

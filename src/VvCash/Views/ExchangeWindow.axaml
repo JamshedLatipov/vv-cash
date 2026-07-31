@@ -35,34 +35,54 @@
       <!-- Body: sales list | returned lines | issued lines -->
       <Grid Grid.Row="1" ColumnDefinitions="300,*,*">
 
-        <!-- Left: sales -->
-        <Grid Grid.Column="0" RowDefinitions="*,Auto" Margin="24,16">
-          <ListBox Grid.Row="0" ItemsSource="{Binding Sales}" SelectedItem="{Binding SelectedSale}" Background="Transparent">
-            <ListBox.ItemTemplate>
-              <DataTemplate DataType="models:ExpenseListItem">
-                <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Grid.Column="0">
-                      <TextBlock FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}">
-                        <Run Text="#"/><Run Text="{Binding DocumentNumber}"/>
-                      </TextBlock>
-                      <TextBlock Text="{Binding Creator}" FontSize="12" Foreground="{StaticResource Slate600Brush}"/>
-                      <TextBlock Text="{Binding SelectedDate}" FontSize="11" Foreground="{StaticResource Slate500Brush}"/>
-                    </StackPanel>
-                    <TextBlock Grid.Column="1" Text="{Binding ToPay, StringFormat='{}{0:N2}'}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
-                  </Grid>
-                </Border>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-          <TextBlock Grid.Row="0" Text="{Binding [NoSales], Source={x:Static services:I18nService.Instance}}" IsVisible="{Binding !Sales.Count}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="15" Foreground="{StaticResource Slate400Brush}"/>
-          <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="12" Margin="0,12,0,0">
-            <Button Classes="OutlinedButton" Command="{Binding PrevPageCommand}" Content="{Binding [Prev], Source={x:Static services:I18nService.Instance}}"/>
-            <TextBlock VerticalAlignment="Center" Foreground="{StaticResource Slate600Brush}">
-              <Run Text="{Binding CurrentPage}"/><Run Text=" / "/><Run Text="{Binding PageCount}"/>
-            </TextBlock>
-            <Button Classes="OutlinedButton" Command="{Binding NextPageCommand}" Content="{Binding [Next], Source={x:Static services:I18nService.Instance}}"/>
-          </StackPanel>
+        <!-- Left: the one receipt being exchanged against.
+
+             There is deliberately no browsable list of sales here. This screen pays the
+             whole returned total out of the till, so a cashier able to page through every
+             receipt the register ever rang could pick an arbitrary one and move drawer
+             money against it. A receipt number has to come off a slip the customer
+             actually handed over. -->
+        <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*" Margin="24,16">
+
+          <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+            <TextBox Grid.Column="0" Text="{Binding DocumentNumberQuery}" Classes="IconTextBox"
+                     Watermark="{Binding [SearchByReceiptNumber], Source={x:Static services:I18nService.Instance}}"
+                     FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBox.InnerLeftContent>
+                <material:MaterialIcon Kind="Receipt" Width="18" Height="18" Foreground="{StaticResource Slate400Brush}" Margin="10,0,8,0"/>
+              </TextBox.InnerLeftContent>
+            </TextBox>
+            <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding SearchSaleCommand}" VerticalAlignment="Center" Padding="12,8">
+              <material:MaterialIcon Kind="Magnify" Width="18" Height="18"/>
+            </Button>
+          </Grid>
+
+          <!-- The receipt that was found, so the cashier can see they matched the right
+               slip before moving any money against it. -->
+          <Border Grid.Row="1" IsVisible="{Binding HasSelectedSale}"
+                  Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}"
+                  BorderThickness="1" CornerRadius="8" Padding="14">
+            <Grid ColumnDefinitions="*,Auto" DataContext="{Binding SelectedSale}" x:DataType="models:ExpenseListItem">
+              <StackPanel Grid.Column="0">
+                <TextBlock FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}">
+                  <Run Text="#"/><Run Text="{Binding DocumentNumber}"/>
+                </TextBlock>
+                <TextBlock Text="{Binding Creator}" FontSize="12" Foreground="{StaticResource Slate600Brush}"/>
+                <TextBlock Text="{Binding SelectedDate}" FontSize="11" Foreground="{StaticResource Slate500Brush}"/>
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="{Binding ToPay, StringFormat='{}{0:N2}'}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+
+          <TextBlock Grid.Row="2" IsVisible="{Binding !HasSelectedSale}"
+                     Text="{Binding [SelectSaleToExchange], Source={x:Static services:I18nService.Instance}}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center"
+                     FontSize="15" Foreground="{StaticResource Slate400Brush}"/>
+
+          <Button Grid.Row="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,12,0,0"
+                  Classes="OutlinedButton" Command="{Binding ClearSearchCommand}"
+                  IsVisible="{Binding HasSelectedSale}"
+                  Content="{Binding [Clear], Source={x:Static services:I18nService.Instance}}"/>
         </Grid>
 
         <!-- Middle: returned lines -->
@@ -157,6 +177,14 @@
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <TextBlock Text="{Binding [ExchangeIssuedLabel], Source={x:Static services:I18nService.Instance}}" FontSize="13" Foreground="{StaticResource Slate600Brush}" VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding IssuedTotal, StringFormat='{}{0:N2}'}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+              </StackPanel>
+              <!-- Only when the server actually discounted the replacement goods: the
+                   lines above read at their catalog price, exactly like the POS cart, so
+                   without this row a promotion would be invisible and the issued total
+                   would look wrong rather than discounted. -->
+              <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasIssuedDiscount}">
+                <TextBlock Text="{Binding [TotalDiscount], Source={x:Static services:I18nService.Instance}}" FontSize="13" Foreground="{StaticResource Red500Brush}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding IssuedDiscount, StringFormat='-{0:N2}'}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Red500Brush}"/>
               </StackPanel>
               <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding CustomerPays}">
                 <TextBlock Text="{Binding [ExchangeCustomerPaysLabel], Source={x:Static services:I18nService.Instance}}" FontSize="13" Foreground="{StaticResource Slate600Brush}" VerticalAlignment="Center"/>

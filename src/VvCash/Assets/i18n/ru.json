@@ -184,7 +184,9 @@
   "ExchangePayoutCategoryWarning": "Не выбрана статья расхода для выдачи из кассы — обмен недоступен",
   "ExchangePayoutCategory": "Статья расхода для выдачи из кассы (обмен)",
   "ExchangeAction": "Обменять",
-  "SelectSaleToExchange": "Выберите чек для обмена",
+  "SelectSaleToExchange": "Найдите чек по номеру",
   "IssuedGoods": "Выдача товара",
+  "SearchByReceiptNumber": "Номер чека",
+  "ReceiptNotFound": "Чек с таким номером не найден",
   "SearchProductToIssue": "Поиск товара по названию или штрихкоду"
 }
