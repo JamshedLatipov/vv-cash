@@ -36,7 +36,21 @@ public sealed class SellerSwitchRequest : EventArgs
 {
     public bool CanSignOut { get; }
 
-    public SellerSwitchRequest(bool canSignOut) => CanSignOut = canSignOut;
+    /// <summary>What to run once somebody has actually confirmed, or null when the raise
+    /// site has nothing waiting on the answer. Exists because the only gate left is
+    /// <see cref="PosViewModel.Pay"/>'s: refusing a payment and raising the overlay leaves
+    /// the cashier holding a press that did nothing, and without this they have to work out
+    /// for themselves that the same button needs pressing again once the PIN is in. Carried
+    /// on the request rather than resolved by the host for the same reason
+    /// <see cref="CanSignOut"/> is — the raise site is the only thing that knows what it
+    /// was in the middle of.</summary>
+    public Func<SellerInfo, Task>? OnSwitched { get; }
+
+    public SellerSwitchRequest(bool canSignOut, Func<SellerInfo, Task>? onSwitched = null)
+    {
+        CanSignOut = canSignOut;
+        OnSwitched = onSwitched;
+    }
 }
 
 public partial class PosViewModel : ViewModelBase, IDisposable
@@ -377,10 +391,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // non-empty cart rested on one premise, stated where the rule was written: that
         // AddToCart's gate only re-asks on an EMPTY cart, so dropping the seller
         // mid-receipt would leave the rest of it with nobody confirmed and nothing to
-        // re-prompt. That premise is gone — the gate now re-asks on every add while
-        // nobody is confirmed regardless of what is in the cart, and Pay() refuses
-        // outright without a seller, so a receipt whose seller was dropped mid-way
-        // re-prompts on the next item and cannot be paid unattributed either way (see
+        // re-prompt. That premise is gone — AddToCart no longer asks at all, and Pay()
+        // refuses outright while the session is stale, so a receipt whose seller was
+        // dropped mid-way is caught at the till and cannot be paid unattributed (see
         // SignOutMidReceipt_NextItemReAsks_AndPayStillRefuses).
         //
         // What the restriction did cost was the only control that does the job: the cart
@@ -1246,40 +1259,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void AddToCart(Product product)
     {
-        // Two reasons to ask who is selling, and both are needed.
+        // Deliberately does NOT ask who is selling. Building a receipt is not the moment
+        // that needs an answer — taking money for it is, and that is the one gate left
+        // (see Pay). Asking here meant the overlay covered the screen on the very first
+        // product of every receipt, which is the busiest moment at the till and the one
+        // where a cashier is least inclined to read it; and because the ask could not
+        // block this method, the product landed in the cart whether or not anyone
+        // answered, which is how a dismissed ask used to leave the register in a state
+        // with no way back to the question.
         //
-        // Nobody is confirmed at all. This one repeats on every add until it is answered,
-        // and that is the point: the ask is not modal to this method — it raises the
-        // overlay and the product lands a few lines down regardless — so dismissing the
-        // overlay leaves nobody confirmed AND a cart with an item in it. A gate that only
-        // fired on an empty cart read that cart as "receipt already in progress" and went
-        // silent for the rest of it, so the cashier who dismissed the overlay once (by
-        // accident or otherwise) could never get it back by scanning. That was survivable
-        // while Pay() still paid without a seller; now that Pay() refuses, it is a dead
-        // end with no way out of it from the catalog.
-        //
-        // Somebody IS confirmed but the session went stale, at the start of a receipt.
-        // This is the idle timeout doing its job: whoever confirmed walked away long
-        // enough that the next person at the register must not inherit their name. Kept
-        // guarded on an empty cart, unlike the first reason — a receipt already being
-        // rung up by a confirmed seller must never be interrupted mid-sale, and Touch()
-        // below keeps that session alive for as long as the items keep coming.
-        //
-        // With seller switching disabled there is no separate identity to confirm —
-        // everything on this register is the shift owner's — so neither ask fires.
-        //
-        // canSignOut is a hard false, never CanEndSellerSession: the cart may well be
-        // empty at this instant (that is the second reason's own firing condition) but
-        // the product is about to land in it, so reading CanEndSellerSession here would
-        // read true and stay wrong for as long as the overlay is actually showing (see
-        // SellerSwitchRequest's remarks).
-        var nobodyConfirmed = _sellerSession.Current == null;
-        var newReceiptAfterIdle = !_cartService.Items.Any() && _sellerSession.IsStale;
-        if (IsSellerSwitchEnabled && (nobodyConfirmed || newReceiptAfterIdle))
-            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
+        // Nothing is lost by waiting: Pay refuses outright while the session is stale, and
+        // the answer given there resumes the payment by itself.
 
-        // Any add is genuine register activity, not just the first one — resets the idle
-        // timer so a long receipt never goes stale mid-sale.
+        // Any add is genuine register activity — resets the idle timer, so a receipt that
+        // is actively being rung up does not go stale under the cashier and make Pay ask
+        // at the checkout for a session that never lapsed.
         _sellerSession.Touch();
 
         _cartService.AddProduct(product);
@@ -1735,10 +1729,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // Current, which is what SellerSwitchRequested does and what approval mode
         // deliberately does not.
         //
-        // The overlay is non-blocking and carries no continuation (unlike the approval
-        // flows' OpenForApproval), so this press does not open the exchange window — the
-        // cashier confirms who is selling and taps Exchange again, the same shape as
-        // AddToCart, which also asks and lets the next action proceed.
+        // Carries a continuation, same as Pay's gate: this press does not open the exchange
+        // window, but the answer to the question does, so the cashier never has to work out
+        // that Exchange needs tapping a second time. Resumes ShowExchangeDialogAsync
+        // directly rather than re-entering this method, so a switch that somehow left the
+        // session stale cannot bounce back into the gate in a loop.
         //
         // Same seller-switch-off exception as everywhere else: with IsSellerSwitchEnabled
         // false there is no separate identity to confirm and the overlay itself is hidden,
@@ -1752,10 +1747,20 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // which automatic gates happen to be safe today and might stop being tomorrow.
         if (IsSellerSwitchEnabled && _sellerSession.IsStale)
         {
-            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
+            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(
+                canSignOut: false,
+                onSwitched: _ => ShowExchangeDialogAsync()));
             return;
         }
 
+        await ShowExchangeDialogAsync();
+    }
+
+    /// <summary>Opens the exchange window itself, once the seller gate above is satisfied.
+    /// Split out for the same reason <see cref="ProceedToPayAsync"/> is: the gate needs
+    /// something to resume that cannot re-enter the gate.</summary>
+    private async Task ShowExchangeDialogAsync()
+    {
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             var mainWindow = desktop.MainWindow;
@@ -1785,21 +1790,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// running Avalonia application, since that dialog itself is not.
     ///
     /// Resuming fills the cart directly, without ever going through
-    /// <see cref="AddToCart"/> — so a stale/absent session (e.g. the register just
-    /// restarted and the cashier's first action is resuming a parked sale, never scanning
-    /// a product) would otherwise reach <see cref="Pay"/> with nobody confirmed, and the
-    /// resulting sale gets silently credited to the shift owner with no flag anywhere (see
-    /// this task's own write-up). Fixed by applying the exact same start-of-receipt gate
-    /// here: whenever this method is about to hand the cart a set of items nobody has
-    /// rung up yet — which, by the time we reach the check below, is unconditionally true:
-    /// either the cart started empty, or the auto-park branch just emptied it — ask if the
-    /// session is stale, exactly like AddToCart's own gate. Checked, and the overlay
-    /// requested, before <see cref="ISellerSession.Touch"/> and before the resumed items
-    /// land in the cart: Touch() would clear staleness and defeat the check (same ordering
-    /// AddToCart depends on), and asking before the cart visibly fills mirrors "ask at the
-    /// start of the receipt" rather than after the cashier can already see it. The gate
-    /// runs at most once per resumed receipt — there is exactly one check per call, not
-    /// one per auto-park-then-resume step.
+    /// <see cref="AddToCart"/>. That used to matter a great deal: it meant a resumed
+    /// receipt slipped past AddToCart's seller gate, so this method carried a copy of it.
+    /// Both are gone — <see cref="Pay"/> is the only place the register asks who is
+    /// selling, and a resumed receipt reaches it exactly like any other, so where the
+    /// items came from stops being a question about attribution at all.
     ///
     /// Restores <see cref="ParkedSaleSnapshot.ApprovedById"/> into <see cref="_approvedById"/>
     /// after the rest of the snapshot loads, so an over-cap discount that was already
@@ -1837,18 +1832,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         var snapshot = await _parkedSaleService.ResumeAsync(id);
         if (snapshot == null) return;
 
-        // Same start-of-receipt gate as AddToCart, applied here because resuming skips
-        // AddToCart entirely — see this method's own remarks for why this must run before
-        // Touch() and before the cart is populated below. Same seller-switch-off
-        // exception as AddToCart too: no separate identity to confirm when the flag is off.
-        //
-        // canSignOut: false, same reasoning as AddToCart's own gate — the cart is empty
-        // right here (either it started that way, or the auto-park branch above just
-        // emptied it) but the resumed snapshot's items are about to land in it below, so
-        // CanEndSellerSession would read true now and be wrong for as long as the overlay
-        // is actually showing.
-        if (IsSellerSwitchEnabled && _sellerSession.IsStale)
-            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
+        // No seller gate here either, for the same reason AddToCart no longer has one:
+        // pulling a parked receipt back up is not the moment that needs an answer. Pay is,
+        // and a resumed receipt reaches it exactly like any other — the fact that these
+        // items never went through AddToCart, which is why this gate existed at all, stops
+        // mattering once the question is asked at the till rather than at the catalog.
 
         // Resuming a parked sale is genuine register activity, same as AddToCart's own
         // Touch() call — resets the idle timer so a long-parked receipt that just got
@@ -1894,19 +1882,22 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        // Nobody is confirmed as selling. AddToCart's start-of-receipt gate asks, but the
-        // overlay is not modal and carries no continuation — dismissing it (Escape, or the
-        // cancel control) leaves Current null while the item that triggered the ask is
-        // already in the cart, and every step from here to the drawer opening used to run
-        // anyway. The document would then go out with no seller on it and be credited to
-        // the shift owner, which is the exact misattribution the whole seller feature
-        // exists to prevent, only now with money having changed hands. Refuse and re-ask
-        // instead: this is the last point where refusing is still free.
+        // The one place the register asks who is selling. Taking money is the moment that
+        // actually needs the answer — it is the last point where refusing is still free,
+        // and the only one where the cashier is guaranteed to be looking at the screen.
+        // Everything upstream (AddToCart, resuming a parked receipt) deliberately does not
+        // ask; see AddToCart for why asking there was worse than useless.
         //
-        // Checks Current directly rather than IsStale: staleness is the "ask again"
-        // trigger, and a receipt rung up over more than the idle timeout would fail this
-        // on the clock alone even though someone genuinely did confirm for it. What must
-        // never happen is paying with nobody confirmed at all.
+        // Gates on IsStale, not merely Current == null. Being the only gate left, this one
+        // carries the idle timeout as well: a seller who confirmed, then walked away long
+        // enough to lapse, must not stay signed under a receipt the next person rang up.
+        // Touch() runs on every add, so a receipt actively being rung up never lapses under
+        // the cashier — reaching this stale means the register genuinely sat idle.
+        //
+        // OnSwitched is what stops the refusal being a dead press: once the PIN is in, the
+        // payment resumes by itself rather than making the cashier press Pay a second time.
+        // It calls ProceedToPayAsync directly, never the command, so a switch that somehow
+        // left the session still stale cannot bounce back into this gate in a loop.
         //
         // canSignOut is a hard false: CartItems is non-empty by the guard at the top of
         // this method, so there is nothing to sign out of — see SellerSwitchRequest.
@@ -1915,11 +1906,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // (everything is the shift owner's), nobody ever becomes Current, and the gate
         // would refuse every payment forever — so it degrades to a no-op, same exception
         // CloseShift and OpenReturns make.
-        if (IsSellerSwitchEnabled && _sellerSession.Current == null)
+        if (IsSellerSwitchEnabled && _sellerSession.IsStale)
         {
-            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
+            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(
+                canSignOut: false,
+                onSwitched: _ => ProceedToPayAsync()));
             return;
         }
+
+        await ProceedToPayAsync();
+    }
+
+    /// <summary>Everything Pay does once it is allowed to: quote the cart, then hand the
+    /// payment screen to the host. Split out so the seller gate above has something to
+    /// resume that cannot re-enter the gate itself.
+    ///
+    /// Re-checks the cart rather than trusting Pay's own guard: when this runs as the
+    /// gate's continuation, an overlay stood between the two, and a method that books a
+    /// document should not assume what was true before it.</summary>
+    private async Task ProceedToPayAsync()
+    {
+        if (!CartItems.Any()) return;
 
         if (NavigationRequest != null)
         {
