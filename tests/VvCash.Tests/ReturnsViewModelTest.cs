@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using VvCash.Constants;
 using VvCash.Models;
@@ -27,8 +28,17 @@ public class ReturnsViewModelTest
         /// mirrors ExchangeViewModelTest's own fake of the same name.</summary>
         public Exception? Throw;
 
-        public Task<ExpenseListResponse> GetSalesAsync(int page = 1)
-            => Task.FromResult(new ExpenseListResponse());
+        /// <summary>Every (page, document_number) pair the view model asked for, so the
+        /// search tests can prove the typed receipt number actually reached the request
+        /// rather than being filtered client-side over a page of unrelated sales.</summary>
+        public readonly List<(int Page, string? DocumentNumber)> Queries = new();
+        public readonly List<ExpenseListItem> Found = new();
+
+        public Task<ExpenseListResponse> GetSalesAsync(int page = 1, string? documentNumber = null)
+        {
+            Queries.Add((page, documentNumber));
+            return Task.FromResult(new ExpenseListResponse { Body = Found.ToList() });
+        }
         public Task<ReturnDetailBody> GetReturnableLinesAsync(string expenseId)
             => Task.FromResult(new ReturnDetailBody());
         public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request)
@@ -211,5 +221,85 @@ public class ReturnsViewModelTest
         await vm.SubmitReturnCommand.ExecuteAsync(null);
 
         Assert.False(vm.HasBookedDocument);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Finding the sale by the number on the customer's slip. The list alone only ever
+    // showed the server's default page — today's sales — so a return against an older
+    // receipt had nothing to select.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchSales_SendsTheTypedNumberToTheServer()
+    {
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        svc.Queries.Clear();
+        vm.DocumentNumberQuery = "1042";
+
+        await vm.SearchSalesCommand.ExecuteAsync(null);
+
+        var query = Assert.Single(svc.Queries);
+        Assert.Equal("1042", query.DocumentNumber);
+    }
+
+    [Fact]
+    public async Task SearchSales_RestartsAtPageOne()
+    {
+        // Whatever page the cashier was browsing has nothing to do with where the
+        // searched-for receipt lands; asking for page 3 of a one-result search finds
+        // nothing and reads as "no such receipt".
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.CurrentPage = 3;
+        svc.Queries.Clear();
+        vm.DocumentNumberQuery = "1042";
+
+        await vm.SearchSalesCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.CurrentPage);
+        Assert.Equal(1, Assert.Single(svc.Queries).Page);
+    }
+
+    [Fact]
+    public async Task SearchSales_DropsTheSaleSelectedBefore()
+    {
+        // The previously selected receipt is not in the new result set, and leaving it
+        // selected would leave its lines on screen under a search that did not find it.
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        Assert.NotNull(vm.SelectedSale);
+        vm.DocumentNumberQuery = "1042";
+
+        await vm.SearchSalesCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.SelectedSale);
+    }
+
+    [Fact]
+    public async Task ClearSearch_GoesBackToBrowsingWithNoNumber()
+    {
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.DocumentNumberQuery = "1042";
+        await vm.SearchSalesCommand.ExecuteAsync(null);
+        svc.Queries.Clear();
+
+        await vm.ClearSearchCommand.ExecuteAsync(null);
+
+        Assert.Equal(string.Empty, vm.DocumentNumberQuery);
+        Assert.Equal(string.Empty, Assert.Single(svc.Queries).DocumentNumber);
+    }
+
+    [Fact]
+    public async Task ClearSearch_WithNothingTyped_DoesNotReloadForNothing()
+    {
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        svc.Queries.Clear();
+
+        await vm.ClearSearchCommand.ExecuteAsync(null);
+
+        Assert.Empty(svc.Queries);
     }
 }

@@ -58,10 +58,25 @@ public partial class ExchangeViewModel : ViewModelBase
     private readonly ISyncService? _syncService;
     private readonly IPrinterService? _printerService;
     private readonly ICashFeatureService? _features;
+    private readonly IQuoteService? _quoteService;
     private readonly MoneyPolicy _moneyPolicy;
     private readonly string _shiftId;
     private readonly string? _sellerId;
     private readonly string? _cashId;
+    private readonly string? _warehouseId;
+
+    /// <summary>The server's pricing of the issued basket, or null when nothing has been
+    /// priced yet (empty basket, offline, or the quote failed). Same role
+    /// ICartService.Quote plays for the POS cart, and read the same way — the register
+    /// must not price a replacement off its own cached catalog while a promotion the
+    /// server knows about is running, which is exactly how an exchange came to charge the
+    /// undiscounted price for goods the original sale had bought at half of it.</summary>
+    private QuoteResult? _issuedQuote;
+
+    /// <summary>Cancels the quote in flight when a newer basket edit supersedes it, so a
+    /// slow reply can never land on top of a basket it no longer describes. Mirrors
+    /// PosViewModel's own _quoteCts.</summary>
+    private System.Threading.CancellationTokenSource? _issuedQuoteCts;
 
     /// <summary>Idempotency key for the replacement sale, minted once per basket state
     /// and not per submit press. When a sale commits server-side but its reply is lost
@@ -86,22 +101,24 @@ public partial class ExchangeViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<ReturnLineVm> _returnedLines = new();
     [ObservableProperty] private ObservableCollection<CartItem> _issuedLines = new();
 
-    [ObservableProperty] private ObservableCollection<ExpenseListItem> _sales = new();
+    /// <summary>The one receipt being exchanged, found by its number. There is
+    /// deliberately no browsable list of sales behind this: the exchange screen pays the
+    /// whole returned total out of the till, so a cashier who can page through every
+    /// receipt the register ever rang can pick an arbitrary one and move drawer money
+    /// against it. A number has to come off a slip the customer actually handed over.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSelectedSale))]
     private ExpenseListItem? _selectedSale;
+
+    /// <summary>What the cashier typed into the receipt-number box. Applied only when
+    /// <see cref="SearchSale"/> runs, not per keystroke.</summary>
+    [ObservableProperty] private string _documentNumberQuery = string.Empty;
+
     [ObservableProperty] private bool _isLoadingSales;
     [ObservableProperty] private bool _isLoadingLines;
     [ObservableProperty] private string? _errorMessage;
     [ObservableProperty] private string? _successMessage;
     [ObservableProperty] private string _issuedSearchQuery = string.Empty;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasMorePages))]
-    private int _currentPage = 1;
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasMorePages))]
-    private int _pageCount = 1;
 
     /// <summary>The return and the till payout have no offline queue behind them, so
     /// with no connection there is nothing for the submit button to offer.</summary>
@@ -114,7 +131,6 @@ public partial class ExchangeViewModel : ViewModelBase
     private bool _isSubmitting;
 
     public bool HasSelectedSale => SelectedSale != null;
-    public bool HasMorePages => CurrentPage < PageCount;
 
     /// <summary>True once this screen has written anything to the server — that is, from
     /// the moment the return leg is booked, since a return cannot be cancelled and the
@@ -132,7 +148,22 @@ public partial class ExchangeViewModel : ViewModelBase
     /// <summary>Rounded the way the server books it — the figure the cashier
     /// reads on screen must match what the receipt ends up saying.</summary>
     public decimal ReturnedTotal => _moneyPolicy.Round(ReturnedLines.Sum(l => l.LineRefund));
-    public decimal IssuedTotal => _moneyPolicy.Round(IssuedLines.Sum(l => l.LineTotal));
+
+    /// <summary>What the replacement goods cost before any discount — the sum of the
+    /// lines as they read on screen. Split out from <see cref="IssuedTotal"/> so the
+    /// screen can show the discount as its own figure, the way the POS totals block
+    /// already does; the two are equal whenever nothing is discounted.</summary>
+    public decimal IssuedSubtotal => _moneyPolicy.Round(IssuedLines.Sum(l => l.LineTotal));
+
+    /// <summary>What the server takes off the replacement goods: promotions, and the
+    /// customer's own card when one applies. Zero while the basket is unpriced (empty,
+    /// offline, or the quote failed) — in which case the exchange falls back to catalog
+    /// pricing exactly as the POS cart does.</summary>
+    public decimal IssuedDiscount => _moneyPolicy.Round(_issuedQuote?.DiscountTotal ?? 0m);
+
+    public bool HasIssuedDiscount => IssuedDiscount > 0m;
+
+    public decimal IssuedTotal => _moneyPolicy.Round(IssuedSubtotal - IssuedDiscount);
     public decimal Difference => IssuedTotal - ReturnedTotal;
 
     /// <summary>True once the replacement costs more than what came back.</summary>
@@ -153,6 +184,10 @@ public partial class ExchangeViewModel : ViewModelBase
     /// for an ordinary sale.</param>
     /// <param name="cashId">The cash this register is signed in as, from
     /// ISessionContext. Only the till payout makes the client name it.</param>
+    /// <param name="warehouseId">From ISessionContext, and normally null — the register
+    /// is not told which warehouse its cash stocks from, and the server resolves it from
+    /// the cash token instead. Passed through only so the quote request can name it on a
+    /// register that does happen to know.</param>
     /// <param name="isOnline">Snapshot of the register's connectivity at the
     /// moment the screen opens; kept live afterwards via <paramref name="syncService"/>.</param>
     public ExchangeViewModel(
@@ -166,10 +201,12 @@ public partial class ExchangeViewModel : ViewModelBase
         ISyncService? syncService = null,
         IPrinterService? printerService = null,
         ICashFeatureService? features = null,
+        IQuoteService? quoteService = null,
         MoneyPolicy? moneyPolicy = null,
         string shiftId = "",
         string? sellerId = null,
         string? cashId = null,
+        string? warehouseId = null,
         bool isOnline = false)
     {
         _window = window;
@@ -182,20 +219,21 @@ public partial class ExchangeViewModel : ViewModelBase
         _syncService = syncService;
         _printerService = printerService;
         _features = features;
+        _quoteService = quoteService;
         _moneyPolicy = moneyPolicy ?? MoneyPolicy.Default;
         _shiftId = shiftId;
         _sellerId = sellerId;
         _cashId = cashId;
+        _warehouseId = warehouseId;
         IsOnline = isOnline;
 
         if (_syncService != null)
             _syncService.SyncStatusChanged += OnSyncStatusChanged;
 
+        // No sales are fetched on open any more: with the browsable list gone there is
+        // nothing to fill until the cashier enters a receipt number.
         if (window != null)
-        {
             window.Closed += OnWindowClosed;
-            _ = LoadSalesAsync();
-        }
     }
 
     /// <summary>The Close button is only one way out of this dialog — the window
@@ -210,27 +248,79 @@ public partial class ExchangeViewModel : ViewModelBase
     }
 
     private void OnSyncStatusChanged(object? sender, bool isOnline)
-        => Avalonia.Threading.Dispatcher.UIThread.Post(() => IsOnline = isOnline);
+        => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var wasOffline = !IsOnline;
+            IsOnline = isOnline;
+            // A basket built while the connection was down was priced off the register's
+            // own catalog, with every promotion missed. Coming back online is the first
+            // moment that can be corrected, and leaving it uncorrected would sell the
+            // replacement at the undiscounted price with the cashier none the wiser.
+            if (isOnline && wasOffline && IssuedLines.Count > 0) TriggerIssuedRequote();
+        });
 
-    private async Task LoadSalesAsync()
+    /// <summary>Finds the one receipt the customer is exchanging against, by the number
+    /// printed on their slip. The backend match is exact and scoped to this register's
+    /// own cash, and it drops the default today-only date range for a numbered lookup —
+    /// so a slip from an earlier day is still reachable without the register ever being
+    /// able to page through receipts it has no business seeing.</summary>
+    [RelayCommand]
+    private async Task SearchSale()
     {
         if (_returnService == null) return;
+        if (string.IsNullOrWhiteSpace(DocumentNumberQuery))
+        {
+            // Blank is "no receipt", not "every receipt": sending it would ask the server
+            // for an unfiltered page, which is the browsable list this screen just lost.
+            ClearSelectedSale();
+            return;
+        }
+
         IsLoadingSales = true;
         ErrorMessage = null;
+        SuccessMessage = null;
         try
         {
-            var res = await _returnService.GetSalesAsync(CurrentPage);
-            Sales = new ObservableCollection<ExpenseListItem>(res.Body);
-            PageCount = Math.Max(1, res.PageCount);
+            var res = await _returnService.GetSalesAsync(1, DocumentNumberQuery);
+            var match = res.Body.FirstOrDefault();
+            if (match == null)
+            {
+                ClearSelectedSale();
+                ErrorMessage = I18nService.Instance["ReceiptNotFound"];
+                return;
+            }
+            // Assigning this is what loads the returnable lines — see OnSelectedSaleChanged.
+            SelectedSale = match;
         }
         catch (Exception)
         {
+            ClearSelectedSale();
             ErrorMessage = I18nService.Instance["NoConnection"];
         }
         finally
         {
             IsLoadingSales = false;
         }
+    }
+
+    /// <summary>Drops the receipt and everything that hung off it. Assigning null is
+    /// enough for the returned basket (OnSelectedSaleChanged clears it), but the issued
+    /// one belongs to the exchange as a whole and would otherwise survive into the next
+    /// receipt the cashier looks up.</summary>
+    private void ClearSelectedSale()
+    {
+        SelectedSale = null;
+        foreach (var item in IssuedLines.ToList()) RemoveIssuedLine(item);
+    }
+
+    /// <summary>Clears the search box and the receipt with it, so the screen goes back to
+    /// its opening state rather than leaving a receipt selected under an empty box.</summary>
+    [RelayCommand]
+    private void ClearSearch()
+    {
+        DocumentNumberQuery = string.Empty;
+        ErrorMessage = null;
+        ClearSelectedSale();
     }
 
     partial void OnSelectedSaleChanged(ExpenseListItem? value)
@@ -284,14 +374,14 @@ public partial class ExchangeViewModel : ViewModelBase
     {
         item.PropertyChanged += OnIssuedLinePropertyChanged;
         IssuedLines.Add(item);
-        RaiseTotalsChanged();
+        OnIssuedBasketChanged();
     }
 
     public void RemoveIssuedLine(CartItem item)
     {
         item.PropertyChanged -= OnIssuedLinePropertyChanged;
         IssuedLines.Remove(item);
-        RaiseTotalsChanged();
+        OnIssuedBasketChanged();
     }
 
     /// <summary>Looks up the search box's text as a barcode first (an exact scan),
@@ -336,11 +426,24 @@ public partial class ExchangeViewModel : ViewModelBase
 
     private void OnIssuedLinePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // QuotedUnitPrice is excluded on purpose: applying a quote sets it on every line,
+        // and treating that as a basket edit would re-enter the quote path in a loop and,
+        // worse, clear the retry bookkeeping RaiseTotalsChanged resets.
         if (e.PropertyName == nameof(CartItem.Quantity))
-            RaiseTotalsChanged();
+            OnIssuedBasketChanged();
     }
 
     private void OnBasketChanged() => RaiseTotalsChanged();
+
+    /// <summary>What a change to the issued basket goes through, as opposed to the
+    /// returned one: the totals move exactly as before, and on top of that the server is
+    /// asked to re-price the replacement goods, because which promotions apply depends on
+    /// what is in the basket.</summary>
+    private void OnIssuedBasketChanged()
+    {
+        RaiseTotalsChanged();
+        TriggerIssuedRequote();
+    }
 
     private void RaiseTotalsChanged()
     {
@@ -353,13 +456,94 @@ public partial class ExchangeViewModel : ViewModelBase
         // PosViewModel nothing happened and leave the previous seller confirmed.
         _documentHash = null;
         _returnBooked = false;
+        NotifyTotalsChanged();
+    }
+
+    /// <summary>The notifications alone, without the retry reset. A quote landing changes
+    /// every figure on screen but is not a basket edit: clearing <see cref="_returnBooked"/>
+    /// for it would let a retry after a failed payout book the return a second time, and
+    /// there is no endpoint to cancel a return.</summary>
+    private void NotifyTotalsChanged()
+    {
         OnPropertyChanged(nameof(ReturnedTotal));
+        OnPropertyChanged(nameof(IssuedSubtotal));
+        OnPropertyChanged(nameof(IssuedDiscount));
+        OnPropertyChanged(nameof(HasIssuedDiscount));
         OnPropertyChanged(nameof(IssuedTotal));
         OnPropertyChanged(nameof(Difference));
         OnPropertyChanged(nameof(CustomerPays));
         OnPropertyChanged(nameof(TillPays));
         OnPropertyChanged(nameof(RefundDue));
         OnPropertyChanged(nameof(CanSubmit));
+    }
+
+    /// <summary>Asks the server to price the issued basket, superseding whatever quote was
+    /// already in flight. Fire-and-forget by design, like PosViewModel's own requote: the
+    /// screen stays usable while it runs and a failure only means catalog pricing, never a
+    /// blocked exchange.</summary>
+    private void TriggerIssuedRequote()
+    {
+        _issuedQuoteCts?.Cancel();
+        var cts = new System.Threading.CancellationTokenSource();
+        _issuedQuoteCts = cts;
+        _ = RequoteIssuedAsync(cts);
+    }
+
+    private async Task RequoteIssuedAsync(System.Threading.CancellationTokenSource cts)
+    {
+        // No card and no promo code: this screen has neither control. Auto-applied
+        // promotions are the whole point and need no cashier input — the server can only
+        // put them into best-deal if it is asked to price the basket at all.
+        if (_quoteService == null || !IsOnline || IssuedLines.Count == 0)
+        {
+            if (IsCurrentIssuedQuote(cts)) ApplyIssuedQuote(null);
+            return;
+        }
+
+        QuoteResult? result;
+        try
+        {
+            result = await _quoteService.QuoteAsync(
+                QuoteRequestBuilder.Build(IssuedLines, _warehouseId, cardIdentifier: null, code: null),
+                cts.Token);
+        }
+        catch (Exception ex)
+        {
+            // Never blocks the exchange — the basket just falls back to catalog pricing,
+            // same as the POS cart does when a quote fails.
+            System.Diagnostics.Debug.WriteLine($"[ExchangeViewModel] Issued requote failed: {ex}");
+            result = null;
+        }
+
+        if (!IsCurrentIssuedQuote(cts)) return; // a newer basket edit superseded this one
+        ApplyIssuedQuote(result);
+    }
+
+    private bool IsCurrentIssuedQuote(System.Threading.CancellationTokenSource cts)
+        => ReferenceEquals(_issuedQuoteCts, cts) && !cts.IsCancellationRequested;
+
+    /// <summary>Stamps the server's per-line unit price onto the basket and refreshes the
+    /// totals. Matched by product id, exactly as CartService.ApplyQuotedPrices does —
+    /// AddIssuedProduct merges a repeated product onto one line, so the id is unambiguous.
+    /// The stamped price is the line's price BEFORE discount (that is what the quote's
+    /// unit_price carries); the discount itself stays document-level, in
+    /// <see cref="IssuedDiscount"/>, which is the shape the sale request declares it in.</summary>
+    private void ApplyIssuedQuote(QuoteResult? result)
+    {
+        _issuedQuote = result;
+        foreach (var item in IssuedLines)
+            item.QuotedUnitPrice = result?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id)?.UnitPrice;
+        NotifyTotalsChanged();
+    }
+
+    /// <summary>What one issued line is actually worth once the basket's discount is
+    /// taken off it — the quote's own per-line figure, so the printed lines add up to
+    /// <see cref="IssuedTotal"/> instead of to the pre-discount subtotal. Falls back to
+    /// the undiscounted line total for a basket nothing priced.</summary>
+    private decimal IssuedLineFinalTotal(CartItem item)
+    {
+        var line = _issuedQuote?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id);
+        return _moneyPolicy.Round(line?.FinalLineTotal ?? item.LineTotal);
     }
 
     /// <summary>Step 1's body: the lines the customer handed back, dated today rather
@@ -403,31 +587,50 @@ public partial class ExchangeViewModel : ViewModelBase
             DocumentHash = _documentHash,
             SellerId = _sellerId,
             ShiftId = _shiftId,
+            // The quote the figures on screen came from, so the server books the
+            // replacement against the same pricing it just handed out rather than
+            // re-deriving one that may already have moved.
+            QuoteId = _issuedQuote?.QuoteId,
             SoldSource = SoldSourcesEnum.CASH,
             // Mirrors what the register's own plain sale sends (PosViewModel.Pay):
-            // SellPrice below is already the discounted price, so the document-level
-            // discount is declared in money and is zero here — this screen has no
-            // manual-discount control, and the per-line DiscountPercent stays
-            // informational. Left at the default "percent", the server would take each
-            // line's catalog percent off an already-discounted price and land under the
-            // declared to_pay.
+            // SellPrice below is the price BEFORE discount, and the whole discount is
+            // declared once, document-level, in money. Declaring it as "percent" instead
+            // would have the server take each line's catalog percent off a price that
+            // already had the discount in it and land under the declared to_pay.
+            //
+            // Discount was hardcoded to zero here until this screen learned to quote:
+            // with no quote there was no discount to declare, which is precisely why an
+            // exchange charged the full catalog price for goods a running promotion had
+            // sold at half of it.
             Payment = new Payment
             {
                 ToPay = IssuedTotal,
                 PaidInCash = IssuedTotal,
                 PaidByCreditCard = 0m,
                 DiscountType = "cash",
-                Discount = 0m,
+                Discount = IssuedDiscount,
                 Remained = 0m,
             },
-            Products = IssuedLines.Select(l => new DocumentProduct
+            Products = IssuedLines.Select((l, lineIndex) =>
             {
-                Name = l.Product.Name,
-                ProductId = l.Product.Id,
-                Quantity = l.Quantity,
-                SellPrice = l.Product.Price,
-                PriceBeforeDiscount = l.Product.OriginalPrice ?? l.Product.Price,
-                DiscountPercent = l.Product.DiscountPercent ?? 0,
+                // Same resolver the POS sale uses, with no offline promotion to consider:
+                // CanSubmit already requires the register to be online, so a basket that
+                // reaches here was either priced by the server or not priced at all.
+                var (pct, before) = QuoteLineResolver.Resolve(
+                    _issuedQuote, offlinePromotion: null, l, lineIndex, _moneyPolicy);
+                return new DocumentProduct
+                {
+                    Name = l.Product.Name,
+                    ProductId = l.Product.Id,
+                    Quantity = l.Quantity,
+                    // The quoted price when a quote priced this line, the cached one
+                    // otherwise — the server flags a line is_suspicious when sell_price
+                    // differs from its catalog price, so sending a stale cached price
+                    // would flag every honest exchange.
+                    SellPrice = l.UnitPrice,
+                    PriceBeforeDiscount = before,
+                    DiscountPercent = pct,
+                };
             }).ToList(),
         };
     }
@@ -468,8 +671,11 @@ public partial class ExchangeViewModel : ViewModelBase
             // basket clear would otherwise move the figures out from under the receipt.
             var returnedReceiptLines = ReturnedLines.Where(l => l.ReturnQty > 0)
                 .Select(l => new ReturnReceiptLine(l.Name, l.ReturnQty, l.LineRefund)).ToList();
+            // Priced after the discount, not at the catalog subtotal: the slip prints these
+            // lines and then the difference, with no discount line of its own, so
+            // undiscounted lines would simply not add up to the money that changed hands.
             var issuedReceiptLines = IssuedLines
-                .Select(l => new ReturnReceiptLine(l.Product.Name, (int)l.Quantity, l.LineTotal)).ToList();
+                .Select(l => new ReturnReceiptLine(l.Product.Name, (int)l.Quantity, IssuedLineFinalTotal(l))).ToList();
             var difference = Difference;
 
             // ---- 1. the return -------------------------------------------------
@@ -617,22 +823,6 @@ public partial class ExchangeViewModel : ViewModelBase
             try { await _printerService.PrintExchangeReceiptAsync(returnedReceiptLines, issuedReceiptLines, difference, documentNumber); }
             catch { }
         }
-    }
-
-    [RelayCommand]
-    private async Task NextPage()
-    {
-        if (!HasMorePages) return;
-        CurrentPage++;
-        await LoadSalesAsync();
-    }
-
-    [RelayCommand]
-    private async Task PrevPage()
-    {
-        if (CurrentPage <= 1) return;
-        CurrentPage--;
-        await LoadSalesAsync();
     }
 
     /// <summary>Closing the window is enough — OnWindowClosed is what unsubscribes,

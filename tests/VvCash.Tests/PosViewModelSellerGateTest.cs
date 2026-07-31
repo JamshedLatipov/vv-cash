@@ -477,7 +477,7 @@ public class PosViewModelSellerGateTest
     // silently returning fabricated data that would never be checked.
     private class FakeReturnService : IReturnService
     {
-        public Task<ExpenseListResponse> GetSalesAsync(int page = 1) => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
+        public Task<ExpenseListResponse> GetSalesAsync(int page = 1, string? documentNumber = null) => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
         public Task<ReturnDetailBody> GetReturnableLinesAsync(string expenseId) => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
         public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request) => throw new NotSupportedException("not exercised by PosViewModelSellerGateTest");
     }
@@ -799,12 +799,15 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void Pay_WithNoCurrentSeller_OmitsSellerIdFromRequestAndJson()
+    public void Pay_SellerSwitchDisabled_NoCurrentSeller_OmitsSellerIdFromRequestAndJson()
     {
-        using var vm = CreateViewModel(out var deps);
-        // No SetCurrent call: ISellerSession.Current stays null, as at a register nobody
-        // has confirmed on yet — Pay() must not crash and must leave SellerId unset so the
-        // backend falls back to crediting the shift owner.
+        // The seller-switch-off register: nobody ever becomes Current here, so Pay()'s
+        // no-seller gate is deliberately not armed (see the gate's own remarks) and this
+        // is the one configuration where paying with a null SellerId is still correct —
+        // the backend falls back to crediting the shift owner. On a register that HAS
+        // seller switching, the same state now refuses instead; see
+        // Pay_SellerSwitchEnabled_NoCurrentSeller_RefusesAndAsksWhoIsSelling below.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
 
         MixedPaymentViewModel? mixedPaymentVm = null;
@@ -828,6 +831,92 @@ public class PosViewModelSellerGateTest
         // — the backend's documented behaviour for a genuinely absent field, not an empty one.
         var json = System.Text.Json.JsonSerializer.Serialize(request);
         Assert.DoesNotContain("seller", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Pay_SellerSwitchEnabled_NoCurrentSeller_RefusesAndAsksWhoIsSelling()
+    {
+        // The bug this gate closes: AddToCart's start-of-receipt ask raises a NON-modal
+        // overlay and then adds the item regardless, so dismissing that overlay left a
+        // full cart with Current still null and every later step — payment screen, the
+        // document, the drawer — ran anyway. The sale went out unattributed.
+        //
+        // Reproduced exactly as it happens at the till: the gate fires, nobody completes
+        // the switch (no SetCurrent), and Pay is pressed on the cart that got filled
+        // anyway. Nothing may reach NavigationRequest, and the ask must be repeated.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        Assert.Null(deps.SellerSession.Current);
+
+        var navigatedCount = 0;
+        vm.NavigationRequest = _ => navigatedCount++;
+        var raisedCount = 0;
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => { raisedCount++; request = e; };
+
+        vm.PayCommand.Execute(null);
+
+        Assert.Equal(0, navigatedCount);
+        Assert.Null(deps.ExpenseDocumentService.LastRequest);
+        Assert.Equal(1, raisedCount);
+        // The cart is non-empty by the time this fires (Pay returns early on an empty
+        // one), so there is nothing to sign out of — see SellerSwitchRequest's remarks.
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
+    }
+
+    [Fact]
+    public void Pay_AfterSellerConfirmsOnTheSecondAttempt_GoesThrough()
+    {
+        // The gate must be a re-ask, not a dead end: once someone actually confirms,
+        // pressing Pay again pays the same cart and stamps them onto the document. A
+        // guard that refused forever would be as broken as one that never refused.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.Null(mixedPaymentVm); // refused: nobody confirmed
+
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-7", FirstName = "Anna", LastName = "Lee" });
+        vm.PayCommand.Execute(null);
+
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.NotNull(deps.ExpenseDocumentService.LastRequest);
+        Assert.Equal("seller-7", deps.ExpenseDocumentService.LastRequest!.SellerId);
+    }
+
+    [Fact]
+    public void Pay_SellerConfirmedButSessionWentStale_StillPays()
+    {
+        // The gate reads Current, not IsStale, deliberately. A long receipt can outlive
+        // the idle timeout while the person who confirmed it is still standing there;
+        // gating on staleness would demand a fresh PIN at the moment the customer is
+        // handing over money. What must never happen is paying with nobody confirmed at
+        // all, and that is exactly what Current == null means.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-7", FirstName = "Anna", LastName = "Lee" });
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        deps.SellerSession.TimedOut = true;
+        Assert.True(deps.SellerSession.IsStale);
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+
+        Assert.NotNull(mixedPaymentVm);
     }
 
     [Fact]
@@ -1302,7 +1391,10 @@ public class PosViewModelSellerGateTest
         firstPaymentVm.ConfirmPaymentCommand.Execute(null);
         Assert.Equal("supervisor-9", deps.ExpenseDocumentService.LastRequest!.ApprovedBy); // sanity check
 
-        // A second, unrelated receipt: nobody approved anything for it.
+        // A second, unrelated receipt: nobody approved anything for it. The completed
+        // sale above dropped the confirmed seller (EndReceipt), so someone has to confirm
+        // again before this one can be paid — Pay()'s own gate refuses otherwise.
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
         vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
         MixedPaymentViewModel? secondPaymentVm = null;
         vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) secondPaymentVm = m; };
@@ -1323,6 +1415,9 @@ public class PosViewModelSellerGateTest
 
         vm.ClearCartCommand.Execute(null);
 
+        // Dropping the receipt drops the confirmed seller with it (EndReceipt), so the
+        // next one needs a fresh confirmation before Pay()'s gate will let it through.
+        deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
         vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
         MixedPaymentViewModel? mixedPaymentVm = null;
         vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
@@ -1593,6 +1688,11 @@ public class PosViewModelSellerGateTest
 
         Assert.Equal(1, raisedCount); // sanity check: the gate did fire for this resume
         Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // the approved discount still came back
+
+        // Whoever picked the resumed receipt up confirms at the overlay the gate just
+        // raised — without that, Pay()'s no-seller gate refuses and this test would be
+        // asserting against a document that was never built.
+        deps.SellerSession.SetCurrent(MakeSeller("cashier"));
 
         MixedPaymentViewModel? mixedPaymentVm = null;
         vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
@@ -2141,6 +2241,7 @@ public class PosViewModelSellerGateTest
     public void Pay_QuotesTheCartBeforeOpeningThePaymentScreen()
     {
         using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier")); // Pay() refuses with nobody confirmed
         deps.CartService.AddProduct(MakeProduct("p1", 100m));
         WaitForQuotes(deps.QuoteService, 1);
 
@@ -2163,6 +2264,7 @@ public class PosViewModelSellerGateTest
     public void Pay_SendsTheQuotedUnitPriceAsSellPrice()
     {
         using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("cashier")); // Pay() refuses with nobody confirmed
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
 
         // Set directly rather than through a quote: this fake cart service does not

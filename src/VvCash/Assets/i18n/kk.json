@@ -205,7 +205,9 @@
   "ExchangePayoutCategoryWarning": "Кассадан ақша беру үшін шығыс бабы таңдалмаған — айырбас қолжетімсіз",
   "ExchangePayoutCategory": "Кассадан ақша беру шығыс бабы (айырбас)",
   "ExchangeAction": "Айырбастау",
-  "SelectSaleToExchange": "Айырбастау үшін чекті таңдаңыз",
+  "SelectSaleToExchange": "Чекті нөмірі бойынша табыңыз",
   "IssuedGoods": "Берілетін тауар",
+  "SearchByReceiptNumber": "Чек нөмірі",
+  "ReceiptNotFound": "Мұндай нөмірлі чек табылмады",
   "SearchProductToIssue": "Атауы немесе штрихкод бойынша тауар іздеу"
 }

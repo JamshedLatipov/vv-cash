@@ -1744,9 +1744,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 var exchangeVm = new ExchangeViewModel(
                     dialog, _returnService, _cashOperationService, _expenseDocumentService,
                     _counterpartyService, _settingsService, _productService, _syncService,
-                    _printerService, _features,
+                    _printerService, _features, _quoteService,
                     _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty,
-                    _sellerSession.Current?.Id, _session.CashId, IsSystemOnline);
+                    _sellerSession.Current?.Id, _session.CashId, _session.WarehouseId, IsSystemOnline);
                 dialog.DataContext = exchangeVm;
                 await dialog.ShowDialog(mainWindow);
 
@@ -1870,6 +1870,33 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             AlertMessage = "Cannot process payment: No active shift.";
             IsAlertModalVisible = true;
+            return;
+        }
+
+        // Nobody is confirmed as selling. AddToCart's start-of-receipt gate asks, but the
+        // overlay is not modal and carries no continuation — dismissing it (Escape, or the
+        // cancel control) leaves Current null while the item that triggered the ask is
+        // already in the cart, and every step from here to the drawer opening used to run
+        // anyway. The document would then go out with no seller on it and be credited to
+        // the shift owner, which is the exact misattribution the whole seller feature
+        // exists to prevent, only now with money having changed hands. Refuse and re-ask
+        // instead: this is the last point where refusing is still free.
+        //
+        // Checks Current directly rather than IsStale: staleness is the "ask again"
+        // trigger, and a receipt rung up over more than the idle timeout would fail this
+        // on the clock alone even though someone genuinely did confirm for it. What must
+        // never happen is paying with nobody confirmed at all.
+        //
+        // canSignOut is a hard false: CartItems is non-empty by the guard at the top of
+        // this method, so there is nothing to sign out of — see SellerSwitchRequest.
+        //
+        // With seller switching off this register has no separate identity to confirm
+        // (everything is the shift owner's), nobody ever becomes Current, and the gate
+        // would refuse every payment forever — so it degrades to a no-op, same exception
+        // CloseShift and OpenReturns make.
+        if (IsSellerSwitchEnabled && _sellerSession.Current == null)
+        {
+            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
             return;
         }
 

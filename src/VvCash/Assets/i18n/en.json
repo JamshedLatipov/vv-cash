@@ -205,7 +205,9 @@
   "ExchangePayoutCategoryWarning": "No payout expense category is configured — exchange is unavailable",
   "ExchangePayoutCategory": "Cash payout expense category (exchange)",
   "ExchangeAction": "Exchange",
-  "SelectSaleToExchange": "Select a receipt to exchange",
+  "SelectSaleToExchange": "Find the receipt by its number",
   "IssuedGoods": "Goods issued",
+  "SearchByReceiptNumber": "Receipt number",
+  "ReceiptNotFound": "No receipt with that number",
   "SearchProductToIssue": "Search product by name or barcode"
 }

@@ -45,6 +45,53 @@ public class ReturnServiceTest
     }
 
     [Fact]
+    public async Task GetSalesAsync_WithDocumentNumber_SendsItAsAQueryParam()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"body":[],"page_count":1,"total_items":0,"item_per_page":10}"""));
+        var svc = Build(handler);
+
+        await svc.GetSalesAsync(1, "1042");
+
+        var url = handler.LastRequest!.RequestUri!.ToString();
+        Assert.Contains("document_number=1042", url);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetSalesAsync_WithoutADocumentNumber_LeavesTheParamOffEntirely(string? number)
+    {
+        // Blank must not become document_number= : the backend treats an empty value as
+        // "no filter", but sending the key at all is noise, and a whitespace-only value
+        // would be an exact match against a number no receipt has.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"body":[],"page_count":1,"total_items":0,"item_per_page":10}"""));
+        var svc = Build(handler);
+
+        await svc.GetSalesAsync(1, number);
+
+        Assert.DoesNotContain("document_number", handler.LastRequest!.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task GetSalesAsync_DocumentNumberIsUrlEscaped()
+    {
+        // Document numbers are free-form store-side text. An unescaped '&' would end the
+        // parameter and silently search for something else entirely.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"body":[],"page_count":1,"total_items":0,"item_per_page":10}"""));
+        var svc = Build(handler);
+
+        await svc.GetSalesAsync(1, "A&B 1");
+
+        // AbsoluteUri, not ToString(): Uri.ToString() hands back the unescaped display
+        // form, which would hide the very escaping this test is about.
+        Assert.Contains("document_number=A%26B%201", handler.LastRequest!.RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
     public async Task GetReturnableLinesAsync_ReturnsBody()
     {
         var handler = new StubHttpMessageHandler(_ =>

@@ -28,9 +28,14 @@ public class ReturnService : IReturnService
         return baseUrl;
     }
 
-    public async Task<ExpenseListResponse> GetSalesAsync(int page = 1)
+    public async Task<ExpenseListResponse> GetSalesAsync(int page = 1, string? documentNumber = null)
     {
         var url = $"{GetBaseUrl()}documents/expense/?page={page}";
+        // Escaped rather than interpolated raw: a document number is free-form store-side
+        // text, so a '&' or '#' typed into the search box would otherwise truncate the
+        // query string and silently search for something else.
+        if (!string.IsNullOrWhiteSpace(documentNumber))
+            url += $"&document_number={Uri.EscapeDataString(documentNumber.Trim())}";
         var res = await _httpClient.GetFromJsonAsync<ExpenseListResponse>(url);
         return res ?? new ExpenseListResponse();
     }
