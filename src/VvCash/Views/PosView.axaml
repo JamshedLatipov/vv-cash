@@ -635,6 +635,15 @@
                         <material:MaterialIcon Kind="CloudOffOutline" Width="14" Height="14" Foreground="#ef4444"/>
                         <TextBlock Text="{Binding UnsyncedDocumentsCount, StringFormat={}{0} unsynced orders}" Foreground="#ef4444" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
                     </StackPanel>
+                    <Button Classes="IconButton" Padding="0" Background="Transparent" BorderThickness="0"
+                            IsVisible="{Binding Update.IsUpdateAvailable}"
+                            Command="{Binding Update.OpenModalCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <material:MaterialIcon Kind="ArrowUpBoldCircleOutline" Width="14" Height="14" Foreground="#16a34a"/>
+                            <TextBlock Text="{Binding [UpdateAvailableBadge], Source={x:Static services:I18nService.Instance}}"
+                                       Foreground="#16a34a" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="0,0,20,0" VerticalAlignment="Center">
                     <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource Slate400Brush}" FontSize="10" VerticalAlignment="Center" Margin="0,0,12,0"/>
@@ -643,7 +652,10 @@
                     <Border Classes="KeyHint"><TextBlock Text="F4"/></Border>
                     <TextBlock Text="{Binding [Pay], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
-                <TextBlock Grid.Column="2" Text="{Binding [V240TERMINALIDLXP099], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
+                <!-- Was the i18n key V240TERMINALIDLXP099, a leftover from the mockup that
+                     read "V 2.4.0 • TERMINAL ID: LXP-09921" on every register regardless of
+                     what was installed. Now the actual build. -->
+                <TextBlock Grid.Column="2" Text="{Binding Update.AppVersionText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
             </Grid>
         </Border>
 
@@ -1024,6 +1036,64 @@
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Center"
                             Height="48"/>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Update Modal -->
+        <Border Grid.RowSpan="3" Background="#990f172a"
+                IsVisible="{Binding Update.IsModalVisible}"
+                ZIndex="2000">
+            <Border Background="White"
+                    CornerRadius="24"
+                    Padding="32"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Width="480"
+                    BoxShadow="0 20 40 0 #40000000">
+                <StackPanel Spacing="20">
+                    <StackPanel Orientation="Horizontal" Spacing="16" HorizontalAlignment="Center">
+                        <Border Background="{StaticResource Slate100Brush}" CornerRadius="12" Padding="12">
+                            <material:MaterialIcon Kind="ArrowUpBoldCircleOutline" Width="32" Height="32" Foreground="{StaticResource Slate800Brush}"/>
+                        </Border>
+                        <TextBlock Text="{Binding [UpdateModalTitle], Source={x:Static services:I18nService.Instance}}"
+                                   FontSize="24" FontWeight="Black" Foreground="{StaticResource Slate900Brush}"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding Update.AvailableVersionText}"
+                               FontSize="18" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"
+                               HorizontalAlignment="Center"/>
+
+                    <TextBlock Text="{Binding Update.AvailableUpdate.Notes}"
+                               FontSize="14" Foreground="{StaticResource Slate600Brush}"
+                               TextWrapping="Wrap" HorizontalAlignment="Center"
+                               IsVisible="{Binding Update.AvailableUpdate.Notes, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+                    <StackPanel Spacing="8" IsVisible="{Binding Update.IsDownloading}">
+                        <TextBlock Text="{Binding [UpdateDownloading], Source={x:Static services:I18nService.Instance}}"
+                                   FontSize="13" Foreground="{StaticResource Slate600Brush}" HorizontalAlignment="Center"/>
+                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding Update.DownloadProgress}" Height="8"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding [UpdateBlockedByCart], Source={x:Static services:I18nService.Instance}}"
+                               FontSize="13" Foreground="{StaticResource Red500Brush}" HorizontalAlignment="Center"
+                               IsVisible="{Binding !Update.CanInstall}"/>
+
+                    <TextBlock Text="{Binding Update.ErrorText}"
+                               FontSize="13" Foreground="{StaticResource Red500Brush}"
+                               TextWrapping="Wrap" HorizontalAlignment="Center"
+                               IsVisible="{Binding Update.ErrorText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+
+                    <Grid ColumnDefinitions="*, *" Margin="0,8,0,0">
+                        <Button Grid.Column="0" Margin="0,0,6,0" HorizontalAlignment="Stretch"
+                                Content="{Binding [UpdateLaterButton], Source={x:Static services:I18nService.Instance}}"
+                                Command="{Binding Update.CloseModalCommand}"/>
+                        <Button Grid.Column="1" Margin="6,0,0,0" HorizontalAlignment="Stretch"
+                                Content="{Binding [UpdateInstallButton], Source={x:Static services:I18nService.Instance}}"
+                                Command="{Binding Update.StartUpdateCommand}"
+                                IsEnabled="{Binding Update.CanInstall}"/>
+                    </Grid>
                 </StackPanel>
             </Border>
         </Border>

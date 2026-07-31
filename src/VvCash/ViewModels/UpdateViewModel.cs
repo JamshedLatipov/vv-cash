@@ -26,6 +26,13 @@ public partial class UpdateViewModel : ViewModelBase
     /// <summary>The running build, formatted for the status bar.</summary>
     public string AppVersionText { get; }
 
+    /// <summary>The version line for the dialog, formatted through the current locale.
+    /// Built here rather than with a XAML StringFormat because the format string itself
+    /// comes from I18nService at run time, which StringFormat cannot take.</summary>
+    public string AvailableVersionText => AvailableUpdate is null
+        ? string.Empty
+        : string.Format(I18nService.Instance["UpdateVersionLine"], AvailableUpdate.Version);
+
     /// <summary>Set by App.axaml.cs to shut the desktop lifetime down. A settable
     /// delegate rather than a direct call, matching PosViewModel.NavigationRequest:
     /// the view model states intent, the host decides how it happens, and a test can
@@ -51,6 +58,8 @@ public partial class UpdateViewModel : ViewModelBase
     }
 
     partial void OnIsDownloadingChanged(bool value) => OnPropertyChanged(nameof(CanInstall));
+
+    partial void OnAvailableUpdateChanged(UpdateInfo? value) => OnPropertyChanged(nameof(AvailableVersionText));
 
     /// <summary>Called from PosViewModel's background loop. Never throws — the service
     /// already swallows every failure and answers null.</summary>

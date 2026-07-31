@@ -95,6 +95,30 @@ public class UpdateViewModelTest
     }
 
     [Fact]
+    public async Task AvailableVersionTextCarriesTheReleaseVersion()
+    {
+        var (vm, service, _, _) = Build();
+        service.Available = SampleInfo();
+
+        await vm.CheckAsync(CancellationToken.None);
+        Dispatcher.UIThread.RunJobs();
+
+        // I18nService.Instance is never Initialize()'d in this test suite (only
+        // App.axaml.cs and SettingsViewModel call it), so "UpdateVersionLine" resolves
+        // to the missing-key marker "[UpdateVersionLine]" rather than a real locale
+        // string here — matching how SellerSwitchViewModelTest/PosViewModelSellerGateTest
+        // compare against I18nService.Instance[key] instead of a hardcoded string, this
+        // asserts against the same lookup the view model itself uses, so it holds
+        // whether or not a locale ends up loaded.
+        var expected = string.Format(I18nService.Instance["UpdateVersionLine"], vm.AvailableUpdate!.Version);
+        Assert.Equal(expected, vm.AvailableVersionText);
+
+        // Pin down that 1.1.0 is genuinely what flows into the format call, independent
+        // of whether the locale template is present to interpolate it.
+        Assert.Equal(new Version(1, 1, 0), vm.AvailableUpdate!.Version);
+    }
+
+    [Fact]
     public async Task CheckLeavesTheBadgeHiddenWhenThereIsNothingNew()
     {
         var (vm, service, _, _) = Build();
