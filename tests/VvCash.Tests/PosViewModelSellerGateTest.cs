@@ -2150,6 +2150,12 @@ public class PosViewModelSellerGateTest
         mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
         mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
 
+        // The failure branch posts the alert via Dispatcher.UIThread.Post (see the
+        // Revoked-shift-session remarks above). The assertion below doesn't need that
+        // posted state, but leaving a job queued at test end is what the rest of this
+        // file avoids.
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
         Assert.Same(seller, deps.SellerSession.Current);
     }
 }

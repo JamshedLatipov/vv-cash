@@ -518,13 +518,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         LogoutRequested?.Invoke(this, explanation);
     }
 
-    /// <summary>Single choke point for "this receipt is over — nobody is confirmed any
-    /// more". Called from every place an operation actually finishes: a successful
-    /// payment, the cashier manually clearing the receipt, and a returns/exchange dialog
-    /// that genuinely booked a document. The idle timeout stays as a second line of
-    /// defence for a receipt abandoned halfway; this one closes the window where the next
-    /// person starts ringing up within 90 seconds and their sale is silently credited to
-    /// whoever sold last (see the 2026-07-31 spec).
+    /// <summary>The place every finished operation goes through — a successful payment,
+    /// the cashier manually clearing the receipt, and a returns/exchange dialog that
+    /// genuinely booked a document — to say "nobody is confirmed any more". The idle
+    /// timeout stays as a second line of defence for a receipt abandoned halfway; this
+    /// one closes the window where the next person starts ringing up within 90 seconds
+    /// and their sale is silently credited to whoever sold last (see the 2026-07-31 spec).
     ///
     /// Kept as one method rather than four inline Clear() calls for the same reason
     /// PerformSignOut above is one method: the next end-of-receipt path added to this
