@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -163,6 +164,118 @@ public class UpdateServiceTest
 
         // A register with no internet must not see an error — it just keeps trading.
         Assert.Null(await service.CheckAsync(CancellationToken.None));
+    }
+
+    private static string Sha256Of(string content)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        return Convert.ToHexString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(content)))
+                      .ToLowerInvariant();
+    }
+
+    private static (UpdateService Service, string Directory) BuildForDownload(string payload)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "VvCashUpdateTest", Guid.NewGuid().ToString("N"));
+        var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.OK, payload))
+        {
+            ContentType = "application/octet-stream"
+        };
+        var service = new UpdateService(
+            new HttpClient(handler),
+            new FakeVersionProvider("1.0.0"),
+            directory);
+        return (service, directory);
+    }
+
+    private static UpdateInfo InfoFor(string sha256, long size = 0)
+        => new UpdateInfo(
+            new Version(1, 1, 0),
+            "https://proffi.io/downloads/proffi-kassa-setup.exe",
+            sha256,
+            size,
+            null);
+
+    [Fact]
+    public async Task DownloadReturnsThePathWhenTheHashMatches()
+    {
+        const string payload = "pretend this is an installer";
+        var (service, directory) = BuildForDownload(payload);
+        try
+        {
+            var path = await service.DownloadAsync(
+                InfoFor(Sha256Of(payload)), null, CancellationToken.None);
+
+            Assert.NotNull(path);
+            Assert.True(File.Exists(path));
+            Assert.Equal(payload, File.ReadAllText(path!));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadDeletesTheFileWhenTheHashDoesNotMatch()
+    {
+        var (service, directory) = BuildForDownload("tampered installer");
+        try
+        {
+            // The hash of some other content: this is what a man-in-the-middle or a
+            // truncated transfer looks like from the register's side.
+            var path = await service.DownloadAsync(
+                InfoFor(Sha256Of("the real installer")), null, CancellationToken.None);
+
+            Assert.Null(path);
+            // Nothing runnable may be left behind — a stale unverified installer on
+            // disk is exactly what this check exists to prevent.
+            Assert.Empty(Directory.Exists(directory) ? Directory.GetFiles(directory) : Array.Empty<string>());
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadReportsProgress()
+    {
+        const string payload = "pretend this is an installer";
+        var (service, directory) = BuildForDownload(payload);
+        try
+        {
+            var reported = new System.Collections.Generic.List<double>();
+            var path = await service.DownloadAsync(
+                InfoFor(Sha256Of(payload), payload.Length),
+                new Progress<double>(p => { lock (reported) reported.Add(p); }),
+                CancellationToken.None);
+
+            Assert.NotNull(path);
+            // Progress<T> marshals through the synchronization context, so the exact
+            // count is not deterministic; that the final value reached 1.0 is.
+            await Task.Delay(50);
+            lock (reported) Assert.Contains(reported, p => Math.Abs(p - 1.0) < 0.0001);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadReturnsNullOnHttpError()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "VvCashUpdateTest", Guid.NewGuid().ToString("N"));
+        var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.NotFound, "nope"));
+        var service = new UpdateService(new HttpClient(handler), new FakeVersionProvider("1.0.0"), directory);
+        try
+        {
+            Assert.Null(await service.DownloadAsync(InfoFor(ValidHash), null, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
     }
 
     private sealed class ThrowingHandler : HttpMessageHandler

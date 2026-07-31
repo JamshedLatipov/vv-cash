@@ -112,6 +112,83 @@ public sealed class UpdateService : IUpdateService
         return true;
     }
 
-    public Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
-        => throw new NotImplementedException("Task 5");
+    public async Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
+    {
+        // Clear leftovers here rather than in CheckAsync: the check runs on a timer, and
+        // clearing there could delete a download the cashier started minutes ago.
+        ClearDownloadDirectory();
+        Directory.CreateDirectory(_downloadDirectory);
+
+        var target = Path.Combine(_downloadDirectory, "VvCashInstaller.exe");
+        try
+        {
+            using (var response = await _httpClient.GetAsync(
+                       info.Url, HttpCompletionOption.ResponseHeadersRead, ct))
+            {
+                if (!response.IsSuccessStatusCode) return null;
+
+                var total = response.Content.Headers.ContentLength ?? info.SizeBytes;
+                await using var source = await response.Content.ReadAsStreamAsync(ct);
+                await using var destination = File.Create(target);
+
+                var buffer = new byte[81920];
+                long written = 0;
+                int read;
+                while ((read = await source.ReadAsync(buffer, ct)) > 0)
+                {
+                    await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+                    written += read;
+                    if (total > 0) progress?.Report((double)written / total);
+                }
+            }
+
+            if (!await HashMatchesAsync(target, info.Sha256, ct))
+            {
+                TryDelete(target);
+                return null;
+            }
+
+            return target;
+        }
+        catch
+        {
+            // Cancelled, connection dropped, disk full. A partially written installer
+            // must never survive — the next attempt starts clean.
+            TryDelete(target);
+            return null;
+        }
+    }
+
+    private static async Task<bool> HashMatchesAsync(string path, string expected, CancellationToken ct)
+    {
+        await using var stream = File.OpenRead(path);
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        var hash = await sha.ComputeHashAsync(stream, ct);
+        return string.Equals(Convert.ToHexString(hash), expected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ClearDownloadDirectory()
+    {
+        try
+        {
+            if (Directory.Exists(_downloadDirectory)) Directory.Delete(_downloadDirectory, recursive: true);
+        }
+        catch
+        {
+            // A file still held open by a previous run is not worth failing over; the
+            // download below overwrites what it needs.
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // Best effort. The hash check is the guard that matters, and it already said no.
+        }
+    }
 }
