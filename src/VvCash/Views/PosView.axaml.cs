@@ -99,7 +99,15 @@ public partial class PosView : UserControl
     /// branch inside <see cref="OnGlobalKeyDown"/>, which left F2 (moves focus into the
     /// search box), F4 (fires PayCommand), Space/Enter on a focused product tile, and
     /// <see cref="OnSearchBoxKeyDown"/>'s own Enter-triggered scan all still reaching
-    /// straight through.</summary>
+    /// straight through.
+    ///
+    /// Marking the event Handled at the TopLevel also swallows keyboard input aimed at
+    /// the overlay itself, which lives inside that same tree: Tab navigation and
+    /// Space/Enter activation of the seller tiles, the PIN digits and the back/close
+    /// controls all stop working while it is up. That costs nothing today — the pad is
+    /// touch-only, so a switch could never be completed from the keyboard anyway — and
+    /// Escape, the overlay's one documented keyboard exit, is deliberately excluded from
+    /// the guard and still dismisses it.</summary>
     private bool IsSellerSwitchOverlayVisible()
         => DataContext is PosViewModel vm && vm.SellerSwitchViewModel is { IsVisible: true };
 
