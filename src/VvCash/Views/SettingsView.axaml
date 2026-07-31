@@ -163,6 +163,17 @@
                         <TextBlock Text="{Binding [LanguageЯзык], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
                         <ComboBox ItemsSource="{Binding AvailableLanguages}" SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}" Classes="SettingsCombo"/>
 
+                        <!-- Формат телефона: от него зависят маска ввода, предел нумпада
+                             и код страны, который уходит на сервер. -->
+                        <TextBlock Text="{Binding [PhoneFormat], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                        <ComboBox ItemsSource="{Binding AvailablePhoneFormats}" SelectedItem="{Binding SelectedPhoneFormat, Mode=TwoWay}" Classes="SettingsCombo">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayName}"/>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+
                         <!-- Sync Interval Input -->
                         <TextBlock Text="{Binding [SyncIntervalMinutes], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
                         <TextBox Classes="SettingsInput" Text="{Binding SyncIntervalText, Mode=TwoWay}" Watermark="{Binding [eg10], Source={x:Static services:I18nService.Instance}}" Margin="0,8,0,32"/>

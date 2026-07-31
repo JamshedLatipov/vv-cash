@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -99,6 +100,13 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _selectedLanguage = "ru";
 
+    /// <summary>Каталог целиком: он неизменен и не зависит от сети, поэтому
+    /// подгружать его нечем и незачем.</summary>
+    public IReadOnlyList<PhoneFormat> AvailablePhoneFormats { get; } = PhoneFormats.All;
+
+    [ObservableProperty]
+    private PhoneFormat _selectedPhoneFormat = PhoneFormats.Default;
+
     [ObservableProperty]
     private bool _returnOpenCashDrawer = true;
 
@@ -157,6 +165,7 @@ public partial class SettingsViewModel : ViewModelBase
         CashRegisterToken = _settingsService.CashRegisterToken;
         SyncIntervalText = _settingsService.SyncIntervalMinutes.ToString();
         SelectedLanguage = string.IsNullOrEmpty(_settingsService.Language) ? "ru" : _settingsService.Language;
+        SelectedPhoneFormat = PhoneFormats.Resolve(_settingsService.PhoneFormatId);
         ReturnOpenCashDrawer = _settingsService.ReturnOpenCashDrawer;
         ReturnPrintReceipt = _settingsService.ReturnPrintReceipt;
 
@@ -250,6 +259,8 @@ public partial class SettingsViewModel : ViewModelBase
 
         _settingsService.Language = SelectedLanguage;
         I18nService.Instance.Initialize(SelectedLanguage);
+
+        _settingsService.PhoneFormatId = SelectedPhoneFormat.Id;
 
         _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
         _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;
