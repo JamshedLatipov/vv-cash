@@ -10,9 +10,14 @@ $proj      = Join-Path $root 'src\VvCash\VvCash.csproj'
 $publishDir = Join-Path $root 'publish\win-x64'
 $iss       = Join-Path $PSScriptRoot 'VvCashInstaller.iss'
 
-$versionNode = ([xml](Get-Content $proj)).SelectSingleNode('//PropertyGroup/Version')
-if (-not $versionNode) { throw "No <Version> element in $proj — the installer needs it." }
-$version = $versionNode.InnerText.Trim()
+# Ask MSBuild for the evaluated Version instead of reading the XML by hand. MSBuild applies
+# Condition evaluation the way a real build does; a plain XPath query does not, so a future
+# Condition-guarded Release-only <Version> would be silently ignored by XPath and the
+# installer would get stamped with the wrong version with no error at all. Evaluate with
+# -p:Configuration=Release since that is the configuration this script actually publishes.
+$version = (& dotnet msbuild $proj -getProperty:Version -p:Configuration=Release -nologo).Trim()
+if ($LASTEXITCODE -ne 0) { throw "dotnet msbuild -getProperty:Version failed ($LASTEXITCODE) for $proj" }
+if ([string]::IsNullOrWhiteSpace($version)) { throw "MSBuild returned a blank Version for $proj -- add or fix the <Version> property in the PropertyGroup; otherwise ISCC would fail later with a confusing 'AppVersion directive' error instead of naming the real cause." }
 Write-Host "==> Product version from csproj: $version" -ForegroundColor Cyan
 
 Write-Host '==> Publishing self-contained x64 build...' -ForegroundColor Cyan
