@@ -256,14 +256,15 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         IsVisible = true;
 
         // Sellers.CollectionChanged (above) already re-raises HasNoApprover/HasEmptyRoster/
-        // CanSignOut whenever the roster rebuild above actually adds or removes an item —
-        // which covers IsApprovalMode flipping too, since OnIsApprovalModeChanged calls the
-        // same method. The one gap that leaves: two consecutive Show() calls that both land
-        // on an empty Sellers collection (Clear() on an already-empty ObservableCollection
-        // raises no event, and the Add() loop never runs) never touch the collection at all,
-        // so a canSignOut that changed between those two calls — the one piece of state
-        // Show() itself owns outright, not derived from the roster — would otherwise go
-        // unnotified. An explicit call here closes that gap for CanSignOut specifically.
+        // CanSignOut on every Show() call, since Sellers.Clear() unconditionally raises a
+        // Reset regardless of whether the collection had anything in it — so relying on
+        // that alone would happen to work here too. Notified explicitly anyway: canSignOut
+        // is state this method owns outright (assigned two lines up, from its own
+        // parameter), not something derived from the roster, so its notification
+        // shouldn't ride along as an incidental side effect of Sellers being rebuilt —
+        // that coupling is exactly the kind of thing a future refactor of the roster
+        // rebuild (say, replacing Clear()+Add() with reassigning Sellers wholesale) could
+        // break without anyone noticing CanSignOut stopped updating.
         NotifyEmptyStateChanged();
     }
 

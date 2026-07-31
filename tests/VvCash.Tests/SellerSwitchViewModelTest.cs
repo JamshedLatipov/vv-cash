@@ -181,7 +181,29 @@ public class SellerSwitchViewModelTest
 
         Assert.Contains(nameof(vm.HasNoApprover), changed);
         Assert.Contains(nameof(vm.HasEmptyRoster), changed);
+        Assert.Contains(nameof(vm.CanSignOut), changed);
         Assert.False(vm.HasEmptyRoster);
+    }
+
+    // Same concern as the notice above, but for canSignOut specifically: it is state
+    // Show() owns outright (its own parameter), not derived from the roster, so it needs
+    // its own coverage rather than riding along on Sellers repopulating — see Show()'s own
+    // remarks on the explicit NotifyEmptyStateChanged() call this pins down.
+    [Fact]
+    public async Task CanSignOut_RaisesPropertyChanged_WhenReopenedWithADifferentPermission()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open(canSignOut: true);
+        Assert.True(vm.CanSignOut); // sanity check on the premise
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.Open(canSignOut: false);
+
+        Assert.Contains(nameof(vm.CanSignOut), changed);
+        Assert.False(vm.CanSignOut);
     }
 
     [Fact]
