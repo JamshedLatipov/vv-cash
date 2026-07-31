@@ -152,6 +152,48 @@ public class CustomerSearchViewModelTest
         Assert.NotNull(vm.ErrorMessage);
     }
 
+    /// <summary>Пустой результат, затем провал следующего поиска: раньше
+    /// «Клиент не найден» переживало провал и снова приглашало завести дубль —
+    /// уже поверх ошибки связи. HasNoResults обязан гаснуть.</summary>
+    [Fact]
+    public async Task NoResults_ThenSearchFailure_HidesEmptyState()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse>();
+        var vm = harness.Build();
+        vm.SearchQuery = "Петров";
+        await vm.SearchCommand.ExecuteAsync(null);
+        Assert.True(vm.HasNoResults);
+
+        harness.Service.Results = null;
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasNoResults);
+        Assert.NotNull(vm.ErrorMessage);
+    }
+
+    /// <summary>Тот же переход, но со стороны уведомления: без PropertyChanged
+    /// по HasNoResults привязка не обновится и «Клиент не найден» останется на
+    /// экране поверх ошибки, каким бы верным ни было само свойство.</summary>
+    [Fact]
+    public async Task NoResults_ThenSearchFailure_RaisesHasNoResultsNotification()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse>();
+        var vm = harness.Build();
+        vm.SearchQuery = "Петров";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        harness.Service.Results = null;
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Contains(nameof(CustomerSearchViewModel.HasNoResults), raised);
+        Assert.False(vm.HasNoResults);
+    }
+
     [Fact]
     public async Task SearchFailure_KeepsPreviousResults()
     {

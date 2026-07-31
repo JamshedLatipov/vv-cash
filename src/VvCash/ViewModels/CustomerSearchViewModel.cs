@@ -33,9 +33,13 @@ public partial class CustomerSearchViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HasNoResults))]
     private bool _isLoading;
 
-    /// <summary>Провал поиска, а не его пустой результат. Показывается вместо
-    /// пустого состояния, чтобы «нет связи» не читалось как «клиента нет».</summary>
-    [ObservableProperty] private string? _errorMessage;
+    /// <summary>Провал поиска, а не его пустой результат. Взаимоисключение с
+    /// пустым состоянием обеспечено здесь, а не в разметке: HasNoResults читает
+    /// это поле, поэтому неудавшийся поиск не может выдать себя за отсутствие
+    /// клиента — что бы ни привязала вьюха.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoResults))]
+    private string? _errorMessage;
 
     /// <summary>Был ли хотя бы один поиск с непустым запросом. Без этого флага
     /// «Клиент не найден» висело бы на только что открытом окне.</summary>
@@ -53,7 +57,7 @@ public partial class CustomerSearchViewModel : ViewModelBase
     /// true, а сбрасывается он в finally, последним — когда список уже принял
     /// окончательный вид. Поэтому хватает уведомления по двум флагам, следить
     /// за CollectionChanged не нужно.</summary>
-    public bool HasNoResults => HasSearched && !IsLoading && SearchResults.Count == 0;
+    public bool HasNoResults => HasSearched && !IsLoading && ErrorMessage == null && SearchResults.Count == 0;
 
     public CustomerSearchViewModel(
         ICounterpartyService counterpartyService,
@@ -92,7 +96,11 @@ public partial class CustomerSearchViewModel : ViewModelBase
                 // Поиск не состоялся: связи нет или сервер ответил ошибкой.
                 // Ни список, ни HasSearched не трогаем — «Клиент не найден» с
                 // кнопкой «Создать» здесь означало бы приглашение завести дубль
-                // клиента, который на самом деле в базе есть.
+                // клиента, который на самом деле в базе есть. Выделение тоже
+                // сохраняется намеренно и по той же причине, что и список:
+                // кассир должен видеть, кого именно прикрепит «ВЫБРАТЬ
+                // КЛИЕНТА», а снятое выделение поверх оставшегося списка было
+                // бы половинчатым и непонятным.
                 ErrorMessage = I18nService.Instance["NoConnection"];
                 return;
             }
