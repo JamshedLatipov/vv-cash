@@ -54,7 +54,7 @@ public partial class ReturnsViewModel : ViewModelBase
     /// PosViewModel after the modal closes: a screen that was opened and closed without
     /// booking anything is not the end of an operation and must not cost the cashier a
     /// fresh PIN. Sticky — several returns in one sitting are still "a document happened".</summary>
-    public bool CompletedDocument { get; private set; }
+    public bool HasBookedDocument { get; private set; }
 
     public ReturnsViewModel(Window? window, IReturnService returnService,
         IPrinterService printerService, ISettingsService settingsService,
@@ -172,7 +172,7 @@ public partial class ReturnsViewModel : ViewModelBase
             // Set before the drawer/receipt side effects, not after: those are
             // best-effort (they swallow their own exceptions) and the document is already
             // on the server by this point regardless of how printing goes.
-            CompletedDocument = true;
+            HasBookedDocument = true;
 
             await RunPostReturnActionsAsync(SelectedSale.DocumentNumber ?? string.Empty);
             SuccessMessage = I18nService.Instance["ReturnSuccess"];

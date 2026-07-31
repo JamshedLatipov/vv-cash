@@ -95,7 +95,7 @@ private void EndReceipt() => _sellerSession.Clear();
 Обе VM получают публичное свойство:
 
 ```csharp
-public bool CompletedDocument { get; private set; }
+public bool HasBookedDocument { get; private set; }
 ```
 
 Липкое (однократно `true`, никогда не сбрасывается): окно живёт одну операцию, а
@@ -138,9 +138,9 @@ xUnit, по образцу `PosViewModelSellerGateTest` (фейковый `ISell
 - `ClearCart` → продавец сброшен;
 - `EndReceipt` при выключенном переключении → `Current` остаётся `null`, событий
   нет (регресс-защита на no-op);
-- `ReturnsViewModel`: успешный возврат ставит `CompletedDocument`, неуспешный —
+- `ReturnsViewModel`: успешный возврат ставит `HasBookedDocument`, неуспешный —
   нет;
-- `ExchangeViewModel`: `CompletedDocument` выставляется, как только возврат
+- `ExchangeViewModel`: `HasBookedDocument` выставляется, как только возврат
   записан, даже если следующий шаг упал;
 - после сброса первый `AddToCart` в пустую корзину поднимает
   `SellerSwitchRequested` немедленно, без ожидания идл-таймаута.
