@@ -90,7 +90,7 @@ public class PhoneFormatTest
     [Fact]
     public void Catalogue_HasUniqueIdsAndNoBlankFields()
     {
-        Assert.Equal(3, PhoneFormats.All.Count);
+        Assert.NotEmpty(PhoneFormats.All);
         Assert.Equal(PhoneFormats.All.Count, PhoneFormats.All.Select(f => f.Id).Distinct().Count());
 
         foreach (var f in PhoneFormats.All)

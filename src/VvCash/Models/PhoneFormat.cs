@@ -29,15 +29,19 @@ public sealed class PhoneFormat
             if (c == DigitSlot) count++;
         }
         DigitCount = count;
+
+        Placeholder = Format(string.Empty);
     }
 
     /// <summary>То, что ложится в настройки. Хранится он, а не DisplayName:
     /// переименование страны в интерфейсе не должно ломать настроенную кассу.</summary>
     public string Id { get; }
 
-    /// <summary>Не переводится и лежит в коде: это названия стран с кодами, они
-    /// одинаково читаются на всех пяти языках, а пятнадцать ключей i18n ради
-    /// строки «Таджикистан (+992)» — цена без выгоды.</summary>
+    /// <summary>Не переводится и лежит в коде. Код страны идёт первым, потому
+    /// что это единственная часть строки, которая опознаётся независимо от
+    /// письменности; латинские ISO-коды в скобках делают запись читаемой в
+    /// локалях en и uz (последняя — латиница) без отдельного ключа i18n на
+    /// каждую страну.</summary>
     public string DisplayName { get; }
 
     /// <summary>Без плюса: приклеивается к цифрам перед отправкой на сервер.</summary>
@@ -50,7 +54,7 @@ public sealed class PhoneFormat
 
     /// <summary>Как выглядит пустое поле. Оно же — то, что видит кассир до
     /// первого нажатия на нумпад.</summary>
-    public string Placeholder => Format(string.Empty);
+    public string Placeholder { get; }
 
     /// <summary>Раскладывает набранные цифры по маске слева направо; на
     /// незанятые места ставит подчёркивания, чтобы было видно, сколько ещё
@@ -86,21 +90,21 @@ public static class PhoneFormats
 {
     /// <summary>Казахстан не отдельной записью: там тот же +7 и те же десять
     /// цифр, отдельный пункт делал бы вид, что выбор на что-то влияет.</summary>
-    public static readonly PhoneFormat Russia =
-        new("RU", "Россия / Казахстан (+7)", "7", "(###) ###-##-##");
+    public static readonly PhoneFormat RussiaKazakhstan =
+        new("RU", "+7 — Россия / Казахстан (RU / KZ)", "7", "(###) ###-##-##");
 
     public static readonly PhoneFormat Tajikistan =
-        new("TJ", "Таджикистан (+992)", "992", "(##) ###-##-##");
+        new("TJ", "+992 — Таджикистан (TJ)", "992", "(##) ###-##-##");
 
     public static readonly PhoneFormat Uzbekistan =
-        new("UZ", "Узбекистан (+998)", "998", "(##) ###-##-##");
+        new("UZ", "+998 — Узбекистан (UZ)", "998", "(##) ###-##-##");
 
     public static IReadOnlyList<PhoneFormat> All { get; } =
-        new[] { Russia, Tajikistan, Uzbekistan };
+        Array.AsReadOnly(new[] { RussiaKazakhstan, Tajikistan, Uzbekistan });
 
     /// <summary>Чем становится касса, где настройка не задана. Он же ответ на
     /// настройку, оставшуюся от удалённой записи каталога.</summary>
-    public static PhoneFormat Default => Russia;
+    public static PhoneFormat Default => RussiaKazakhstan;
 
     /// <summary>Единственное место, где Id превращается в формат. Функцией, а не
     /// веткой на месте использования: правило «пусто или незнакомо — значит RU»
