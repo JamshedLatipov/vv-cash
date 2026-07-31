@@ -239,6 +239,18 @@ public class CustomerSearchViewModelTest
         var vm = new Harness().Build(canCreateCustomer: false);
 
         Assert.False(vm.IsCreateEnabled);
+        Assert.False(vm.CreateCustomerCommand.CanExecute(null));
+    }
+
+    /// <summary>Парная к предыдущей: без неё тест на выключенный флаг проходил
+    /// бы и для команды, которую нельзя выполнить никогда.</summary>
+    [Fact]
+    public void CreateEnabledByFeatureFlag_AllowsTheCommand()
+    {
+        var vm = new Harness().Build(canCreateCustomer: true);
+
+        Assert.True(vm.IsCreateEnabled);
+        Assert.True(vm.CreateCustomerCommand.CanExecute(null));
     }
 
     [Fact]

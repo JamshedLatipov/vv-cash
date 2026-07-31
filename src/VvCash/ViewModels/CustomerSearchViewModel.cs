@@ -138,7 +138,11 @@ public partial class CustomerSearchViewModel : ViewModelBase
         SelectedCounterparty = counterparty;
     }
 
-    [RelayCommand]
+    // CanExecute на флаге, а не только в разметке: окно поиска не должно быть
+    // обходом cash_customer_registration_enabled, даже если кнопку кто-то
+    // привяжет мимо IsCreateEnabled. Флаг — снимок на момент открытия окна и
+    // больше не меняется, поэтому NotifyCanExecuteChangedFor не нужен.
+    [RelayCommand(CanExecute = nameof(IsCreateEnabled))]
     private async Task CreateCustomerAsync()
     {
         var created = await _createCustomer(SearchQuery);
