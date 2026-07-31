@@ -26,7 +26,7 @@ namespace VvCash.ViewModels;
 /// <see cref="BeginPinSetup"/>): a seller whose PIN was never set
 /// (<see cref="SwitchResult.PinNotSet"/>) gets to create one on the spot instead of
 /// being shown an error — see the "PIN setup (Task 19)" region below.</summary>
-public partial class SellerSwitchViewModel : ViewModelBase
+public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
 {
     private const int PinLength = 4;
 
@@ -175,7 +175,27 @@ public partial class SellerSwitchViewModel : ViewModelBase
         // not just whatever it happened to hold when the last explicit notification
         // was raised.
         Sellers.CollectionChanged += (_, _) => NotifyEmptyStateChanged();
+
+        // CanSignOut reads _session.Current directly, so it must also react when Current
+        // changes for a reason outside this class's own SignOutSeller/SubmitAsync calls —
+        // in particular SellerSession.LoadRosterAsync clearing Current when the seller a
+        // still-open overlay is showing has vanished from the roster or lost CanSell. Kept
+        // alive for as long as this VM is, so see Dispose for why unsubscribing matters:
+        // _session is a singleton and this VM is transient.
+        _session.CurrentChanged += OnSessionCurrentChanged;
     }
+
+    private void OnSessionCurrentChanged(object? sender, EventArgs e)
+        => OnPropertyChanged(nameof(CanSignOut));
+
+    /// <summary>Unsubscribes from <see cref="ISellerSession.CurrentChanged"/> — required
+    /// because <see cref="ISellerSession"/> is a singleton and this view model is
+    /// transient (a fresh one is resolved per <c>NavigateToPos</c> in App.axaml.cs, same
+    /// as <see cref="PosViewModel"/>): without this, every logout/login cycle would leave
+    /// one more dead instance permanently subscribed, still reacting to events on a VM
+    /// nothing displays any more. Mirrors <c>PosViewModel.Dispose</c>'s own reasoning for
+    /// the identical problem.</summary>
+    public void Dispose() => _session.CurrentChanged -= OnSessionCurrentChanged;
 
     /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.
     /// <paramref name="canSignOut"/> is the caller's permission for whether the manual

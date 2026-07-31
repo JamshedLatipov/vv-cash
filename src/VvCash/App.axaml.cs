@@ -48,9 +48,14 @@ public partial class App : Application
             // MainViewModel.NavigateTo because the payment flow navigates away and back
             // to the *same* PosViewModel, which must survive that round-trip.)
             PosViewModel? activePosVm = null;
+            // SellerSwitchViewModel now subscribes to ISellerSession.CurrentChanged too
+            // (to keep CanSignOut live — see its own remarks), so it needs the exact same
+            // dispose-before-replace treatment as activePosVm above, for the same reason.
+            SellerSwitchViewModel? activeSellerSwitchVm = null;
             void NavigateToPos()
             {
                 activePosVm?.Dispose();
+                activeSellerSwitchVm?.Dispose();
 
                 var posVm = Services.GetRequiredService<PosViewModel>();
                 activePosVm = posVm;
@@ -62,6 +67,7 @@ public partial class App : Application
                 // SellerSwitchRequested to ask for it to open, matching how NavigationRequest
                 // decouples PosViewModel from the mechanics of navigation.
                 var sellerSwitchVm = Services.GetRequiredService<SellerSwitchViewModel>();
+                activeSellerSwitchVm = sellerSwitchVm;
                 posVm.SellerSwitchViewModel = sellerSwitchVm;
                 // e.CanSignOut is decided by whichever PosViewModel method raised the
                 // event, at the moment it raised it (see SellerSwitchRequest's own

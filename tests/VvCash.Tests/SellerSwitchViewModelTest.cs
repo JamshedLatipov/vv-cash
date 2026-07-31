@@ -498,6 +498,50 @@ public class SellerSwitchViewModelTest
         Assert.False(vm.IsVisible); // the pending submit still resolves normally afterwards
     }
 
+    // ---------------------------------------------------------------------------------
+    // CanSignOut tracking ISellerSession.CurrentChanged (code-review fix): a roster
+    // refresh can clear Current out from under an already-open overlay (see
+    // SellerSession.LoadRosterAsync — a seller vanishing from the roster or losing
+    // CanSell does exactly this), and without tracking the event the sign-out button
+    // would keep showing with nobody left to sign out.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CanSignOut_RaisesPropertyChanged_WhenSessionCurrentChanges()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open();
+        Assert.True(vm.CanSignOut); // sanity check on the premise
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        session.Clear(); // e.g. a roster refresh dropping the current seller mid-overlay
+
+        Assert.Contains(nameof(vm.CanSignOut), changed);
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task Dispose_UnsubscribesFromSellerSessionCurrentChanged()
+    {
+        // SellerSwitchViewModel is transient like PosViewModel, and ISellerSession is a
+        // singleton — without unsubscribing, every login/logout cycle would leave one
+        // more dead VM reacting to CurrentChanged forever (mirrors
+        // PosViewModelSellerGateTest.Dispose_UnsubscribesFromSellerSessionCurrentChanged).
+        var session = await SessionWithRoster();
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Dispose();
+
+        var raised = false;
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.CanSignOut)) raised = true; };
+
+        await session.SwitchAsync("u-1", "4821");
+
+        Assert.False(raised);
+    }
+
     [Fact]
     public async Task Open_AfterAPreviousFailedAttempt_ClearsErrorAndPin()
     {
