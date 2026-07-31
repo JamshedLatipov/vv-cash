@@ -1845,7 +1845,9 @@ If the app closes and does **not** come back, the second `[Run]` entry from Task
 
 - [ ] **Step 8: Confirm a bad hash is refused**
 
-Edit `kassa-latest.json` on the server, changing one character of `sha256`, and bump `version` to `1.0.2`. On a register still on 1.0.1, wait for the badge and press "Обновить". Expected: the download runs, then "Не удалось загрузить обновление", the app stays open, and `%TEMP%\VvCash\updates\` holds no `VvCashInstaller.exe`.
+Edit `kassa-latest.json` on the server, changing one character of `sha256`, and bump `version` to `1.0.2`. On a register still on 1.0.1, wait for the badge and press "Обновить". Expected: the download runs, then "Не удалось загрузить обновление", the app stays open, and `%TEMP%\VvCash\updates\` holds **no `.exe` at all**.
+
+Check for any `.exe`, not for a specific name: the downloaded file is named `VvCashInstaller-<guid>.exe` so that an attacker cannot pre-plant a race against a predictable path between the hash check and the launch.
 
 - [ ] **Step 9: Restore the manifest and record the result**
 
