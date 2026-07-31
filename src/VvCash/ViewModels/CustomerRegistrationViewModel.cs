@@ -2,7 +2,6 @@ using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Avalonia.Controls;
 using VvCash.Models.Api;
 using VvCash.Models;
 using VvCash.Services;
@@ -12,8 +11,13 @@ namespace VvCash.ViewModels;
 
 public partial class CustomerRegistrationViewModel : ViewModelBase
 {
-    private readonly Window _window;
     private readonly ICounterpartyService _counterpartyService;
+
+    /// <summary>Закрыть окно, отдав созданного клиента либо null. Делегат, а не
+    /// Window: владеть окном должна вызывающая сторона — иначе view model нельзя
+    /// сконструировать в тесте, а тест с window == null проверял бы ветку,
+    /// которой в проде нет. Тот же приём в CustomerSearchViewModel.</summary>
+    private readonly Action<CounterpartyResponse?> _close;
 
     /// <summary>Снимок формата на момент открытия окна — как PosViewModel
     /// снимает фича-флаги. Формат не может измениться, пока окно открыто:
@@ -37,9 +41,12 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
 
     public string FormattedPhoneNumber => _phoneFormat.Format(PhoneNumber);
 
-    public CustomerRegistrationViewModel(Window window, ICounterpartyService counterpartyService, ISettingsService settingsService)
+    public CustomerRegistrationViewModel(
+        Action<CounterpartyResponse?> close,
+        ICounterpartyService counterpartyService,
+        ISettingsService settingsService)
     {
-        _window = window;
+        _close = close;
         _counterpartyService = counterpartyService;
         _phoneFormat = PhoneFormats.Resolve(settingsService.PhoneFormatId);
     }
@@ -128,12 +135,12 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
             return;
         }
 
-        _window.Close(response);
+        _close(response);
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        _window.Close(null); // Return cancelled
+        _close(null); // Return cancelled
     }
 }

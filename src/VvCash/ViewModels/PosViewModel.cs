@@ -1544,7 +1544,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         var phoneFormat = PhoneFormats.Resolve(_settingsService.PhoneFormatId);
 
         var dialog = new VvCash.Views.CustomerRegistrationWindow();
-        var vm = new CustomerRegistrationViewModel(dialog, _counterpartyService, _settingsService);
+        var vm = new CustomerRegistrationViewModel(result => dialog.Close(result), _counterpartyService, _settingsService);
         vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery, phoneFormat.DigitCount));
         dialog.DataContext = vm;
 
