@@ -123,6 +123,8 @@
   "CustomerNotFound": "Муштарӣ ёфт нашуд",
   "CustomerNotFoundHint": "Дархостро санҷед ё муштарии нав эҷод кунед",
   "CustomerCreateFailed": "Муштариро эҷод кардан нашуд. Пайвастро санҷида, аз нав кӯшиш кунед",
+  "PhoneFormat": "Формати телефон",
+  "PhoneIncomplete": "Рақами телефон пурра ворид нашудааст",
   "Subcategories": "Зергурӯҳҳо",
   "Products": "Маҳсулот",
   "StartShiftAction": "ОҒОЗИ СМЕНА",

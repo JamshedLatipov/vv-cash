@@ -102,6 +102,8 @@
   "CustomerNotFound": "Клиент не найден",
   "CustomerNotFoundHint": "Проверьте запрос или создайте нового клиента",
   "CustomerCreateFailed": "Не удалось создать клиента. Проверьте связь и попробуйте ещё раз",
+  "PhoneFormat": "Формат телефона",
+  "PhoneIncomplete": "Номер телефона введён не полностью",
   "Subcategories": "Подкатегории",
   "Products": "Товары",
   "StartShiftAction": "НАЧАТЬ СМЕНУ",
