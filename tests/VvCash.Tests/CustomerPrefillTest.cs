@@ -23,13 +23,14 @@ public class CustomerPrefillTest
 
     /// <summary>Длиннее, чем любой из случаев выше: закрепляет, что берутся
     /// именно последние десять цифр (срез [^10..]), а не первые и не всё
-    /// подряд.</summary>
+    /// подряд. Половины строки намеренно разные — на «1234567890» дважды тест
+    /// прошёл бы и при срезе [..10], то есть не проверял бы ничего.</summary>
     [Fact]
     public void LongDigitString_TakesLastTenDigits()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("12345678901234567890");
+        var prefill = CustomerPrefill.FromSearchQuery("11111111112222222222");
 
-        Assert.Equal("1234567890", prefill.PhoneNumber);
+        Assert.Equal("2222222222", prefill.PhoneNumber);
     }
 
     [Fact]
