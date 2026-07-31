@@ -1605,6 +1605,39 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task OpenExchange()
     {
+        // An exchange writes a replacement-sale document that carries seller_id, and
+        // ExchangeViewModel snapshots _sellerSession.Current?.Id into its constructor below
+        // — so opening this screen with nobody confirmed produces a sale silently credited
+        // to the shift owner, with nothing on screen saying so. That is exactly the
+        // consequence this branch introduced: before EndReceipt() started clearing Current
+        // after every completed operation, a confirmed seller survived between receipts and
+        // an exchange usually carried someone; now the very next customer's "actually, I'd
+        // like to exchange this" reaches an empty session every time.
+        //
+        // This is a "who is selling" gate, not a rights escalation, which is why it raises
+        // SellerSwitchRequested rather than RefundApprovalRequested/CloseShiftApprovalRequested
+        // the way OpenReturns/CloseShift do above. Those two exist so a supervisor can approve
+        // on someone else's behalf without becoming the current seller — the right being
+        // checked (CanRefund/CanCloseShift) is independent of whose id ends up on the
+        // document. Here there is no separate right to escalate: the whole problem is that
+        // nobody's id is available to stamp at all, so the fix is to make someone become
+        // Current, which is what SellerSwitchRequested does and what approval mode
+        // deliberately does not.
+        //
+        // The overlay is non-blocking and carries no continuation (unlike the approval
+        // flows' OpenForApproval), so this press does not open the exchange window — the
+        // cashier confirms who is selling and taps Exchange again, the same shape as
+        // AddToCart, which also asks and lets the next action proceed.
+        //
+        // Same seller-switch-off exception as everywhere else: with IsSellerSwitchEnabled
+        // false there is no separate identity to confirm and the overlay itself is hidden,
+        // so the gate must not fire.
+        if (IsSellerSwitchEnabled && _sellerSession.IsStale)
+        {
+            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             var mainWindow = desktop.MainWindow;

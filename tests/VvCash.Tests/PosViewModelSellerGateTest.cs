@@ -2316,4 +2316,63 @@ public class PosViewModelSellerGateTest
 
         Assert.Same(seller, deps.SellerSession.Current);
     }
+
+    // ---------------------------------------------------------------------------------
+    // Exchange seller gate (follow-up to the whole-branch review): OpenExchange snapshots
+    // _sellerSession.Current?.Id into ExchangeViewModel's constructor, and that id is what
+    // ends up stamped as seller_id on the exchange's replacement-sale document. Before this
+    // branch a confirmed seller survived between receipts, so an exchange usually carried
+    // someone; this branch made EndReceipt() clear Current after every completed operation,
+    // and OpenExchange had no seller gate of its own — so the ordinary "customer pays, next
+    // customer wants an exchange" flow opened the exchange screen with nobody confirmed and
+    // silently credited the resulting sale to the shift owner, with nothing on screen saying
+    // so. Fixed by applying the same start-of-receipt gate AddToCart/ResumeParkedSale
+    // already use, here as well — see OpenExchange's own remarks for why this is a
+    // SellerSwitchRequested gate, not a RefundApprovalRequested/CloseShiftApprovalRequested
+    // one.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void OpenExchange_WithNobodyConfirmed_RaisesSellerSwitchRequested()
+    {
+        using var vm = CreateViewModel(out var deps);
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenExchangeCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void OpenExchange_WithSellerConfirmed_DoesNotRaise()
+    {
+        // Application.Current is null in this test host (see the class-level remarks), so
+        // once the gate passes the method returns without opening any window — the same
+        // limitation ShowReturnsDialogAsync/OpenExchange already live with here; this
+        // assertion is about the gate, not the dialog.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenExchangeCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public void OpenExchange_WithSellerSwitchingDisabled_DoesNotRaise()
+    {
+        // Same seller-switch-off exception as everywhere else: with no separate sellers to
+        // confirm, and the overlay itself hidden along with the flag, the gate must not
+        // fire regardless of who (if anyone) is Current.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenExchangeCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+    }
 }
