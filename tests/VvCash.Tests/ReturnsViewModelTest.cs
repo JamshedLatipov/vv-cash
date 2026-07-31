@@ -17,6 +17,11 @@ public class ReturnsViewModelTest
     {
         public ReturnRequest? LastRequest;
         public string? LastExpenseId;
+
+        /// <summary>What CreateReturnAsync reports back — defaults to success (matching
+        /// prior behaviour); the CompletedDocument tests flip it to false.</summary>
+        public bool CreateResult = true;
+
         public Task<ExpenseListResponse> GetSalesAsync(int page = 1)
             => Task.FromResult(new ExpenseListResponse());
         public Task<ReturnDetailBody> GetReturnableLinesAsync(string expenseId)
@@ -24,7 +29,7 @@ public class ReturnsViewModelTest
         public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request)
         {
             LastExpenseId = expenseId; LastRequest = request;
-            return Task.FromResult(true);
+            return Task.FromResult(CreateResult);
         }
     }
 
@@ -158,5 +163,32 @@ public class ReturnsViewModelTest
         // Same rule as the drawer above: the server's answer wins over the local checkbox.
         Assert.Equal(0, printer.Receipt);
         Assert.Equal(1, printer.Drawer); // the other flag is untouched and still unconfigured -> enabled
+    }
+
+    [Fact]
+    public async Task SubmitReturn_OnSuccess_MarksCompletedDocument()
+    {
+        // PosViewModel reads this after the modal closes to decide whether the register
+        // just finished an operation and must re-ask who is selling.
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.True(vm.CompletedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_WhenServerRejects_LeavesCompletedDocumentFalse()
+    {
+        // Nothing was booked, so opening and closing the screen must not cost a PIN.
+        var svc = new FakeReturnService { CreateResult = false };
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.False(vm.CompletedDocument);
     }
 }
