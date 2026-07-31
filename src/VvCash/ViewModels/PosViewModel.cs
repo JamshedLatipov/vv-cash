@@ -1541,9 +1541,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// владельцем окна и наличием строки для префилла.</summary>
     private async Task<CounterpartyResponse?> ShowCustomerRegistrationAsync(Avalonia.Controls.Window owner, string searchQuery)
     {
+        var phoneFormat = PhoneFormats.Resolve(_settingsService.PhoneFormatId);
+
         var dialog = new VvCash.Views.CustomerRegistrationWindow();
-        var vm = new CustomerRegistrationViewModel(dialog, _counterpartyService);
-        vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery));
+        var vm = new CustomerRegistrationViewModel(dialog, _counterpartyService, _settingsService);
+        vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery, phoneFormat.DigitCount));
         dialog.DataContext = vm;
 
         // as, а не каст: окно закрывается либо созданным клиентом, либо null, но

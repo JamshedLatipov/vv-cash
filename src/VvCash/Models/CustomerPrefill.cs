@@ -12,24 +12,29 @@ public sealed class CustomerPrefill
     public string FirstName { get; init; } = string.Empty;
     public string LastName { get; init; } = string.Empty;
 
-    /// <summary>Ровно десять цифр или пусто. CustomerRegistrationViewModel.SubmitAsync
-    /// отправляет телефон только при длине 10 и сам приклеивает код страны,
-    /// поэтому хранить здесь что-то другое бессмысленно.</summary>
+    /// <summary>Ровно digitCount цифр или пусто. CustomerRegistrationViewModel.SubmitAsync
+    /// отправляет телефон только при полной длине по формату кассы и сам
+    /// приклеивает код страны, поэтому хранить здесь что-то другое
+    /// бессмысленно.</summary>
     public string PhoneNumber { get; init; } = string.Empty;
 
     public static readonly CustomerPrefill Empty = new();
 
-    public static CustomerPrefill FromSearchQuery(string? query)
+    /// <param name="digitCount">Сколько цифр в полном национальном номере на
+    /// этой кассе — из PhoneFormat. Порог «это телефон» и длина среза берутся
+    /// отсюда: на девятизначной кассе десятка отправляла бы полный местный номер
+    /// в имя.</param>
+    public static CustomerPrefill FromSearchQuery(string? query, int digitCount)
     {
         if (string.IsNullOrWhiteSpace(query)) return Empty;
 
         // Порог по числу цифр, а не «строка состоит только из цифр»: кассир
-        // набирает телефон и как «+7 (900) 123-45-67». Берутся последние десять,
-        // чтобы ведущие 7/8 не сдвигали номер.
+        // набирает телефон и как «+7 (900) 123-45-67». Берутся последние
+        // digitCount, чтобы код страны в начале не сдвигал номер.
         var digits = new string(query.Where(char.IsDigit).ToArray());
-        if (digits.Length >= 10)
+        if (digits.Length >= digitCount)
         {
-            return new CustomerPrefill { PhoneNumber = digits[^10..] };
+            return new CustomerPrefill { PhoneNumber = digits[^digitCount..] };
         }
 
         // null как разделитель — это split по любому пробельному символу.

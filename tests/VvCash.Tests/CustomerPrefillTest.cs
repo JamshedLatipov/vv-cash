@@ -12,13 +12,36 @@ public class CustomerPrefillTest
     [InlineData("+7 (900) 123-45-67")]
     [InlineData("89001234567")]        // с восьмёркой
     [InlineData("9001234567")]         // ровно десять
-    public void TenOrMoreDigits_GoToPhone(string query)
+    public void EnoughDigits_GoToPhone(string query)
     {
-        var prefill = CustomerPrefill.FromSearchQuery(query);
+        var prefill = CustomerPrefill.FromSearchQuery(query, 10);
 
         Assert.Equal("9001234567", prefill.PhoneNumber);
         Assert.Equal(string.Empty, prefill.FirstName);
         Assert.Equal(string.Empty, prefill.LastName);
+    }
+
+    /// <summary>Ради чего задача и делается: на таджикской кассе девять цифр —
+    /// это полный номер, а не обрывок, и в имя он уезжать не должен.</summary>
+    [Theory]
+    [InlineData("901234567", "901234567")]
+    [InlineData("+992 (90) 123-45-67", "901234567")]
+    [InlineData("992901234567", "901234567")]
+    public void NineDigitFormat_TakesNineDigits(string query, string expected)
+    {
+        var prefill = CustomerPrefill.FromSearchQuery(query, 9);
+
+        Assert.Equal(expected, prefill.PhoneNumber);
+        Assert.Equal(string.Empty, prefill.FirstName);
+    }
+
+    /// <summary>Тот же ввод при другом формате читается иначе — десятизначная
+    /// касса видит в девяти цифрах не номер.</summary>
+    [Fact]
+    public void SameQuery_ReadsDifferentlyPerFormat()
+    {
+        Assert.Equal("901234567", CustomerPrefill.FromSearchQuery("901234567", 9).PhoneNumber);
+        Assert.Equal(string.Empty, CustomerPrefill.FromSearchQuery("901234567", 10).PhoneNumber);
     }
 
     /// <summary>Длиннее, чем любой из случаев выше: закрепляет, что берутся
@@ -26,9 +49,9 @@ public class CustomerPrefillTest
     /// подряд. Половины строки намеренно разные — на «1234567890» дважды тест
     /// прошёл бы и при срезе [..10], то есть не проверял бы ничего.</summary>
     [Fact]
-    public void LongDigitString_TakesLastTenDigits()
+    public void LongDigitString_TakesTheLastDigits()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("11111111112222222222");
+        var prefill = CustomerPrefill.FromSearchQuery("11111111112222222222", 10);
 
         Assert.Equal("2222222222", prefill.PhoneNumber);
     }
@@ -36,7 +59,7 @@ public class CustomerPrefillTest
     [Fact]
     public void SingleWord_GoesToFirstName()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("Иван");
+        var prefill = CustomerPrefill.FromSearchQuery("Иван", 10);
 
         Assert.Equal("Иван", prefill.FirstName);
         Assert.Equal(string.Empty, prefill.LastName);
@@ -46,7 +69,7 @@ public class CustomerPrefillTest
     [Fact]
     public void TwoWords_SplitIntoFirstAndLastName()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("Иван Петров");
+        var prefill = CustomerPrefill.FromSearchQuery("Иван Петров", 10);
 
         Assert.Equal("Иван", prefill.FirstName);
         Assert.Equal("Петров", prefill.LastName);
@@ -58,7 +81,7 @@ public class CustomerPrefillTest
     [Fact]
     public void ThreeWords_TailGoesToLastName()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("Иван Петрович Петров");
+        var prefill = CustomerPrefill.FromSearchQuery("Иван Петрович Петров", 10);
 
         Assert.Equal("Иван", prefill.FirstName);
         Assert.Equal("Петрович Петров", prefill.LastName);
@@ -67,7 +90,7 @@ public class CustomerPrefillTest
     [Fact]
     public void ExtraWhitespace_Ignored()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("  Иван   Петров  ");
+        var prefill = CustomerPrefill.FromSearchQuery("  Иван   Петров  ", 10);
 
         Assert.Equal("Иван", prefill.FirstName);
         Assert.Equal("Петров", prefill.LastName);
@@ -76,9 +99,9 @@ public class CustomerPrefillTest
     /// <summary>Меньше десяти цифр — это не телефон, а, например, номер карты
     /// или обрывок ввода. Уходит в имя, где кассир его увидит и поправит.</summary>
     [Fact]
-    public void FewerThanTenDigits_NotTreatedAsPhone()
+    public void FewerDigitsThanTheFormat_NotTreatedAsPhone()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("12345");
+        var prefill = CustomerPrefill.FromSearchQuery("12345", 10);
 
         Assert.Equal(string.Empty, prefill.PhoneNumber);
         Assert.Equal("12345", prefill.FirstName);
@@ -89,7 +112,7 @@ public class CustomerPrefillTest
     [Fact]
     public void TabSeparatedQuery_SplitIntoFirstAndLastName()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("Иван\tПетров");
+        var prefill = CustomerPrefill.FromSearchQuery("Иван\tПетров", 10);
 
         Assert.Equal("Иван", prefill.FirstName);
         Assert.Equal("Петров", prefill.LastName);
@@ -101,7 +124,7 @@ public class CustomerPrefillTest
     [Fact]
     public void DigitsInsideWord_GoesToFirstName()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("Иван2");
+        var prefill = CustomerPrefill.FromSearchQuery("Иван2", 10);
 
         Assert.Equal("Иван2", prefill.FirstName);
         Assert.Equal(string.Empty, prefill.PhoneNumber);
@@ -113,7 +136,7 @@ public class CustomerPrefillTest
     [Fact]
     public void PunctuationOnlyQuery_GoesToFirstName()
     {
-        var prefill = CustomerPrefill.FromSearchQuery("---");
+        var prefill = CustomerPrefill.FromSearchQuery("---", 10);
 
         Assert.Equal("---", prefill.FirstName);
         Assert.Equal(string.Empty, prefill.LastName);
@@ -126,7 +149,7 @@ public class CustomerPrefillTest
     [InlineData("   ")]
     public void EmptyQuery_GivesEmptyPrefill(string? query)
     {
-        var prefill = CustomerPrefill.FromSearchQuery(query);
+        var prefill = CustomerPrefill.FromSearchQuery(query, 10);
 
         Assert.Equal(string.Empty, prefill.FirstName);
         Assert.Equal(string.Empty, prefill.LastName);
