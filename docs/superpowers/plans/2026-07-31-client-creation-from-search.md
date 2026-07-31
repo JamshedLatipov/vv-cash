@@ -901,6 +901,16 @@ git commit -m "i18n(customer): add strings for creating a client from search"
                             </ListBox.ItemTemplate>
                         </ListBox>
 
+                        <!-- Провал поиска: связи нет или сервер ответил ошибкой.
+                             Взаимоисключение с пустым состоянием обеспечивает сама
+                             HasNoResults (читает ErrorMessage), разметке коордиировать
+                             нечего — но показать ошибку она обязана, иначе провалившийся
+                             поиск выглядит как «ничего не произошло». -->
+                        <StackPanel IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16">
+                            <material:MaterialIcon Kind="CloudOffOutline" Width="72" Height="72" Foreground="{StaticResource Slate300Brush}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding ErrorMessage}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Red500Brush}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="360"/>
+                        </StackPanel>
+
                         <!-- Пустое состояние: показывается только после поиска, давшего ноль результатов -->
                         <StackPanel IsVisible="{Binding HasNoResults}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16">
                             <material:MaterialIcon Kind="AccountSearch" Width="72" Height="72" Foreground="{StaticResource Slate300Brush}" HorizontalAlignment="Center"/>
@@ -1012,7 +1022,47 @@ dotnet run --project src/VvCash/VvCash.csproj
 **Task 2 — nullability сгенерированного partial-метода.** План утверждал, что
 `OnSearchResultsChanged` объявлен с non-nullable `oldValue` и что расхождение
 даёт CS8826. Оба утверждения неверны: генератор объявляет `oldValue` nullable, а
-расхождение даёт **CS8611**. Сигнатура и комментарий исправлены.
+расхождение даёт **CS8611**. Вопрос снят целиком следующим пунктом — partial-метод
+удалён.
+
+**Task 2 — вся механика `CollectionChanged` оказалась лишней.** `HasNoResults`
+может стать истинной только при `HasSearched == true`, а `IsLoading = false`
+стоит в `finally`, то есть уведомление от него приходит последним и всегда
+после того, как список принял окончательный вид; промежуточные `Clear`/`Add`
+идут под `IsLoading == true` и гасятся самим выражением. Подписка, перевешивание
+и два partial-метода (~30 строк) заменены на `[NotifyPropertyChangedFor]` над
+двумя флагами — конвенция, уже применённая в репозитории ~40 раз. Безопасность
+доказана экспериментом: четыре новых теста написаны против старой механики,
+затем механика удалена, те же тесты зелёные (`09c7789`).
+
+**Task 2 — провал поиска выдавал себя за отсутствие клиента. Главная находка.**
+`CounterpartyService.SearchCounterpartiesAsync` возвращал `null` только на
+исключении и пустом `BackendUrl`, а на **не-успешном HTTP-статусе проваливался
+в `return allResults`** — пустой список, неотличимый от «совпадений нет». Окно
+показывало «Клиент не найден» с кнопкой «Создать», и кассир на офлайн-кассе
+завёл бы дубль поверх живого клиента вместе со второй дисконтной картой.
+Починено в двух слоях: сервис возвращает `null` на ошибку (`560840b`, покрыто
+новым `CounterpartyServiceTest`, `2e54a8e`), а VM на `null` не трогает ни
+`HasSearched`, ни список и выставляет `ErrorMessage` по ключу `NoConnection`.
+Затем нашлась вторая дыра того же класса: последовательность «пустой результат →
+провал следующего поиска» оставляла `HasNoResults` истинной поверх ошибки. В
+формулу добавлено `ErrorMessage == null` (`5ce4bc7`).
+
+**Task 2 — флаг гейтил только разметку.** У `CreateCustomerCommand` не было
+`CanExecute`, а тест с именем `CreateDisabledByFeatureFlag_HidesCreateAffordances`
+проверял ровно одно: что конструктор положил аргумент в поле. Добавлен
+`[RelayCommand(CanExecute = nameof(IsCreateEnabled))]` и пара тестов на оба
+значения флага (`db1dc94`).
+
+Итог по Task 2: **22 теста** в `CustomerSearchViewModelTest` и **3** в новом
+`CounterpartyServiceTest`; полный набор — 426. Блок кода Task 2 выше отражает
+исходный план и с итоговым файлом уже не совпадает — источник истины
+`src/VvCash/ViewModels/CustomerSearchViewModel.cs`.
+
+**Task 6 получил дополнительную работу:** разметка обязана показывать
+`ErrorMessage` (блок добавлен в Step 1), иначе провалившийся поиск выглядит как
+«ничего не произошло». Взаимоисключение с пустым состоянием координировать не
+надо — оно обеспечено в самой `HasNoResults`.
 
 ## Self-review
 
