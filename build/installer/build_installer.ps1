@@ -10,14 +10,25 @@ $proj      = Join-Path $root 'src\VvCash\VvCash.csproj'
 $publishDir = Join-Path $root 'publish\win-x64'
 $iss       = Join-Path $PSScriptRoot 'VvCashInstaller.iss'
 
-# Ask MSBuild for the evaluated Version instead of reading the XML by hand. MSBuild applies
-# Condition evaluation the way a real build does; a plain XPath query does not, so a future
-# Condition-guarded Release-only <Version> would be silently ignored by XPath and the
-# installer would get stamped with the wrong version with no error at all. Evaluate with
-# -p:Configuration=Release since that is the configuration this script actually publishes.
+# Resolving the version takes two steps, because each one alone fails silently in a
+# different way.
+#
+# First: assert the csproj actually declares <Version>. This has to be an XML check,
+# because MSBuild cannot answer it -- when the element is absent entirely, the SDK
+# supplies an implicit default of 1.0.0 and -getProperty:Version reports that, happily
+# and indistinguishably from a real declaration. Drop the line in a bad merge and every
+# release would ship stamped 1.0.0 forever, so registers already on 1.0.0 or newer would
+# never see an update and nothing anywhere would report an error.
+$declaredVersions = ([xml](Get-Content $proj)).SelectNodes('//PropertyGroup/Version')
+if ($declaredVersions.Count -eq 0) { throw "No <Version> element in $proj -- add one to the PropertyGroup. Without it MSBuild silently reports the SDK default of 1.0.0, and every release would ship stamped with that version." }
+
+# Second: ask MSBuild for the evaluated value rather than reading the XML node. Only
+# MSBuild applies Condition evaluation, so a Release-only <Version> guarded by a
+# Condition would be invisible to XPath, which just takes the first node in document
+# order. Evaluate as Release, since that is what this script publishes below.
 $version = (& dotnet msbuild $proj -getProperty:Version -p:Configuration=Release -nologo).Trim()
 if ($LASTEXITCODE -ne 0) { throw "dotnet msbuild -getProperty:Version failed ($LASTEXITCODE) for $proj" }
-if ([string]::IsNullOrWhiteSpace($version)) { throw "MSBuild returned a blank Version for $proj -- add or fix the <Version> property in the PropertyGroup; otherwise ISCC would fail later with a confusing 'AppVersion directive' error instead of naming the real cause." }
+if ([string]::IsNullOrWhiteSpace($version)) { throw "MSBuild returned a blank Version for $proj -- fix the <Version> property in the PropertyGroup; otherwise ISCC would fail later with a confusing 'AppVersion directive' error instead of naming the real cause." }
 Write-Host "==> Product version from csproj: $version" -ForegroundColor Cyan
 
 Write-Host '==> Publishing self-contained x64 build...' -ForegroundColor Cyan
