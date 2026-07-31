@@ -17,6 +17,14 @@ public sealed class UpdateService : IUpdateService
 
     private const string ProductId = "vvcash";
 
+    /// <summary>Derived from <see cref="ManifestUrl"/> rather than hardcoded, so a move
+    /// of the manifest to a CDN only requires changing that one constant. The download
+    /// host must match this: against an attacker who can rewrite the whole manifest
+    /// this changes little, but it narrows the blast radius when write access to the
+    /// manifest is broader than publish access to the download directory (a CI job, a
+    /// CMS, a webhook that only that one file is exposed through).</summary>
+    private static readonly string ManifestHost = new Uri(ManifestUrl).Host;
+
     private readonly HttpClient _httpClient;
     private readonly IAppVersionProvider _versionProvider;
     private readonly string _downloadDirectory;
@@ -62,7 +70,7 @@ public sealed class UpdateService : IUpdateService
         }
     }
 
-    internal static UpdateInfo? Parse(string json)
+    private static UpdateInfo? Parse(string json)
     {
         try
         {
@@ -78,6 +86,7 @@ public sealed class UpdateService : IUpdateService
             if (!TryGetString(root, "url", out var url)) return null;
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
             if (uri.Scheme != Uri.UriSchemeHttps) return null;
+            if (!string.Equals(uri.Host, ManifestHost, StringComparison.OrdinalIgnoreCase)) return null;
 
             if (!TryGetString(root, "sha256", out var sha256)) return null;
             if (sha256.Length != 64 || !sha256.All(Uri.IsHexDigit)) return null;

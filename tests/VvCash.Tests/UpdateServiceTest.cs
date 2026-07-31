@@ -120,6 +120,36 @@ public class UpdateServiceTest
         Assert.Null(await service.CheckAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task DifferentHostUrlIsRejected()
+    {
+        // The manifest lives on proffi.io. If whatever writes kassa-latest.json has
+        // broader access than whatever publishes to /downloads/ (a CI job, a CMS, a
+        // webhook), pinning the host keeps that weaker attacker from pointing the
+        // register at their own server.
+        var (service, _) = Build(Manifest(url: "https://evil.example/downloads/proffi-kassa-setup.exe"));
+
+        Assert.Null(await service.CheckAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SameHostDifferentPathIsAccepted()
+    {
+        // The check pins the host, not the whole URL — a future re-organisation of the
+        // download directory must not silently stop all updates.
+        var (service, _) = Build(Manifest(url: "https://proffi.io/downloads/v2/proffi-kassa-setup.exe"));
+
+        Assert.NotNull(await service.CheckAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HostCasingIsIgnored()
+    {
+        var (service, _) = Build(Manifest(url: "https://PROFFI.IO/downloads/proffi-kassa-setup.exe"));
+
+        Assert.NotNull(await service.CheckAsync(CancellationToken.None));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("deadbeef")]
