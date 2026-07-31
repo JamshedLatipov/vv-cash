@@ -1078,7 +1078,7 @@
 
                     <TextBlock Text="{Binding [UpdateBlockedByCart], Source={x:Static services:I18nService.Instance}}"
                                FontSize="13" Foreground="{StaticResource Red500Brush}" HorizontalAlignment="Center"
-                               IsVisible="{Binding !Update.CanInstall}"/>
+                               IsVisible="{Binding Update.IsBlockedByCart}"/>
 
                     <TextBlock Text="{Binding Update.ErrorText}"
                                FontSize="13" Foreground="{StaticResource Red500Brush}"

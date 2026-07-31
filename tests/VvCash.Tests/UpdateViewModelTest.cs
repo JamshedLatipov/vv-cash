@@ -24,12 +24,18 @@ public class UpdateViewModelTest
         public string? DownloadResult;
         public int DownloadCalls;
 
+        /// <summary>Invoked right before DownloadAsync returns, standing in for
+        /// something happening on the register while the (real, seconds-long) download
+        /// is in flight — used to reproduce a scan landing mid-download.</summary>
+        public Action? OnDownload;
+
         public Task<UpdateInfo?> CheckAsync(CancellationToken ct) => Task.FromResult(Available);
 
         public Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
         {
             DownloadCalls++;
             progress?.Report(1.0);
+            OnDownload?.Invoke();
             return Task.FromResult(DownloadResult);
         }
     }
@@ -164,6 +170,30 @@ public class UpdateViewModelTest
     }
 
     [Fact]
+    public async Task StartUpdateRefusesWhenAScanLandsDuringTheDownload()
+    {
+        var (vm, service, launcher, cart) = Build();
+        service.Available = SampleInfo();
+        service.DownloadResult = @"C:\temp\VvCashInstaller.exe";
+        // The cart was empty when StartUpdateCommand read CanInstall, but a barcode
+        // scan lands a product while the (roughly 35 MB) download is in flight.
+        service.OnDownload = () => cart.AddProduct(SampleProduct());
+        var shutdownRequested = false;
+        vm.ShutdownRequested = () => shutdownRequested = true;
+
+        await vm.CheckAsync(CancellationToken.None);
+        Dispatcher.UIThread.RunJobs();
+        await vm.StartUpdateCommand.ExecuteAsync(null);
+
+        // The download did happen (it started before the scan), but the installer must
+        // never run against a cart that gained items while it was in flight.
+        Assert.Equal(1, service.DownloadCalls);
+        Assert.Null(launcher.Launched);
+        Assert.False(shutdownRequested);
+        Assert.False(string.IsNullOrEmpty(vm.ErrorText));
+    }
+
+    [Fact]
     public async Task SuccessfulUpdateLaunchesTheInstallerAndAsksForShutdown()
     {
         var (vm, service, launcher, _) = Build();
@@ -235,5 +265,19 @@ public class UpdateViewModelTest
         // closing the shift.
         Assert.False(vm.IsModalVisible);
         Assert.True(vm.IsUpdateAvailable);
+    }
+
+    [Fact]
+    public void IsBlockedByCartTracksTheCart()
+    {
+        var (vm, _, _, cart) = Build();
+
+        Assert.False(vm.IsBlockedByCart);
+
+        cart.AddProduct(SampleProduct());
+        Assert.True(vm.IsBlockedByCart);
+
+        cart.ClearCart();
+        Assert.False(vm.IsBlockedByCart);
     }
 }

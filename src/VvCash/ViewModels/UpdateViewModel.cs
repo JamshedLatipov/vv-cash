@@ -43,6 +43,12 @@ public partial class UpdateViewModel : ViewModelBase
     /// installing mid-sale means losing whatever the cashier has rung up.</summary>
     public bool CanInstall => _cartService.Items.Count == 0 && !IsDownloading;
 
+    /// <summary>True when a receipt is in progress. Distinct from !CanInstall, which is
+    /// also false while a download is running — binding the "finish the current receipt"
+    /// message to that would show it next to the progress bar, telling the cashier to
+    /// finish a receipt they do not have.</summary>
+    public bool IsBlockedByCart => _cartService.Items.Count > 0;
+
     public UpdateViewModel(
         IUpdateService updateService,
         IInstallerLauncher launcher,
@@ -54,7 +60,11 @@ public partial class UpdateViewModel : ViewModelBase
         _cartService = cartService;
 
         AppVersionText = $"V {versionProvider.Current}";
-        _cartService.CartChanged += (_, _) => OnPropertyChanged(nameof(CanInstall));
+        _cartService.CartChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(CanInstall));
+            OnPropertyChanged(nameof(IsBlockedByCart));
+        };
     }
 
     partial void OnIsDownloadingChanged(bool value) => OnPropertyChanged(nameof(CanInstall));
@@ -103,6 +113,10 @@ public partial class UpdateViewModel : ViewModelBase
 
         try
         {
+            // Captures SynchronizationContext.Current at construction, which is the
+            // Avalonia UI context only because this method always runs from a command
+            // binding started on the UI thread. A future caller invoking this from a
+            // background thread would silently lose that marshalling.
             var progress = new Progress<double>(value => DownloadProgress = value);
             var path = await _updateService.DownloadAsync(AvailableUpdate, progress, _downloadCts.Token);
 
@@ -112,14 +126,35 @@ public partial class UpdateViewModel : ViewModelBase
                 return;
             }
 
+            // Re-check the cart here, right before Launch, rather than trust the
+            // CanInstall read from before the await above: a 35 MB download takes long
+            // enough for a barcode scan to land a product mid-flight. Once the
+            // installer is running it will overwrite VvCash.exe regardless of what this
+            // method does next, so the check has to gate Launch, not ShutdownRequested
+            // — placed after Launch it would be worthless. The download is discarded by
+            // simply not using it; UpdateService wipes its download directory at the
+            // start of the next DownloadAsync call, so nothing needs cleaning up here.
+            // A scan landing between this check and Launch below is still possible, but
+            // that window is milliseconds rather than the seconds a download takes, and
+            // closing it fully would mean blocking cart input during the download — a
+            // larger change than the risk warrants.
+            if (_cartService.Items.Count > 0)
+            {
+                ErrorText = I18nService.Instance["UpdateBlockedByCart"];
+                return;
+            }
+
             try
             {
                 _launcher.Launch(path);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // The file is downloaded and verified — it just could not be started.
-                // Show where it is so someone can double-click it.
+                // Show where it is so someone can double-click it. There is no logging
+                // framework in this project; [UpdateViewModel] matches the prefix
+                // UpdateService already uses for its own broad catches.
+                Console.WriteLine($"[UpdateViewModel] Launch failed: {ex.GetType().Name}: {ex.Message}");
                 ErrorText = $"{I18nService.Instance["UpdateLaunchFailed"]} {path}";
                 return;
             }
