@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using Avalonia.Controls;
 using VvCash.Models.Api;
 using VvCash.Models;
+using VvCash.Services;
 using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
@@ -22,6 +23,12 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     [ObservableProperty] private DateTime? _dateOfBirth;
     [ObservableProperty] private bool _isLoyaltyEnrolled = true;
     [ObservableProperty] private string _phoneNumber = string.Empty;
+
+    /// <summary>Провал создания клиента. Окно при этом не закрывается: раньше
+    /// оно закрывалось с null и на отмене, и на отказе сервера, так что кассир,
+    /// нажавший «Сохранить», получал просто исчезнувшее окно и никакого
+    /// объяснения — а введённые данные терялись вместе с ним.</summary>
+    [ObservableProperty] private string? _errorMessage;
 
     public string FormattedPhoneNumber
     {
@@ -111,18 +118,28 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
             Form = "individual" // Default based on requirement
         };
 
-        var response = await _counterpartyService.CreateCounterpartyAsync(request);
+        CounterpartyResponse? response;
+        try
+        {
+            response = await _counterpartyService.CreateCounterpartyAsync(request);
+        }
+        catch (Exception)
+        {
+            // ICounterpartyService не обещает, что реализация не бросает, а
+            // необработанное исключение из команды роняет кассу.
+            response = null;
+        }
 
-        if (response != null)
+        if (response == null)
         {
-            // Close window and potentially return the created user ID or details
-            _window.Close(response);
+            // Окно остаётся открытым с заполненной формой: кассир видит причину
+            // и может повторить, не набирая всё заново. Закрытие с null здесь
+            // означало бы «отмена», а отменял не он.
+            ErrorMessage = I18nService.Instance["CustomerCreateFailed"];
+            return;
         }
-        else
-        {
-            // For now, close with null to signify failure (or we could show an error)
-            _window.Close(null);
-        }
+
+        _window.Close(response);
     }
 
     [RelayCommand]

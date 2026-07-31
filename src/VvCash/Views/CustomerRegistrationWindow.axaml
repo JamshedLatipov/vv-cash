@@ -160,6 +160,19 @@
 
             <!-- Footer Actions -->
             <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="0,1,0,0" Padding="32">
+              <StackPanel Spacing="16">
+                <!-- Провал создания. Окно остаётся открытым с заполненной формой,
+                     поэтому сообщение стоит рядом с кнопкой, которую кассир только
+                     что нажал, — и повторить можно тем же нажатием. -->
+                <Border IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                        Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Red500Brush}" BorderThickness="1"
+                        CornerRadius="8" Padding="16,12">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <material:MaterialIcon Kind="AlertCircleOutline" Width="24" Height="24" Foreground="{StaticResource Red500Brush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ErrorMessage}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Red500Brush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </Border>
+
                 <Grid ColumnDefinitions="1*, 2*">
                     <Button Grid.Column="0" Content="ОТМЕНА" Classes="OutlinedButton" Command="{Binding CancelCommand}" Margin="0,0,16,0" HorizontalAlignment="Stretch"/>
                     <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding SubmitCommand}" HorizontalAlignment="Stretch">
@@ -169,6 +182,7 @@
                         </StackPanel>
                     </Button>
                 </Grid>
+              </StackPanel>
             </Border>
 
         </Grid>
