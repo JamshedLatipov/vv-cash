@@ -119,6 +119,25 @@ public class CustomerSearchViewModelTest
         Assert.False(vm.HasNoResults);
     }
 
+    /// <summary>Регресс: очистка строки после удачного поиска не должна
+    /// оставлять «Клиент не найден» — это снова «не искали».</summary>
+    [Fact]
+    public async Task ClearingQueryAfterSearch_DropsEmptyState()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse>();
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+        Assert.True(vm.HasNoResults);
+
+        vm.SearchQuery = string.Empty;
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasSearched);
+        Assert.False(vm.HasNoResults);
+    }
+
     [Fact]
     public async Task CreateCustomer_PassesSearchQueryAsPrefill()
     {

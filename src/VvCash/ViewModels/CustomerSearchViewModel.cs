@@ -88,6 +88,10 @@ public partial class CustomerSearchViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(SearchQuery))
         {
+            // Пустой запрос — это «не искали», а не «не нашли», в том числе
+            // когда до него был успешный поиск: иначе очистка строки оставляла
+            // бы «Клиент не найден» висеть над пустым запросом.
+            HasSearched = false;
             SearchResults.Clear();
             return;
         }
