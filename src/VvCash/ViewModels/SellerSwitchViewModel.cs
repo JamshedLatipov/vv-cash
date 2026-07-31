@@ -191,10 +191,17 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// <summary>Unsubscribes from <see cref="ISellerSession.CurrentChanged"/> — required
     /// because <see cref="ISellerSession"/> is a singleton and this view model is
     /// transient (a fresh one is resolved per <c>NavigateToPos</c> in App.axaml.cs, same
-    /// as <see cref="PosViewModel"/>): without this, every logout/login cycle would leave
-    /// one more dead instance permanently subscribed, still reacting to events on a VM
-    /// nothing displays any more. Mirrors <c>PosViewModel.Dispose</c>'s own reasoning for
-    /// the identical problem.</summary>
+    /// as <see cref="PosViewModel"/>): without this, the singleton would hold a live
+    /// delegate reference back into an instance nothing displays any more, keeping it
+    /// reachable and still reacting to every future <see cref="ISellerSession.CurrentChanged"/>.
+    /// This unsubscribe is also what actually lets the instance itself be collected, not
+    /// just what stops it reacting: App.axaml.cs builds this type with
+    /// <c>ActivatorUtilities.CreateInstance</c> rather than the DI container's own
+    /// <c>GetRequiredService</c> specifically so the container never captures it for its
+    /// own disposal (it captures every <see cref="IDisposable"/> it constructs, root-
+    /// provider-lifetime, regardless of whether Dispose is ever called manually) — see
+    /// that call site's own remarks. Mirrors <c>PosViewModel.Dispose</c>'s own reasoning
+    /// for the identical singleton-vs-transient problem.</summary>
     public void Dispose() => _session.CurrentChanged -= OnSessionCurrentChanged;
 
     /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.

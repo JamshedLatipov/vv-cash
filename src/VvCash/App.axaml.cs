@@ -66,7 +66,20 @@ public partial class App : Application
                 // SellerSwitchViewModel property; PosViewModel only ever raises
                 // SellerSwitchRequested to ask for it to open, matching how NavigationRequest
                 // decouples PosViewModel from the mechanics of navigation.
-                var sellerSwitchVm = Services.GetRequiredService<SellerSwitchViewModel>();
+                //
+                // Built with ActivatorUtilities.CreateInstance rather than
+                // Services.GetRequiredService<SellerSwitchViewModel>(): the .NET DI
+                // container captures every IDisposable it constructs for its own eventual
+                // disposal, root-provider-lifetime, regardless of whether this code ever
+                // calls Dispose() itself — so GetRequiredService here would keep every
+                // prior instance reachable (just inert) for as long as the app runs,
+                // making activeSellerSwitchVm?.Dispose() above unable to actually release
+                // one. ActivatorUtilities.CreateInstance constructs the instance directly
+                // (still resolving its constructor's own dependencies from Services)
+                // without registering it with the container, so this Dispose() call is
+                // what it looks like: the only thing keeping the prior instance alive
+                // once it stops being referenced here.
+                var sellerSwitchVm = ActivatorUtilities.CreateInstance<SellerSwitchViewModel>(Services);
                 activeSellerSwitchVm = sellerSwitchVm;
                 posVm.SellerSwitchViewModel = sellerSwitchVm;
                 // e.CanSignOut is decided by whichever PosViewModel method raised the
@@ -257,7 +270,12 @@ public partial class App : Application
         services.AddTransient<LoginViewModel>();
         services.AddTransient<PosViewModel>();
         services.AddTransient<CustomerDisplayViewModel>();
-        services.AddTransient<SellerSwitchViewModel>();
+        // SellerSwitchViewModel is deliberately NOT registered here: NavigateToPos below
+        // builds it with ActivatorUtilities.CreateInstance instead of
+        // GetRequiredService<SellerSwitchViewModel>() specifically so the container never
+        // captures it for its own disposal — see that call site's own remarks. A
+        // registration here would be dead (nothing resolves it through the container) and
+        // would misleadingly suggest the container manages this type's lifetime.
         services.AddSingleton<MainViewModel>();
     }
 }
