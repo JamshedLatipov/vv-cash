@@ -1450,7 +1450,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery));
         dialog.DataContext = vm;
 
-        return (CounterpartyResponse?) await dialog.ShowDialog<object>(owner);
+        // as, а не каст: окно закрывается либо созданным клиентом, либо null, но
+        // ошибиться здесь означало бы уронить кассу на InvalidCastException.
+        // Тот же приём уже применён в OpenParkedSales.
+        return await dialog.ShowDialog<object>(owner) as CounterpartyResponse;
     }
 
     /// <summary>Клиент выбран — неважно, найден в базе или только что создан.

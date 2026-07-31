@@ -65,9 +65,8 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     }
 
     /// <summary>Переносит строку поиска в форму, когда регистрацию открыли из
-    /// окна поиска. Пустые поля префилла не затирают уже введённое: метод
-    /// зовётся до показа окна, но правило «пустое не пишем» держит его
-    /// безопасным и при повторном вызове.</summary>
+    /// окна поиска. Пустые поля префилла ничего не пишут: строка «Иванов» даёт
+    /// только имя, и обнулять из-за неё телефон незачем.</summary>
     public void ApplyPrefill(CustomerPrefill prefill)
     {
         if (!string.IsNullOrEmpty(prefill.PhoneNumber)) PhoneNumber = prefill.PhoneNumber;
