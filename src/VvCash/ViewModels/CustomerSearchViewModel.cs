@@ -1,6 +1,5 @@
 using System;
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -29,7 +28,10 @@ public partial class CustomerSearchViewModel : ViewModelBase
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<CounterpartyResponse> _searchResults = new();
     [ObservableProperty] private CounterpartyResponse? _selectedCounterparty;
-    [ObservableProperty] private bool _isLoading;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoResults))]
+    private bool _isLoading;
 
     /// <summary>Провал поиска, а не его пустой результат. Показывается вместо
     /// пустого состояния, чтобы «нет связи» не читалось как «клиента нет».</summary>
@@ -37,13 +39,20 @@ public partial class CustomerSearchViewModel : ViewModelBase
 
     /// <summary>Был ли хотя бы один поиск с непустым запросом. Без этого флага
     /// «Клиент не найден» висело бы на только что открытом окне.</summary>
-    [ObservableProperty] private bool _hasSearched;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoResults))]
+    private bool _hasSearched;
 
     /// <summary>Снимок cash_customer_registration_enabled на момент открытия
     /// окна — тот же флаг, что прячет кнопку регистрации в тулбаре. Окно поиска
     /// не должно быть обходом флага.</summary>
     public bool IsCreateEnabled { get; }
 
+    /// <summary>Промежуточные состояния списка (Clear, затем Add на каждый
+    /// результат) гасит сам же !IsLoading: всё наполнение идёт под IsLoading ==
+    /// true, а сбрасывается он в finally, последним — когда список уже принял
+    /// окончательный вид. Поэтому хватает уведомления по двум флагам, следить
+    /// за CollectionChanged не нужно.</summary>
     public bool HasNoResults => HasSearched && !IsLoading && SearchResults.Count == 0;
 
     public CustomerSearchViewModel(
@@ -56,35 +65,7 @@ public partial class CustomerSearchViewModel : ViewModelBase
         _close = close;
         _createCustomer = createCustomer;
         IsCreateEnabled = canCreateCustomer;
-
-        // Подписка на саму коллекцию, а не строка в конце SearchAsync: поиск
-        // наполняет её в несколько шагов (Clear, затем Add на результат), и
-        // пустое состояние обязано отслеживать реальное содержимое.
-        SearchResults.CollectionChanged += OnSearchResultsCollectionChanged;
     }
-
-    private void OnSearchResultsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
-        => OnPropertyChanged(nameof(HasNoResults));
-
-    /// <summary>SearchResults — [ObservableProperty], то есть коллекцию можно
-    /// подменить целиком. Сегодня этого никто не делает, но без перевешивания
-    /// подписки такая подмена сломала бы пустое состояние молча.
-    ///
-    /// oldValue объявлен nullable вслед за сгенерированным объявлением partial-метода;
-    /// разойтись с ним в аннотациях — это CS8611. На практике null здесь не приходит:
-    /// поле инициализировано `= new()`, а инициализатор поля идёт мимо сеттера.</summary>
-    partial void OnSearchResultsChanged(
-        ObservableCollection<CounterpartyResponse>? oldValue,
-        ObservableCollection<CounterpartyResponse> newValue)
-    {
-        if (oldValue != null) oldValue.CollectionChanged -= OnSearchResultsCollectionChanged;
-        newValue.CollectionChanged += OnSearchResultsCollectionChanged;
-        OnPropertyChanged(nameof(HasNoResults));
-    }
-
-    partial void OnHasSearchedChanged(bool value) => OnPropertyChanged(nameof(HasNoResults));
-
-    partial void OnIsLoadingChanged(bool value) => OnPropertyChanged(nameof(HasNoResults));
 
     [RelayCommand]
     private async Task SearchAsync()

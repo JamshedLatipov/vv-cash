@@ -88,6 +88,50 @@ public class CustomerSearchViewModelTest
 
         Assert.False(vm.HasNoResults);
         Assert.Single(vm.SearchResults);
+        Assert.Equal("Иванов", harness.Service.LastQuery);
+    }
+
+    /// <summary>Самая частая последовательность: кассир нашёл не того, поправил
+    /// написание — и теперь не находит никого.</summary>
+    [Fact]
+    public async Task SearchWithResults_ThenNoResults_ShowsEmptyState()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse> { Customer("c-1", "Иванов Иван") };
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+        Assert.False(vm.HasNoResults);
+
+        harness.Service.Results = new List<CounterpartyResponse>();
+        vm.SearchQuery = "Ивановв";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasNoResults);
+        Assert.Empty(vm.SearchResults);
+    }
+
+    /// <summary>HasNoResults — вычисляемое свойство: если по нему не приходит
+    /// PropertyChanged, привязка в разметке молча не обновится и «Клиент не
+    /// найден» не появится. Пин на механику уведомления, какой бы она ни была.</summary>
+    [Fact]
+    public async Task ResultsThenNoResults_RaisesHasNoResultsNotification()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse> { Customer("c-1", "Иванов Иван") };
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        harness.Service.Results = new List<CounterpartyResponse>();
+        vm.SearchQuery = "Ивановв";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Contains(nameof(CustomerSearchViewModel.HasNoResults), raised);
+        Assert.True(vm.HasNoResults);
     }
 
     /// <summary>Провал поиска (нет связи, ошибка сервера) не должен выглядеть
@@ -267,6 +311,19 @@ public class CustomerSearchViewModelTest
 
         Assert.Equal(1, harness.CloseCount);
         Assert.Same(vm.SearchResults[0], harness.ClosedWith);
+    }
+
+    /// <summary>Главная кнопка не должна превращаться в отмену, когда в списке
+    /// ничего не выбрано.</summary>
+    [Fact]
+    public void ConfirmSelection_WithNothingSelected_DoesNotClose()
+    {
+        var harness = new Harness();
+        var vm = harness.Build();
+
+        vm.ConfirmSelectionCommand.Execute(null);
+
+        Assert.Equal(0, harness.CloseCount);
     }
 
     [Fact]
