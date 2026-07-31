@@ -1,11 +1,15 @@
 bin/
 obj/
 
-# Build outputs
+# Build outputs. Note build/* rather than build/: the installer sources live under
+# build/installer/ and have to stay tracked, and git will not descend into an
+# excluded directory to reach a negation.
 out/
 publish/
 TestResults/
-build/
+build/*
+!build/installer/
+build/installer/Output/
 
 # Rider / JetBrains
 .idea/
