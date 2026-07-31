@@ -21,6 +21,17 @@ public class CustomerPrefillTest
         Assert.Equal(string.Empty, prefill.LastName);
     }
 
+    /// <summary>Длиннее, чем любой из случаев выше: закрепляет, что берутся
+    /// именно последние десять цифр (срез [^10..]), а не первые и не всё
+    /// подряд.</summary>
+    [Fact]
+    public void LongDigitString_TakesLastTenDigits()
+    {
+        var prefill = CustomerPrefill.FromSearchQuery("12345678901234567890");
+
+        Assert.Equal("1234567890", prefill.PhoneNumber);
+    }
+
     [Fact]
     public void SingleWord_GoesToFirstName()
     {
@@ -70,6 +81,42 @@ public class CustomerPrefillTest
 
         Assert.Equal(string.Empty, prefill.PhoneNumber);
         Assert.Equal("12345", prefill.FirstName);
+    }
+
+    /// <summary>Разделитель слов — любой пробельный символ, а не только
+    /// пробел: split по null-массиву разделителей это гарантирует.</summary>
+    [Fact]
+    public void TabSeparatedQuery_SplitIntoFirstAndLastName()
+    {
+        var prefill = CustomerPrefill.FromSearchQuery("Иван\tПетров");
+
+        Assert.Equal("Иван", prefill.FirstName);
+        Assert.Equal("Петров", prefill.LastName);
+    }
+
+    /// <summary>Несколько цифр внутри слова не превращают слово в телефон —
+    /// порог считается по всей строке, но здесь цифр всё равно меньше
+    /// десяти, так что граница не путается со словом.</summary>
+    [Fact]
+    public void DigitsInsideWord_GoesToFirstName()
+    {
+        var prefill = CustomerPrefill.FromSearchQuery("Иван2");
+
+        Assert.Equal("Иван2", prefill.FirstName);
+        Assert.Equal(string.Empty, prefill.PhoneNumber);
+    }
+
+    /// <summary>Строка без цифр и без букв — не телефон и не пусто, поэтому
+    /// уходит в имя как есть. Это текущее поведение, тест его фиксирует, а не
+    /// предписывает.</summary>
+    [Fact]
+    public void PunctuationOnlyQuery_GoesToFirstName()
+    {
+        var prefill = CustomerPrefill.FromSearchQuery("---");
+
+        Assert.Equal("---", prefill.FirstName);
+        Assert.Equal(string.Empty, prefill.LastName);
+        Assert.Equal(string.Empty, prefill.PhoneNumber);
     }
 
     [Theory]

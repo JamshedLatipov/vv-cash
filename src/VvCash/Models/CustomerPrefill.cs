@@ -34,7 +34,6 @@ public sealed class CustomerPrefill
 
         // null как разделитель — это split по любому пробельному символу.
         var words = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0) return Empty;
 
         return new CustomerPrefill
         {
