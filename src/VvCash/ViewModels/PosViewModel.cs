@@ -1243,21 +1243,36 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void AddToCart(Product product)
     {
-        // Ask who is selling only at the start of a receipt: an empty cart plus a stale
-        // session means nobody has confirmed identity since the idle timeout, so raise the
-        // overlay request before this item lands. Once the cart has an item, the receipt is
-        // in progress and must never be interrupted for this — same reasoning as Touch()
-        // below keeping the session alive through the rest of the sale.
-        // With seller switching disabled there is no separate identity to confirm —
-        // everything on this register is the shift owner's — so the start-of-receipt
-        // ask never fires.
+        // Two reasons to ask who is selling, and both are needed.
         //
-        // canSignOut is a hard false, never CanEndSellerSession: the cart is only empty
-        // right here because that is this gate's own firing condition — product is about
-        // to land in it a few lines down. Reading CanEndSellerSession at this instant
-        // would read true and stay wrong for as long as the overlay is actually showing
-        // (see SellerSwitchRequest's remarks).
-        if (IsSellerSwitchEnabled && !_cartService.Items.Any() && _sellerSession.IsStale)
+        // Nobody is confirmed at all. This one repeats on every add until it is answered,
+        // and that is the point: the ask is not modal to this method — it raises the
+        // overlay and the product lands a few lines down regardless — so dismissing the
+        // overlay leaves nobody confirmed AND a cart with an item in it. A gate that only
+        // fired on an empty cart read that cart as "receipt already in progress" and went
+        // silent for the rest of it, so the cashier who dismissed the overlay once (by
+        // accident or otherwise) could never get it back by scanning. That was survivable
+        // while Pay() still paid without a seller; now that Pay() refuses, it is a dead
+        // end with no way out of it from the catalog.
+        //
+        // Somebody IS confirmed but the session went stale, at the start of a receipt.
+        // This is the idle timeout doing its job: whoever confirmed walked away long
+        // enough that the next person at the register must not inherit their name. Kept
+        // guarded on an empty cart, unlike the first reason — a receipt already being
+        // rung up by a confirmed seller must never be interrupted mid-sale, and Touch()
+        // below keeps that session alive for as long as the items keep coming.
+        //
+        // With seller switching disabled there is no separate identity to confirm —
+        // everything on this register is the shift owner's — so neither ask fires.
+        //
+        // canSignOut is a hard false, never CanEndSellerSession: the cart may well be
+        // empty at this instant (that is the second reason's own firing condition) but
+        // the product is about to land in it, so reading CanEndSellerSession here would
+        // read true and stay wrong for as long as the overlay is actually showing (see
+        // SellerSwitchRequest's remarks).
+        var nobodyConfirmed = _sellerSession.Current == null;
+        var newReceiptAfterIdle = !_cartService.Items.Any() && _sellerSession.IsStale;
+        if (IsSellerSwitchEnabled && (nobodyConfirmed || newReceiptAfterIdle))
             SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
 
         // Any add is genuine register activity, not just the first one — resets the idle
