@@ -183,8 +183,19 @@ public partial class PosView : UserControl
             _barcodeBuffer = string.Empty;
             if (DataContext is PosViewModel vm)
             {
-                _ = vm.HandleBarcodeAsync(barcode);
-                vm.SearchQuery = string.Empty; // clear out accidental typing in active search box
+                // Same overlay-visibility guard as the Escape branch above: this handler
+                // is Tunnel-routed on the TopLevel, so a hardware scanner's keystrokes
+                // reach here regardless of focus and regardless of whether the modal
+                // seller-switch overlay is up. Without this, a scan while the overlay is
+                // showing reaches HandleBarcodeAsync -> AddToCart and fills the cart out
+                // from under it — including, now that the overlay can show a sign-out
+                // control, putting that control over a cart that already has an item.
+                var overlay = vm.SellerSwitchViewModel;
+                if (overlay == null || !overlay.IsVisible)
+                {
+                    _ = vm.HandleBarcodeAsync(barcode);
+                    vm.SearchQuery = string.Empty; // clear out accidental typing in active search box
+                }
             }
             e.Handled = true;
             return;
