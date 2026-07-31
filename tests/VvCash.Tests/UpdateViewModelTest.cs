@@ -190,7 +190,12 @@ public class UpdateViewModelTest
         Assert.Equal(1, service.DownloadCalls);
         Assert.Null(launcher.Launched);
         Assert.False(shutdownRequested);
-        Assert.False(string.IsNullOrEmpty(vm.ErrorText));
+
+        // The dialog explains itself through IsBlockedByCart, which drives the permanent
+        // "finish the current receipt" line. ErrorText deliberately stays clear so that
+        // sentence is not printed twice.
+        Assert.True(vm.IsBlockedByCart);
+        Assert.True(string.IsNullOrEmpty(vm.ErrorText));
     }
 
     [Fact]

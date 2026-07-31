@@ -138,11 +138,13 @@ public partial class UpdateViewModel : ViewModelBase
             // that window is milliseconds rather than the seconds a download takes, and
             // closing it fully would mean blocking cart input during the download — a
             // larger change than the risk warrants.
-            if (_cartService.Items.Count > 0)
-            {
-                ErrorText = I18nService.Instance["UpdateBlockedByCart"];
-                return;
-            }
+            //
+            // Nothing is written to ErrorText here on purpose. IsBlockedByCart is true by
+            // definition at this point, and the dialog already shows UpdateBlockedByCart
+            // permanently on that flag — setting the same sentence again would print it
+            // twice, once above the other, at exactly the moment the cashier is trying to
+            // read it.
+            if (_cartService.Items.Count > 0) return;
 
             try
             {
