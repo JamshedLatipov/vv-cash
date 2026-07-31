@@ -26,6 +26,7 @@ public class AuthServiceTest
         public bool ReturnOpenCashDrawer { get; set; }
         public bool ReturnPrintReceipt { get; set; }
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+        public string PhoneFormatId { get; set; } = string.Empty;
         public int SaveCallCount { get; private set; }
         public event EventHandler? SettingsChanged;
         public void Save()

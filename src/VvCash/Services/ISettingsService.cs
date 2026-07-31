@@ -33,6 +33,12 @@ public interface ISettingsService
     /// discovering it at the payout step leaves a return already booked.</summary>
     string ExchangePayoutCategoryId { get; set; }
 
+    /// <summary>Id записи из PhoneFormats — какой формат телефона у клиентов
+    /// этой кассы. Пусто на кассе, где настройку не трогали; PhoneFormats.Resolve
+    /// читает пустое и незнакомое как Россию, поэтому обновление существующей
+    /// кассы ничего не меняет.</summary>
+    string PhoneFormatId { get; set; }
+
     event EventHandler? SettingsChanged;
 
     void Save();

@@ -118,6 +118,7 @@ public class ExchangeViewModelTest
         public bool ReturnOpenCashDrawer { get; set; } = true;
         public bool ReturnPrintReceipt { get; set; } = true;
         public string ExchangePayoutCategoryId { get; set; } = "cat-1";
+        public string PhoneFormatId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged { add { } remove { } }
         public void Save() { }
     }

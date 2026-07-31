@@ -26,6 +26,7 @@ public class CounterpartyServiceTest
         public bool ReturnOpenCashDrawer { get; set; } = true;
         public bool ReturnPrintReceipt { get; set; } = true;
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+        public string PhoneFormatId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged { add { } remove { } }
         public void Save() { }
     }
