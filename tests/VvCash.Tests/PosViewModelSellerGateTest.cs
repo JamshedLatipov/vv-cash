@@ -649,26 +649,96 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void AddToCart_SecondItemMidReceipt_NeverInterruptsEvenWhileSessionRemainsStale()
+    public void AddToCart_NobodyEverConfirms_KeepsAskingOnEveryItem()
     {
-        // Three items rung up by the same person must ask once, not once per item. Nobody
-        // ever completes the overlay in this test (Current stays null throughout), so per
-        // the real SellerSession.IsStale rule the session is stale for the whole test —
-        // Touch() alone can never clear that. This is exactly the scenario that proves the
-        // mid-receipt guard is doing real work: the gate must still not fire a second time,
-        // because it is gated on the cart being empty, not on staleness.
+        // This test used to assert the opposite — that a second item must NOT re-ask,
+        // because the gate was guarded on an empty cart. It was written to protect "a
+        // receipt being rung up by one person asks once, not once per item", but its own
+        // setup never confirms anyone, so what it actually pinned was the dead end: the
+        // ask is not modal to AddToCart, the product lands whether or not the overlay was
+        // answered, and that non-empty cart then suppressed every later ask. A cashier who
+        // dismissed the overlay could not get it back, and once Pay() started refusing
+        // without a seller there was no way forward from the catalog at all.
+        //
+        // The guarantee it was reaching for is real and still holds — it just needs
+        // somebody actually confirmed to be the scenario it claims to be. That is
+        // AddToCart_OnceSomebodyIsConfirmed_NeverAsksAgainMidReceipt above.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.TimedOut = true;
         var raisedCount = 0;
         vm.SellerSwitchRequested += (s, e) => raisedCount++;
 
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m)); // cart was empty -> gate fires
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
         Assert.Equal(1, raisedCount);
         Assert.True(deps.SellerSession.IsStale); // Touch() cannot clear this while Current is still null
 
-        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m)); // cart is non-empty -> gate must not fire again
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
 
-        Assert.Equal(1, raisedCount);
+        Assert.Equal(2, raisedCount);
+    }
+
+    [Fact]
+    public void AddToCart_AfterTheAskWasDismissed_AsksAgainOnTheNextProduct()
+    {
+        // The dead end reported from the floor. The ask is not modal to AddToCart: it
+        // raises the overlay and then adds the product anyway, so dismissing the overlay
+        // leaves nobody confirmed AND a non-empty cart. The gate's own empty-cart guard
+        // then reads that cart as "receipt already in progress" and stays silent for
+        // every later product — the cashier sees the overlay once, dismisses it (by
+        // accident or on purpose), and can never get it back by scanning. Harmless while
+        // Pay() still paid; a dead end now that Pay() refuses without a seller.
+        using var vm = CreateViewModel(out var deps);
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        Assert.Equal(1, raised);
+
+        // Dismissing the overlay is a no-op on the session — SellerSwitchViewModel.Cancel
+        // deliberately leaves Current exactly as it was — so this is the whole simulation.
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Single(deps.CartService.Items); // the product landed regardless
+
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
+
+        Assert.Equal(2, raised);
+    }
+
+    [Fact]
+    public void AddToCart_OnceSomebodyIsConfirmed_NeverAsksAgainMidReceipt()
+    {
+        // The other half of the rule, and the reason the fix above cannot simply be "ask
+        // on every add": a receipt being rung up by someone who already confirmed must
+        // never be interrupted, however many items it has.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
+        vm.AddToCartCommand.Execute(MakeProduct("p3", 7m));
+
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
+    public void AddToCart_ConfirmedSellerButIdleExpired_StillAsksAtTheStartOfTheNextReceipt()
+    {
+        // The idle timeout must keep working for the case it exists for: somebody
+        // confirmed, then walked away long enough for the session to go stale, and the
+        // next person starts a fresh receipt. Current is non-null here, so a gate that
+        // only asked when nobody was confirmed would credit that receipt to whoever
+        // walked away — exactly the misattribution the timeout exists to prevent.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        deps.SellerSession.TimedOut = true;
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.Equal(1, raised);
     }
 
     [Fact]
@@ -1712,7 +1782,7 @@ public class PosViewModelSellerGateTest
         // a single call. The gate must still fire at most once, not once per step.
         using var vm = CreateViewModel(out var deps);
         // Cart starts with an item from a receipt already in progress under a stale
-        // session (mirrors AddToCart_SecondItemMidReceipt_NeverInterruptsEvenWhileSessionRemainsStale:
+        // session (mirrors AddToCart_NobodyEverConfirms_KeepsAskingOnEveryItem:
         // Touch() alone can never clear staleness while Current stays null).
         vm.AddToCartCommand.Execute(MakeProduct("p-current", 5m));
         Assert.True(deps.SellerSession.IsStale);
