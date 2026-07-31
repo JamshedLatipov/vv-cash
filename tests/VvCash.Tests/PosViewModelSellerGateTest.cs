@@ -2158,4 +2158,54 @@ public class PosViewModelSellerGateTest
 
         Assert.Same(seller, deps.SellerSession.Current);
     }
+
+    [Fact]
+    public void ClearCart_ClearsCurrentSeller()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void AddToCart_AfterReceiptEnded_AsksAgainWithoutWaitingOutTheIdleTimeout()
+    {
+        // The whole point of the reset: the idle clock has NOT elapsed (AddToCart's own
+        // Touch() just reset it), and the gate must still fire for the next receipt.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.ClearCartCommand.Execute(null);
+        Assert.False(deps.SellerSession.TimedOut);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 10m));
+
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void ClearCart_WithNobodyConfirmed_IsANoOp_RaisesNoCurrentChanged()
+    {
+        // The seller-switching-off case: nobody ever becomes Current there, and the reset
+        // must degrade to nothing rather than churn the chip through CurrentChanged.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        var chipChanges = 0;
+        vm.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(PosViewModel.SellerChipText)) chipChanges++;
+        };
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Equal(0, chipChanges);
+    }
 }

@@ -1220,6 +1220,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ClearActivePromo();
         _approvedById = null;
         _ = _customerDisplayService.ClearAsync();
+
+        // Only this command — the cashier deliberately dropping the receipt. The
+        // internal _cartService.ClearCart() calls (park, auto-park inside
+        // ResumeParkedSale) are mid-operation, not the end of one, and must not reset.
+        EndReceipt();
     }
 
     [RelayCommand]
