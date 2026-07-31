@@ -232,6 +232,26 @@ public class CustomerSearchViewModelTest
         Assert.False(vm.HasNoResults);
     }
 
+    /// <summary>«Нет соединения» от прошлого поиска — не факт о поиске, которого
+    /// не было. Очистка строки убирает и его. Отдельным тестом, а не проверкой в
+    /// ClearingQueryAfterSearch_DropsEmptyState: там поиск удачен и ErrorMessage
+    /// никто не выставлял, так что проверка прошла бы и без самой правки.</summary>
+    [Fact]
+    public async Task ClearingQueryAfterFailure_DropsTheError()
+    {
+        var harness = new Harness();
+        harness.Service.Results = null;
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+        Assert.NotNull(vm.ErrorMessage);
+
+        vm.SearchQuery = "   ";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.ErrorMessage);
+    }
+
     [Fact]
     public async Task CreateCustomer_PassesSearchQueryAsPrefill()
     {
