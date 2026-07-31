@@ -790,22 +790,56 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void OpenSellerSwitch_MidReceipt_WithdrawsSignOut()
+    public void OpenSellerSwitch_MidReceipt_StillGrantsSignOut()
     {
-        // The same tap, but with an item already rung up: CanEndSellerSession is false,
-        // so the manual open must withdraw the permission too, not just the two
-        // automatic gates — proves this reads the live cart state rather than always
-        // granting it.
+        // This test used to assert the opposite. Withdrawing sign-out mid-receipt rested
+        // on one stated premise: "AddToCart's gate only re-asks on an EMPTY cart, so
+        // dropping the seller with items still in the cart would leave the rest of that
+        // receipt with nobody confirmed and nothing to re-prompt."
+        //
+        // That premise no longer holds. The gate re-asks on every add while nobody is
+        // confirmed, cart empty or not, and Pay() refuses outright without a seller — so
+        // a receipt whose seller was dropped mid-way re-prompts on the next item and
+        // cannot be paid unattributed either way. With the premise gone the restriction
+        // only cost the cashier the one control they need: the cart is almost never empty
+        // at the moment somebody wants to stop selling.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(new SellerInfo { Id = "s0", FirstName = "Prior", LastName = "Seller" });
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        Assert.NotEmpty(deps.CartService.Items); // the premise this used to turn on
         SellerSwitchRequest? request = null;
         vm.SellerSwitchRequested += (s, e) => request = e;
 
         vm.OpenSellerSwitchCommand.Execute(null);
 
         Assert.NotNull(request);
-        Assert.False(request!.CanSignOut);
+        Assert.True(request!.CanSignOut);
+    }
+
+    [Fact]
+    public void SignOutMidReceipt_NextItemReAsks_AndPayStillRefuses()
+    {
+        // What makes granting sign-out mid-receipt safe, rather than a hole: the receipt
+        // left behind cannot quietly finish under nobody's name. The very next item
+        // re-asks, and Pay() refuses regardless. Without both of these the old empty-cart
+        // restriction would still be earning its keep.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s0"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        deps.SellerSession.Clear(); // what SellerSwitchViewModel.SignOutSeller does
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
+        Assert.Equal(1, raised); // re-asked despite the cart being non-empty
+
+        var navigated = 0;
+        vm.NavigationRequest = _ => navigated++;
+        vm.PayCommand.Execute(null);
+
+        Assert.Equal(0, navigated);
+        Assert.Null(deps.ExpenseDocumentService.LastRequest);
     }
 
     // ---------------------------------------------------------------------------------

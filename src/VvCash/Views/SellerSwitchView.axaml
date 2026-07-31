@@ -114,10 +114,11 @@
                     <!-- Manual counterpart to the automatic end-of-receipt reset (see
                          PosViewModel.EndReceipt / CanEndSellerSession): lets the cashier
                          explicitly say "nobody is selling now" without switching to
-                         someone else. CanSignOut is false in approval mode, while the
-                         cart still has items (the caller's canSignOut permission, sourced
-                         from CanEndSellerSession), or while nobody is confirmed yet —
-                         nothing to sign out of. OutlinedButton matches the same
+                         someone else. CanSignOut is false in approval mode, when the
+                         overlay was opened by an automatic gate rather than by tapping
+                         the seller chip, or while nobody is confirmed yet — nothing to
+                         sign out of. A non-empty cart no longer withholds it; see
+                         PosViewModel.OpenSellerSwitch. OutlinedButton matches the same
                          secondary-action style used for dismissal controls elsewhere in
                          this app's modals (e.g. ParkedSalesWindow's "Skip"). -->
                     <Button Classes="OutlinedButton" HorizontalAlignment="Center"

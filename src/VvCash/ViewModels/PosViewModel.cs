@@ -370,15 +370,26 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         // The one raise site allowed to grant sign-out (see SellerSwitchRequest's own
         // remarks): tapping the chip does not itself add anything to the cart, unlike
-        // AddToCart/ResumeParkedSale below. CanEndSellerSession read right now is accurate
-        // for this instant — it is not a guarantee that the cart stays empty for as long
-        // as the overlay ends up showing: HandleBarcodeAsync awaits a product lookup
-        // before posting AddToCart, so a scan already in flight before this tap could
-        // still land afterwards. PosView.axaml.cs's keyboard guard (see
-        // IsSellerSwitchOverlayVisible) is what closes the direct route of a scan
-        // reaching the cart while the overlay is up; this comment is only about what this
-        // one read of CanEndSellerSession itself promises.
-        SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(CanEndSellerSession));
+        // AddToCart/ResumeParkedSale below, so the permission it grants stays true for as
+        // long as the overlay is up.
+        //
+        // Granted outright rather than from CanEndSellerSession. Withdrawing it on a
+        // non-empty cart rested on one premise, stated where the rule was written: that
+        // AddToCart's gate only re-asks on an EMPTY cart, so dropping the seller
+        // mid-receipt would leave the rest of it with nobody confirmed and nothing to
+        // re-prompt. That premise is gone — the gate now re-asks on every add while
+        // nobody is confirmed regardless of what is in the cart, and Pay() refuses
+        // outright without a seller, so a receipt whose seller was dropped mid-way
+        // re-prompts on the next item and cannot be paid unattributed either way (see
+        // SignOutMidReceipt_NextItemReAsks_AndPayStillRefuses).
+        //
+        // What the restriction did cost was the only control that does the job: the cart
+        // is hardly ever empty at the moment somebody wants to stop selling, so in
+        // practice the button was never there when it was needed. SellerSwitchViewModel
+        // still hides it whenever there is nobody to sign out of (Current == null) and in
+        // approval mode — see CanSignOut — so this grants permission, it does not force
+        // the control on screen.
+        SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: true));
     }
 
     [RelayCommand]
@@ -550,25 +561,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         LogoutRequested?.Invoke(this, explanation);
     }
 
-    /// <summary>True when the cart has no items right now — the exact condition
-    /// <see cref="EndReceipt"/>'s own guard checks below, exposed here for the manual
-    /// counterpart to that automatic reset: the seller-switch overlay's "stop selling"
-    /// control (see <see cref="SellerSwitchViewModel.CanSignOut"/>) must never be offered
-    /// mid-receipt, for the same reason EndReceipt itself refuses to fire then —
-    /// AddToCart's gate only re-asks who is selling on an EMPTY cart, so dropping the
-    /// seller with items still in the cart would leave the rest of that receipt with
-    /// nobody confirmed and nothing to re-prompt.
+    /// <summary>True when no receipt is in progress — i.e. the cart is empty. The
+    /// condition <see cref="EndReceipt"/> guards on, named so that guard reads as the rule
+    /// it is rather than as a bare collection check.
     ///
-    /// A momentary snapshot, not a durable guarantee: only <see cref="OpenSellerSwitch"/>
-    /// (the manual chip tap, which adds nothing to the cart itself) may read this and pass
-    /// it through <see cref="SellerSwitchRequest.CanSignOut"/> — <see cref="AddToCart"/>
-    /// and <see cref="ResumeParkedSale"/> both observe the cart empty for the same instant
-    /// this property would report true, but only because they are each about to fill it;
-    /// see <see cref="SellerSwitchRequest"/>'s remarks for the bug that reading this at
-    /// those raise sites caused. PosViewModel still has no reason to know
-    /// SellerSwitchViewModel exists — App.axaml.cs forwards whatever value the raising
-    /// method already decided, via <see cref="SellerSwitchRequest.CanSignOut"/>, rather
-    /// than reading this property itself.</summary>
+    /// No longer gates the seller-switch overlay's "stop selling" control. It used to, on
+    /// the premise that AddToCart's gate only re-asks who is selling on an EMPTY cart, so
+    /// dropping the seller mid-receipt would strand the rest of that receipt with nobody
+    /// confirmed and nothing to re-prompt. AddToCart now re-asks on every add while nobody
+    /// is confirmed, and <see cref="Pay"/> refuses without a seller outright, so that
+    /// premise no longer holds and the restriction only withheld the control at the one
+    /// moment it was wanted — see <see cref="OpenSellerSwitch"/>.
+    ///
+    /// EndReceipt's own use of it is unaffected by that change and stays: it is about not
+    /// treating a returns/exchange dialog closing as the end of a receipt that is still
+    /// being rung up, which has nothing to do with who may sign out.</summary>
     public bool CanEndSellerSession => !_cartService.Items.Any();
 
     /// <summary>Every finished operation is meant to funnel through here — a successful
@@ -586,20 +593,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// Current, and SellerSession.Clear() returns early when Current is already null, so
     /// this degrades to a no-op on its own.
     ///
-    /// Guarded on an empty cart: the returns/exchange dialogs are separate windows that
-    /// never touch the POS cart, so a dialog can close having booked a document while the
-    /// current receipt is still mid-ring — clearing here would leave the rest of that
-    /// receipt with nobody confirmed and AddToCart's gate re-asking only on an empty cart,
-    /// so nothing would ever re-prompt. Pay and ClearCart both empty the cart themselves
-    /// before calling this, so the guard is a no-op for them.</summary>
+    /// Guarded on <see cref="CanEndSellerSession"/>: the returns/exchange dialogs are
+    /// separate windows that never touch the POS cart, so a dialog can close having booked
+    /// a document while the current receipt is still mid-ring. Treating that as the end of
+    /// a receipt would drop the seller out from under a sale still being rung up and make
+    /// the cashier re-confirm mid-receipt for something that was never part of it. Pay and
+    /// ClearCart both empty the cart themselves before calling this, so the guard is a
+    /// no-op for them.</summary>
     private void EndReceipt()
     {
-        // Never mid-receipt: a returns/exchange dialog can be opened over a cart that is
-        // still being rung up, and AddToCart's gate only re-asks on an EMPTY cart — so
-        // clearing here would leave the rest of that receipt with nobody confirmed and
-        // nothing to prompt. Pay and ClearCart both empty the cart before calling this,
-        // so the guard is a no-op for them.
-        if (_cartService.Items.Any()) return;
+        if (!CanEndSellerSession) return;
         _sellerSession.Clear();
     }
 
