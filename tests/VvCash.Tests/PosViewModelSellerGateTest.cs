@@ -348,10 +348,16 @@ public class PosViewModelSellerGateTest
     {
         public DocumentRequest? LastRequest { get; private set; }
 
+        /// <summary>What CreateExpenseDocumentAsync reports back — defaults to success
+        /// (matching prior behaviour). The end-of-receipt tests flip it to false to
+        /// exercise the failed-payment branch, where the seller must survive so a retry
+        /// doesn't demand a fresh PIN.</summary>
+        public bool CreateResult { get; set; } = true;
+
         public Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
         {
             LastRequest = request;
-            return Task.FromResult(true);
+            return Task.FromResult(CreateResult);
         }
 
         public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
@@ -2091,5 +2097,59 @@ public class PosViewModelSellerGateTest
         // price, so reporting the register's stale cached price would flag every honest
         // sale and bury the drift the check exists to catch.
         Assert.Equal(90m, deps.ExpenseDocumentService.LastRequest!.Products[0].SellPrice);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // End of receipt: a finished operation drops the confirmed seller outright, so the
+    // next receipt cannot be rung up under the previous person's name inside the idle
+    // window. See docs/superpowers/specs/2026-07-31-seller-reset-on-receipt-end-design.md.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Pay_OnSuccess_ClearsCurrentSeller()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void Pay_WhenDocumentCreationFails_KeepsCurrentSeller()
+    {
+        // A failed payment is not the end of a receipt: the cashier is expected to try
+        // again, and demanding a fresh PIN for a retry would punish the wrong person.
+        using var vm = CreateViewModel(out var deps);
+        deps.ExpenseDocumentService.CreateResult = false;
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Same(seller, deps.SellerSession.Current);
     }
 }

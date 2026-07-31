@@ -518,6 +518,23 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         LogoutRequested?.Invoke(this, explanation);
     }
 
+    /// <summary>Single choke point for "this receipt is over — nobody is confirmed any
+    /// more". Called from every place an operation actually finishes: a successful
+    /// payment, the cashier manually clearing the receipt, and a returns/exchange dialog
+    /// that genuinely booked a document. The idle timeout stays as a second line of
+    /// defence for a receipt abandoned halfway; this one closes the window where the next
+    /// person starts ringing up within 90 seconds and their sale is silently credited to
+    /// whoever sold last (see the 2026-07-31 spec).
+    ///
+    /// Kept as one method rather than four inline Clear() calls for the same reason
+    /// PerformSignOut above is one method: the next end-of-receipt path added to this
+    /// class must have one obvious place to hook into, or it will quietly skip the reset.
+    ///
+    /// No IsSellerSwitchEnabled guard on purpose: with switching off nobody ever becomes
+    /// Current, and SellerSession.Clear() returns early when Current is already null, so
+    /// this degrades to a no-op on its own.</summary>
+    private void EndReceipt() => _sellerSession.Clear();
+
     [RelayCommand]
     private async Task FullReinitializeAsync()
     {
@@ -1757,6 +1774,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         SelectedCustomer = null;
                         ClearActivePromo();
                         _approvedById = null;
+                        // The receipt is done and the document (posted or queued offline)
+                        // already carries this seller's id — from here on nobody is
+                        // confirmed. Only on this success branch: see EndReceipt.
+                        EndReceipt();
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)
