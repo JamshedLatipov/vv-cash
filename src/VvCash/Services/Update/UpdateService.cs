@@ -29,6 +29,14 @@ public sealed class UpdateService : IUpdateService
     private readonly IAppVersionProvider _versionProvider;
     private readonly string _downloadDirectory;
 
+    /// <summary>Serialises the whole body of <see cref="DownloadAsync"/>. Every call
+    /// starts by wiping <see cref="_downloadDirectory"/>: without this, two overlapping
+    /// calls — a double click, or a retry racing the previous attempt's own cleanup —
+    /// could have the second delete the first's fully downloaded, hash-verified file
+    /// out from under it. Windows file locking keeps that from corrupting anything, but
+    /// the cashier would see an unexplained failure on what should have succeeded.</summary>
+    private readonly SemaphoreSlim _downloadLock = new(1, 1);
+
     public UpdateService(
         HttpClient httpClient,
         IAppVersionProvider versionProvider,
@@ -123,18 +131,46 @@ public sealed class UpdateService : IUpdateService
 
     public async Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
     {
+        await _downloadLock.WaitAsync(ct);
+        try
+        {
+            return await DownloadCoreAsync(info, progress, ct);
+        }
+        finally
+        {
+            _downloadLock.Release();
+        }
+    }
+
+    private async Task<string?> DownloadCoreAsync(UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
+    {
         // Clear leftovers here rather than in CheckAsync: the check runs on a timer, and
         // clearing there could delete a download the cashier started minutes ago.
         ClearDownloadDirectory();
         Directory.CreateDirectory(_downloadDirectory);
 
-        var target = Path.Combine(_downloadDirectory, "VvCashInstaller.exe");
+        // An unpredictable name rather than a fixed one: the installer runs elevated
+        // (PrivilegesRequired=admin), so between the hash check below passing and the
+        // caller handing this path to Process.Start, a non-elevated process running as
+        // the same user could otherwise sit on a known path and swap the file in —
+        // turning a same-user foothold into an elevated one. A random name means an
+        // attacker has no path to pre-plant a race against. It narrows that window, it
+        // does not close it; closing it fully would mean holding a file handle open
+        // across the API boundary to the caller, which was judged not worth the
+        // complexity here. ClearDownloadDirectory above still wipes the whole directory
+        // on every attempt, so these random names do not accumulate on disk.
+        var target = Path.Combine(_downloadDirectory, $"VvCashInstaller-{Guid.NewGuid():N}.exe");
         try
         {
             using (var response = await _httpClient.GetAsync(
                        info.Url, HttpCompletionOption.ResponseHeadersRead, ct))
             {
-                if (!response.IsSuccessStatusCode) return null;
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine(
+                        $"[UpdateService] Download failed: HTTP {(int)response.StatusCode} {response.StatusCode}");
+                    return null;
+                }
 
                 var total = response.Content.Headers.ContentLength ?? info.SizeBytes;
                 await using var source = await response.Content.ReadAsStreamAsync(ct);
@@ -147,33 +183,56 @@ public sealed class UpdateService : IUpdateService
                 {
                     await destination.WriteAsync(buffer.AsMemory(0, read), ct);
                     written += read;
-                    if (total > 0) progress?.Report((double)written / total);
+                    // total can be stale (a manifest sizeBytes that lags the published
+                    // artifact) or absent from the response (a CDN answering chunked
+                    // with no Content-Length, falling back to that same sizeBytes).
+                    // Clamp so a bound Avalonia ProgressBar never receives a value past
+                    // its Maximum.
+                    if (total > 0) progress?.Report(Math.Min(1.0, (double)written / total));
                 }
             }
 
-            if (!await HashMatchesAsync(target, info.Sha256, ct))
+            var actualHash = await HashOfAsync(target, ct);
+            if (!string.Equals(actualHash, info.Sha256, StringComparison.OrdinalIgnoreCase))
             {
+                // The security-relevant event: an artifact fetched over an HTTPS
+                // connection to the pinned host does not match what the manifest
+                // published. Logged distinctly, with both hashes, so this is
+                // identifiable after the fact and not indistinguishable from a
+                // dropped connection or a full disk.
+                Console.WriteLine(
+                    $"[UpdateService] Hash mismatch: expected {info.Sha256}, got {actualHash}. Discarding download.");
                 TryDelete(target);
                 return null;
             }
 
             return target;
         }
-        catch
+        catch (OperationCanceledException)
         {
-            // Cancelled, connection dropped, disk full. A partially written installer
-            // must never survive — the next attempt starts clean.
+            // The ordinary case: the cashier pressed Cancel. Not a failure worth
+            // alarming over, but the partial file still must not survive.
+            Console.WriteLine("[UpdateService] Download cancelled.");
+            TryDelete(target);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Connection dropped, disk full, a file that HashOfAsync could not open —
+            // something unexpected. A partially written installer must never survive:
+            // the next attempt starts clean.
+            Console.WriteLine($"[UpdateService] Download failed: {ex.GetType().Name}: {ex.Message}");
             TryDelete(target);
             return null;
         }
     }
 
-    private static async Task<bool> HashMatchesAsync(string path, string expected, CancellationToken ct)
+    private static async Task<string> HashOfAsync(string path, CancellationToken ct)
     {
         await using var stream = File.OpenRead(path);
         using var sha = System.Security.Cryptography.SHA256.Create();
         var hash = await sha.ComputeHashAsync(stream, ct);
-        return string.Equals(Convert.ToHexString(hash), expected, StringComparison.OrdinalIgnoreCase);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private void ClearDownloadDirectory()

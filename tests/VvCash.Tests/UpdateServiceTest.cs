@@ -308,9 +308,74 @@ public class UpdateServiceTest
         }
     }
 
+    [Fact]
+    public async Task DownloadProgressNeverExceedsOneWhenSizeIsUnderstated()
+    {
+        // A manifest sizeBytes that is stale/understated, combined with a response
+        // that carries no Content-Length header (as a CDN answering chunked would):
+        // total falls back to the understated sizeBytes below, so written/total can
+        // climb past 1.0 without a clamp. An Avalonia ProgressBar bound above its
+        // Maximum misbehaves.
+        const string payload = "pretend this is an installer, a bit longer this time";
+        var understatedSize = payload.Length / 2;
+        var directory = Path.Combine(Path.GetTempPath(), "VvCashUpdateTest", Guid.NewGuid().ToString("N"));
+        var handler = new NoContentLengthHandler(payload);
+        var service = new UpdateService(new HttpClient(handler), new FakeVersionProvider("1.0.0"), directory);
+        try
+        {
+            var reported = new System.Collections.Generic.List<double>();
+            var path = await service.DownloadAsync(
+                InfoFor(Sha256Of(payload), understatedSize),
+                new Progress<double>(p => { lock (reported) reported.Add(p); }),
+                CancellationToken.None);
+
+            Assert.NotNull(path);
+            await Task.Delay(50);
+            lock (reported)
+            {
+                Assert.NotEmpty(reported);
+                Assert.All(reported, p => Assert.True(p <= 1.0, $"progress {p} exceeded 1.0"));
+                Assert.Contains(reported, p => Math.Abs(p - 1.0) < 0.0001);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private sealed class ThrowingHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
             => throw new HttpRequestException("no route to host");
+    }
+
+    /// <summary>Answers with a response carrying no Content-Length header at all, the
+    /// way a chunked-transfer response from a CDN in front of proffi.io could. Plain
+    /// StringContent (as used by <see cref="StubHttpMessageHandler"/>) always computes
+    /// one, so this exists to force the manifest's sizeBytes fallback in
+    /// DownloadAsync.</summary>
+    private sealed class NoContentLengthHandler : HttpMessageHandler
+    {
+        private readonly string _payload;
+        public NoContentLengthHandler(string payload) => _payload = payload;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new NoLengthContent(_payload) });
+
+        private sealed class NoLengthContent : HttpContent
+        {
+            private readonly byte[] _bytes;
+            public NoLengthContent(string content) => _bytes = System.Text.Encoding.UTF8.GetBytes(content);
+
+            protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+                => stream.WriteAsync(_bytes, 0, _bytes.Length);
+
+            protected override bool TryComputeLength(out long length)
+            {
+                length = 0;
+                return false;
+            }
+        }
     }
 }
