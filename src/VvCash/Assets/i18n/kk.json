@@ -182,6 +182,7 @@
   "ConfirmWithPin": "PIN арқылы растаңыз",
   "NoSellerWithRight": "Бұл операцияға құқығы бар сатушы жоқ — әкімшіге хабарласыңыз",
   "SellerRosterEmpty": "Сатушылар тізімі бос — тізімді жаңартыңыз немесе бұл кассаға сатушыларды тағайындаңыз",
+  "SignOutSeller": "Ешкім сатпайды",
   "CurrentSeller": "Сатушы",
   "SellerVerificationFailed": "PIN-ді тексеру мүмкін болмады. Қайта көріңіз",
   "CreatePin": "PIN ойлап табыңыз",

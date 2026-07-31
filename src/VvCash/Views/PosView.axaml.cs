@@ -90,8 +90,50 @@ public partial class PosView : UserControl
         return true;
     }
 
+    /// <summary>True while the modal seller-switch overlay is actually showing. Its PIN
+    /// pad is touch-only — SellerSwitchView.axaml has no KeyBinding, no KeyDown handler,
+    /// no code-behind at all — so nothing about the overlay itself stops keyboard input
+    /// from reaching whatever's behind the scrim; every keyboard entry point in this file
+    /// must check this before doing anything else. Checked once at the top of each
+    /// handler rather than per-branch: an earlier version guarded only the barcode-Enter
+    /// branch inside <see cref="OnGlobalKeyDown"/>, which left F2 (moves focus into the
+    /// search box), F4 (fires PayCommand), Space/Enter on a focused product tile, and
+    /// <see cref="OnSearchBoxKeyDown"/>'s own Enter-triggered scan all still reaching
+    /// straight through.
+    ///
+    /// Marking the event Handled at the TopLevel also swallows keyboard input aimed at
+    /// the overlay itself, which lives inside that same tree: Tab navigation and
+    /// Space/Enter activation of the seller tiles, the PIN digits and the back/close
+    /// controls all stop working while it is up. That costs nothing today — the pad is
+    /// touch-only, so a switch could never be completed from the keyboard anyway — and
+    /// Escape, the overlay's one documented keyboard exit, is deliberately excluded from
+    /// the guard and still dismisses it.</summary>
+    private bool IsSellerSwitchOverlayVisible()
+        => DataContext is PosViewModel vm && vm.SellerSwitchViewModel is { IsVisible: true };
+
     private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
     {
+        // Same guard, same reason, as the top of OnGlobalKeyDown: the overlay does not
+        // capture focus, so a SearchBox that already had focus when the overlay opened —
+        // or any path that reaches this handler without passing back through the
+        // TopLevel's Tunnel handler below — must not be allowed to search or scan behind
+        // the scrim. Escape is excluded so this handler's own Escape branch below (clear
+        // the search box) keeps working exactly as it did before this guard existed;
+        // OnGlobalKeyDown's own Escape branch, which dismisses the overlay itself, runs
+        // first regardless (Tunnel fires before this Bubble-routed handler) and already
+        // marks the event Handled when it acts, so the two never double-fire.
+        if (e.Key != Key.Escape && IsSellerSwitchOverlayVisible())
+        {
+            // Drop whatever was mid-flight rather than leave it to replay itself the
+            // moment the overlay closes and the next Enter lands — SearchQuery is
+            // two-way bound to SearchBox (UpdateSourceTrigger=PropertyChanged), so
+            // digits already sitting there don't clear themselves just because this
+            // handler stops acting on them.
+            if (DataContext is PosViewModel gateVm) gateVm.SearchQuery = string.Empty;
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Enter)
         {
             if (sender is TextBox textBox && !string.IsNullOrWhiteSpace(textBox.Text))
@@ -123,6 +165,25 @@ public partial class PosView : UserControl
 
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        // The seller-switch overlay owns all keyboard input while it's showing, except
+        // Escape (handled in its own branch below, where it dismisses the overlay).
+        // See IsSellerSwitchOverlayVisible for why this has to be one check at the very
+        // top rather than repeated per-branch.
+        if (e.Key != Key.Escape && IsSellerSwitchOverlayVisible())
+        {
+            // Same reasoning as OnSearchBoxKeyDown's copy of this guard: drop any
+            // mid-flight scan/search state instead of leaving it to silently replay once
+            // the overlay closes. _barcodeBuffer is this handler's own buffer (see the
+            // scanner logic further down) — SearchQuery never accumulates through it
+            // directly, but is cleared here too as the same defensive belt-and-suspenders
+            // OnSearchBoxKeyDown applies, since a scan can still be mid-flight there
+            // (e.g. focus already in the search box before the overlay opened).
+            _barcodeBuffer = string.Empty;
+            if (DataContext is PosViewModel gateVm) gateVm.SearchQuery = string.Empty;
+            e.Handled = true;
+            return;
+        }
+
         // Hotkeys: F2 focus search · F4 pay · Esc clear search
         if (e.Key == Key.F2)
         {
@@ -166,7 +227,9 @@ public partial class PosView : UserControl
             return;
         }
 
-        // Hardware barcode scanner: fast digit bursts terminated by Enter.
+        // Hardware barcode scanner: fast digit bursts terminated by Enter. Unreachable
+        // while the overlay is visible — the guard at the top of this method already
+        // returned — so no overlay check is needed here.
         var now = DateTime.UtcNow;
         var elapsed = (now - _lastKeyTime).TotalMilliseconds;
 

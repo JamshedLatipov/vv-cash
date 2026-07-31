@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using VvCash.Constants;
@@ -17,6 +18,15 @@ public class ReturnsViewModelTest
     {
         public ReturnRequest? LastRequest;
         public string? LastExpenseId;
+
+        /// <summary>What CreateReturnAsync reports back — defaults to success (matching
+        /// prior behaviour); the HasBookedDocument tests flip it to false.</summary>
+        public bool CreateResult = true;
+
+        /// <summary>When set, CreateReturnAsync throws this instead of returning —
+        /// mirrors ExchangeViewModelTest's own fake of the same name.</summary>
+        public Exception? Throw;
+
         public Task<ExpenseListResponse> GetSalesAsync(int page = 1)
             => Task.FromResult(new ExpenseListResponse());
         public Task<ReturnDetailBody> GetReturnableLinesAsync(string expenseId)
@@ -24,7 +34,8 @@ public class ReturnsViewModelTest
         public Task<bool> CreateReturnAsync(string expenseId, ReturnRequest request)
         {
             LastExpenseId = expenseId; LastRequest = request;
-            return Task.FromResult(true);
+            if (Throw != null) throw Throw;
+            return Task.FromResult(CreateResult);
         }
     }
 
@@ -158,5 +169,46 @@ public class ReturnsViewModelTest
         // Same rule as the drawer above: the server's answer wins over the local checkbox.
         Assert.Equal(0, printer.Receipt);
         Assert.Equal(1, printer.Drawer); // the other flag is untouched and still unconfigured -> enabled
+    }
+
+    [Fact]
+    public async Task SubmitReturn_OnSuccess_MarksHasBookedDocument()
+    {
+        // PosViewModel reads this after the modal closes to decide whether the register
+        // just finished an operation and must re-ask who is selling.
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_WhenServerRejects_LeavesHasBookedDocumentFalse()
+    {
+        // Nothing was booked, so opening and closing the screen must not cost a PIN.
+        var svc = new FakeReturnService { CreateResult = false };
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_WhenServiceThrows_LeavesHasBookedDocumentFalse()
+    {
+        // A network failure means we don't even know if the server booked it — SubmitReturn
+        // catches the exception and reports NoConnection, so the flag must stay unset.
+        var svc = new FakeReturnService { Throw = new System.Net.Http.HttpRequestException("connection reset") };
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings());
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasBookedDocument);
     }
 }

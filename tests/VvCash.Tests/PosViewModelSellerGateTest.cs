@@ -31,7 +31,12 @@ namespace VvCash.Tests;
 /// What this file does NOT cover: the seller chip's XAML binding, the SellerSwitchView
 /// overlay actually appearing on screen, or App.axaml.cs's event wiring — none of that is
 /// reachable without a running Avalonia application, so it was verified by reading the XAML/
-/// code-behind, not by an automated test.
+/// code-behind, not by an automated test. Same reason for
+/// PosViewModel.ShowReturnsDialogAsync / OpenExchange reading HasBookedDocument once
+/// ShowDialog returns: both need a live Avalonia Window, which this xunit host never
+/// provides — that wiring was verified by reading, and the flag's own correctness (when it
+/// does and doesn't get set) is covered by ReturnsViewModelTest / ExchangeViewModelTest
+/// instead.
 public class PosViewModelSellerGateTest
 {
     // ---------------------------------------------------------------------------------
@@ -348,10 +353,16 @@ public class PosViewModelSellerGateTest
     {
         public DocumentRequest? LastRequest { get; private set; }
 
+        /// <summary>What CreateExpenseDocumentAsync reports back — defaults to success
+        /// (matching prior behaviour). The end-of-receipt tests flip it to false to
+        /// exercise the failed-payment branch, where the seller must survive so a retry
+        /// doesn't demand a fresh PIN.</summary>
+        public bool CreateResult { get; set; } = true;
+
         public Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
         {
             LastRequest = request;
-            return Task.FromResult(true);
+            return Task.FromResult(CreateResult);
         }
 
         public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
@@ -598,6 +609,28 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
+    public void AddToCart_EmptyCartAndStaleSession_NeverGrantsSignOut()
+    {
+        // Critical fix: AddToCart's gate fires while the cart is still empty by
+        // construction (its own condition requires !_cartService.Items.Any()), but the
+        // product lands one line later — so by the time the overlay is actually showing,
+        // the cart has an item. CanEndSellerSession read at this instant would be true
+        // (the cart genuinely is empty right now) but would be a lie by the time it
+        // matters, which is exactly what let the sign-out button show over a mid-receipt
+        // cart. The event must carry a hard false here regardless of the cart's
+        // momentary state, never PosViewModel.CanEndSellerSession.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.TimedOut = true;
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
+    }
+
+    [Fact]
     public void AddToCart_EmptyCartButSessionNotStale_DoesNotRaise()
     {
         // IsStale is false only once a seller has actually been confirmed (Current != null)
@@ -665,6 +698,43 @@ public class PosViewModelSellerGateTest
         vm.OpenSellerSwitchCommand.Execute(null);
 
         Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void OpenSellerSwitch_WithEmptyCart_GrantsSignOut()
+    {
+        // The manual chip tap is the one raise site allowed to offer sign-out at all —
+        // and only because, unlike AddToCart/ResumeParkedSale, nothing is about to fill
+        // the cart right after this: tapping the chip does not add anything. Grants
+        // permission by reading PosViewModel.CanEndSellerSession at the moment of the
+        // tap, true here since the cart is genuinely (and durably) empty.
+        using var vm = CreateViewModel(out var deps);
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        vm.OpenSellerSwitchCommand.Execute(null);
+
+        Assert.NotNull(request);
+        Assert.True(request!.CanSignOut);
+    }
+
+    [Fact]
+    public void OpenSellerSwitch_MidReceipt_WithdrawsSignOut()
+    {
+        // The same tap, but with an item already rung up: CanEndSellerSession is false,
+        // so the manual open must withdraw the permission too, not just the two
+        // automatic gates — proves this reads the live cart state rather than always
+        // granting it.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "s0", FirstName = "Prior", LastName = "Seller" });
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        vm.OpenSellerSwitchCommand.Execute(null);
+
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
     }
 
     // ---------------------------------------------------------------------------------
@@ -1459,6 +1529,28 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
+    public async Task ResumeParkedSale_SessionStale_NeverGrantsSignOut()
+    {
+        // Same shape as AddToCart_EmptyCartAndStaleSession_NeverGrantsSignOut: the gate
+        // fires while the cart is momentarily empty (either it started empty, or the
+        // auto-park branch above just emptied it), but the parked snapshot's items land
+        // in the cart moments later — so CanEndSellerSession read right now would read
+        // true and be stale by the time it matters. Must be a hard false.
+        using var vm = CreateViewModel(out var deps);
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.NotNull(request);
+        Assert.False(request!.CanSignOut);
+    }
+
+    [Fact]
     public async Task ResumeParkedSale_SessionFreshWithActiveSeller_DoesNotRequestOverlay()
     {
         using var vm = CreateViewModel(out var deps);
@@ -2091,5 +2183,316 @@ public class PosViewModelSellerGateTest
         // price, so reporting the register's stale cached price would flag every honest
         // sale and bury the drift the check exists to catch.
         Assert.Equal(90m, deps.ExpenseDocumentService.LastRequest!.Products[0].SellPrice);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // End of receipt: a finished operation drops the confirmed seller outright, so the
+    // next receipt cannot be rung up under the previous person's name inside the idle
+    // window. See docs/superpowers/specs/2026-07-31-seller-reset-on-receipt-end-design.md.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Pay_OnSuccess_ClearsCurrentSeller()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void Pay_WhenDocumentCreationFails_KeepsCurrentSeller()
+    {
+        // A failed payment is not the end of a receipt: the cashier is expected to try
+        // again, and demanding a fresh PIN for a retry would punish the wrong person.
+        using var vm = CreateViewModel(out var deps);
+        deps.ExpenseDocumentService.CreateResult = false;
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        // The failure branch posts the alert via Dispatcher.UIThread.Post (see the
+        // Revoked-shift-session remarks above). The assertion below doesn't need that
+        // posted state, but leaving a job queued at test end is what the rest of this
+        // file avoids.
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void ClearCart_ClearsCurrentSeller()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void AddToCart_AfterReceiptEnded_AsksAgainWithoutWaitingOutTheIdleTimeout()
+    {
+        // The whole point of the reset: the idle clock has NOT elapsed (AddToCart's own
+        // Touch() just reset it), and the gate must still fire for the next receipt.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.ClearCartCommand.Execute(null);
+        Assert.False(deps.SellerSession.TimedOut);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 10m));
+
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void ClearCart_WithNobodyConfirmed_IsANoOp_RaisesNoCurrentChanged()
+    {
+        // The seller-switching-off case: nobody ever becomes Current there, and the reset
+        // must degrade to nothing rather than churn the chip through CurrentChanged.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        var chipChanges = 0;
+        vm.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(PosViewModel.SellerChipText)) chipChanges++;
+        };
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.Null(deps.SellerSession.Current);
+        Assert.Equal(0, chipChanges);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Manual sign-out gate (2026-07-31 design, manual counterpart to EndReceipt):
+    // CanEndSellerSession mirrors EndReceipt's own guard exactly (see EndReceipt's
+    // remarks) so App.axaml.cs can hand the seller-switch overlay's manual "stop
+    // selling" control the same permission the automatic reset already enforces —
+    // never mid-receipt, since AddToCart's gate only re-asks who is selling on an
+    // EMPTY cart.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void CanEndSellerSession_FalseWithItemsInCart()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.False(vm.CanEndSellerSession);
+    }
+
+    [Fact]
+    public void CanEndSellerSession_TrueOnceCartIsEmptyAgain()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        Assert.False(vm.CanEndSellerSession); // sanity check on the premise
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.True(vm.CanEndSellerSession);
+    }
+
+    [Fact]
+    public void CanEndSellerSession_TrueOnAFreshEmptyCart()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        Assert.True(vm.CanEndSellerSession);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Mid-receipt guard (final-review Finding 1): a returns/exchange dialog is a separate
+    // window that never touches the POS cart, so it can close having booked a document
+    // while the current receipt is still mid-ring — EndReceipt() must not clear the seller
+    // in that case, or the rest of the receipt is left with nobody confirmed and nothing to
+    // re-prompt (AddToCart's gate only fires on an EMPTY cart). See EndReceipt's own remarks
+    // and docs/superpowers/specs/2026-07-31-seller-reset-on-receipt-end-design.md.
+    //
+    // Coverage note: EndReceipt() has exactly four callers. Two of them —
+    // ShowReturnsDialogAsync and OpenExchange, the two the guard actually protects — need a
+    // live Avalonia Window (they no-op silently without a desktop
+    // IClassicDesktopStyleApplicationLifetime on Application.Current), which this xunit host
+    // never provides — see this file's class-level remarks. That leaves no reachable route
+    // to invoke EndReceipt() with a non-empty cart from here, so neither test below can
+    // actually fail without the guard (both already empty the cart, or never call
+    // EndReceipt at all, before the assertion): they document the guard's no-op contract for
+    // the two reachable callers rather than reproducing the dialog bug itself. The dialog
+    // bug fix was verified by reading ShowReturnsDialogAsync/OpenExchange plus manual
+    // reasoning through the guard's condition, not by an automated test — a real regression
+    // test would need an Avalonia.Headless-style host this project does not have.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ClearCart_WithItemsStillInCart_ClearsCurrentSeller()
+    {
+        // ClearCart empties the cart itself before calling EndReceipt(), so the new guard
+        // ("only reset when the cart is empty") is a no-op here regardless of how many
+        // items were sitting in the cart a moment ago — the legitimate reset must still go
+        // through.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 20m));
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.Empty(deps.CartService.Items);
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void Cart_WithItemsStillOpen_NeverClearsTheSellerOnItsOwn()
+    {
+        // The other half of the contract the guard protects, as far as this host can prove
+        // it: simply having items in the cart never drops the confirmed seller by itself —
+        // nothing short of an actual end-of-receipt call (Pay success, ClearCart, or a
+        // dialog that booked a document) does. Contrast with the test above: there, the
+        // seller drops because the cart got emptied, not because items were rung up.
+        using var vm = CreateViewModel(out var deps);
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 20m));
+
+        Assert.Equal(2, deps.CartService.Items.Count);
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Deliberate non-reset points (final-review Finding 2): the design doc's "Точки, где
+    // сброса намеренно нет" names park and auto-park-inside-resume alongside failed payment
+    // (already covered above by Pay_WhenDocumentCreationFails_KeepsCurrentSeller) as points
+    // that must NOT call EndReceipt. These two close that gap.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ConfirmParkSale_KeepsCurrentSeller()
+    {
+        // Parking is a pause, not the end of the seller's work — ResumeParkedSale's own
+        // gate re-asks if the session has since gone stale, so EndReceipt() must never be
+        // reached from here.
+        using var vm = CreateViewModel(out var deps);
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_AutoParkingAnInProgressCart_KeepsCurrentSeller()
+    {
+        // The auto-park branch inside ResumeParkedSale (an in-progress cart gets parked
+        // before the requested one loads) is the middle of one operation, not the end of
+        // one — same reasoning as the explicit park command above.
+        using var vm = CreateViewModel(out var deps);
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+        vm.AddToCartCommand.Execute(MakeProduct("p-current", 5m));
+
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Exchange seller gate (follow-up to the whole-branch review): OpenExchange snapshots
+    // _sellerSession.Current?.Id into ExchangeViewModel's constructor, and that id is what
+    // ends up stamped as seller_id on the exchange's replacement-sale document. Before this
+    // branch a confirmed seller survived between receipts, so an exchange usually carried
+    // someone; this branch made EndReceipt() clear Current after every completed operation,
+    // and OpenExchange had no seller gate of its own — so the ordinary "customer pays, next
+    // customer wants an exchange" flow opened the exchange screen with nobody confirmed and
+    // silently credited the resulting sale to the shift owner, with nothing on screen saying
+    // so. Fixed by applying the same start-of-receipt gate AddToCart/ResumeParkedSale
+    // already use, here as well — see OpenExchange's own remarks for why this is a
+    // SellerSwitchRequested gate, not a RefundApprovalRequested/CloseShiftApprovalRequested
+    // one.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void OpenExchange_WithNobodyConfirmed_RaisesSellerSwitchRequested()
+    {
+        using var vm = CreateViewModel(out var deps);
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenExchangeCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+    }
+
+    [Fact]
+    public void OpenExchange_WithSellerConfirmed_DoesNotRaise()
+    {
+        // Application.Current is null in this test host (see the class-level remarks), so
+        // once the gate passes the method returns without opening any window — the same
+        // limitation ShowReturnsDialogAsync/OpenExchange already live with here; this
+        // assertion is about the gate, not the dialog.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenExchangeCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+    }
+
+    [Fact]
+    public void OpenExchange_WithSellerSwitchingDisabled_DoesNotRaise()
+    {
+        // Same seller-switch-off exception as everywhere else: with no separate sellers to
+        // confirm, and the overlay itself hidden along with the flag, the gate must not
+        // fire regardless of who (if anyone) is Current.
+        using var vm = CreateViewModel(out var deps, d => d.Features.Set(CashFeatureCodes.SellerSwitch, false));
+        var raisedCount = 0;
+        vm.SellerSwitchRequested += (s, e) => raisedCount++;
+
+        vm.OpenExchangeCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
     }
 }

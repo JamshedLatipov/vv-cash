@@ -48,9 +48,14 @@ public partial class App : Application
             // MainViewModel.NavigateTo because the payment flow navigates away and back
             // to the *same* PosViewModel, which must survive that round-trip.)
             PosViewModel? activePosVm = null;
+            // SellerSwitchViewModel now subscribes to ISellerSession.CurrentChanged too
+            // (to keep CanSignOut live — see its own remarks), so it needs the exact same
+            // dispose-before-replace treatment as activePosVm above, for the same reason.
+            SellerSwitchViewModel? activeSellerSwitchVm = null;
             void NavigateToPos()
             {
                 activePosVm?.Dispose();
+                activeSellerSwitchVm?.Dispose();
 
                 var posVm = Services.GetRequiredService<PosViewModel>();
                 activePosVm = posVm;
@@ -61,9 +66,30 @@ public partial class App : Application
                 // SellerSwitchViewModel property; PosViewModel only ever raises
                 // SellerSwitchRequested to ask for it to open, matching how NavigationRequest
                 // decouples PosViewModel from the mechanics of navigation.
-                var sellerSwitchVm = Services.GetRequiredService<SellerSwitchViewModel>();
+                //
+                // Built with ActivatorUtilities.CreateInstance rather than
+                // Services.GetRequiredService<SellerSwitchViewModel>(): the .NET DI
+                // container captures every IDisposable it constructs for its own eventual
+                // disposal, root-provider-lifetime, regardless of whether this code ever
+                // calls Dispose() itself — so GetRequiredService here would keep every
+                // prior instance reachable (just inert) for as long as the app runs,
+                // making activeSellerSwitchVm?.Dispose() above unable to actually release
+                // one. ActivatorUtilities.CreateInstance constructs the instance directly
+                // (still resolving its constructor's own dependencies from Services)
+                // without registering it with the container, so this Dispose() call is
+                // what it looks like: the only thing keeping the prior instance alive
+                // once it stops being referenced here.
+                var sellerSwitchVm = ActivatorUtilities.CreateInstance<SellerSwitchViewModel>(Services);
+                activeSellerSwitchVm = sellerSwitchVm;
                 posVm.SellerSwitchViewModel = sellerSwitchVm;
-                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open();
+                // e.CanSignOut is decided by whichever PosViewModel method raised the
+                // event, at the moment it raised it (see SellerSwitchRequest's own
+                // remarks) — not read here from CanEndSellerSession, because by the time
+                // this handler runs for AddToCart/ResumeParkedSale the cart is about to
+                // gain an item that wasn't there yet when the gate fired. This wiring just
+                // forwards the decision; PosViewModel still never learns
+                // SellerSwitchViewModel exists.
+                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open(e.CanSignOut);
 
                 // Closing a shift without CanCloseShift escalates through the same
                 // overlay, in approval mode (see SellerSwitchViewModel.OpenForApproval).
@@ -244,7 +270,12 @@ public partial class App : Application
         services.AddTransient<LoginViewModel>();
         services.AddTransient<PosViewModel>();
         services.AddTransient<CustomerDisplayViewModel>();
-        services.AddTransient<SellerSwitchViewModel>();
+        // SellerSwitchViewModel is deliberately NOT registered here: NavigateToPos below
+        // builds it with ActivatorUtilities.CreateInstance instead of
+        // GetRequiredService<SellerSwitchViewModel>() specifically so the container never
+        // captures it for its own disposal — see that call site's own remarks. A
+        // registration here would be dead (nothing resolves it through the container) and
+        // would misleadingly suggest the container manages this type's lifetime.
         services.AddSingleton<MainViewModel>();
     }
 }

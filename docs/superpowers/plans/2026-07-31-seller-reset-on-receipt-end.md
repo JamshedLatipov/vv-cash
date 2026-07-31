@@ -4,7 +4,7 @@
 
 **Goal:** Завершённая операция на кассе (успешная оплата, ручная очистка чека, проведённый возврат или обмен) обнуляет текущего продавца, чтобы следующий чек нельзя было пробить под чужим именем, не дожидаясь 90-секундного идл-таймаута.
 
-**Architecture:** Одна приватная точка `PosViewModel.EndReceipt()` зовёт уже существующий `ISellerSession.Clear()`; её вызывают четыре места. Модальные диалоги возврата и обмена сообщают о фактически записанном документе липким свойством `CompletedDocument`, которое `PosViewModel` читает после `await ShowDialog`. Ни `SellerSession`, ни API, ни бэкенд не меняются.
+**Architecture:** Одна приватная точка `PosViewModel.EndReceipt()` зовёт уже существующий `ISellerSession.Clear()`; её вызывают четыре места. Модальные диалоги возврата и обмена сообщают о фактически записанном документе липким свойством `HasBookedDocument`, которое `PosViewModel` читает после `await ShowDialog`. Ни `SellerSession`, ни API, ни бэкенд не меняются.
 
 **Tech Stack:** .NET 8 / C#, Avalonia (MVVM, CommunityToolkit.Mvvm), xUnit, ручные фейки без mock-библиотеки.
 
@@ -17,8 +17,8 @@
 | Файл | Что делает |
 | --- | --- |
 | `src/VvCash/ViewModels/PosViewModel.cs` | новый `EndReceipt()`; вызовы из success-ветки `Pay`, из `ClearCart`, после диалогов возврата и обмена |
-| `src/VvCash/ViewModels/ReturnsViewModel.cs` | новое `CompletedDocument` |
-| `src/VvCash/ViewModels/ExchangeViewModel.cs` | новое `CompletedDocument` |
+| `src/VvCash/ViewModels/ReturnsViewModel.cs` | новое `HasBookedDocument` |
+| `src/VvCash/ViewModels/ExchangeViewModel.cs` | новое `HasBookedDocument` |
 | `tests/VvCash.Tests/PosViewModelSellerGateTest.cs` | тесты сброса после оплаты и очистки чека; knob `CreateResult` у фейка документов |
 | `tests/VvCash.Tests/ReturnsViewModelTest.cs` | тесты флага возврата; knob `CreateResult` у фейка возвратов |
 | `tests/VvCash.Tests/ExchangeViewModelTest.cs` | тесты флага обмена |
@@ -277,7 +277,7 @@ git commit -m "feat(seller): drop the confirmed seller when the cashier clears t
 
 ---
 
-### Task 3: `ReturnsViewModel.CompletedDocument`
+### Task 3: `ReturnsViewModel.HasBookedDocument`
 
 **Files:**
 - Modify: `tests/VvCash.Tests/ReturnsViewModelTest.cs` (фейк `FakeReturnService`, ~строка 16; новые тесты в конец класса)
@@ -294,7 +294,7 @@ git commit -m "feat(seller): drop the confirmed seller when the cashier clears t
         public string? LastExpenseId;
 
         /// <summary>What CreateReturnAsync reports back — defaults to success (matching
-        /// prior behaviour); the CompletedDocument tests flip it to false.</summary>
+        /// prior behaviour); the HasBookedDocument tests flip it to false.</summary>
         public bool CreateResult = true;
 
         public Task<ExpenseListResponse> GetSalesAsync(int page = 1)
@@ -315,7 +315,7 @@ git commit -m "feat(seller): drop the confirmed seller when the cashier clears t
 
 ```csharp
     [Fact]
-    public async Task SubmitReturn_OnSuccess_MarksCompletedDocument()
+    public async Task SubmitReturn_OnSuccess_MarksHasBookedDocument()
     {
         // PosViewModel reads this after the modal closes to decide whether the register
         // just finished an operation and must re-ask who is selling.
@@ -325,11 +325,11 @@ git commit -m "feat(seller): drop the confirmed seller when the cashier clears t
 
         await vm.SubmitReturnCommand.ExecuteAsync(null);
 
-        Assert.True(vm.CompletedDocument);
+        Assert.True(vm.HasBookedDocument);
     }
 
     [Fact]
-    public async Task SubmitReturn_WhenServerRejects_LeavesCompletedDocumentFalse()
+    public async Task SubmitReturn_WhenServerRejects_LeavesHasBookedDocumentFalse()
     {
         // Nothing was booked, so opening and closing the screen must not cost a PIN.
         var svc = new FakeReturnService { CreateResult = false };
@@ -338,7 +338,7 @@ git commit -m "feat(seller): drop the confirmed seller when the cashier clears t
 
         await vm.SubmitReturnCommand.ExecuteAsync(null);
 
-        Assert.False(vm.CompletedDocument);
+        Assert.False(vm.HasBookedDocument);
     }
 ```
 
@@ -348,7 +348,7 @@ git commit -m "feat(seller): drop the confirmed seller when the cashier clears t
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~ReturnsViewModelTest"`
 
-Expected: ошибка сборки `CS1061: 'ReturnsViewModel' does not contain a definition for 'CompletedDocument'`.
+Expected: ошибка сборки `CS1061: 'ReturnsViewModel' does not contain a definition for 'HasBookedDocument'`.
 
 - [ ] **Step 4: Добавить свойство и его выставление**
 
@@ -359,7 +359,7 @@ Expected: ошибка сборки `CS1061: 'ReturnsViewModel' does not contain
     /// PosViewModel after the modal closes: a screen that was opened and closed without
     /// booking anything is not the end of an operation and must not cost the cashier a
     /// fresh PIN. Sticky — several returns in one sitting are still "a document happened".</summary>
-    public bool CompletedDocument { get; private set; }
+    public bool HasBookedDocument { get; private set; }
 ```
 
 В `SubmitReturn`, сразу после блока `if (!ok) { ... return; }` и перед `await RunPostReturnActionsAsync(...)`:
@@ -368,7 +368,7 @@ Expected: ошибка сборки `CS1061: 'ReturnsViewModel' does not contain
             // Set before the drawer/receipt side effects, not after: those are
             // best-effort (they swallow their own exceptions) and the document is already
             // on the server by this point regardless of how printing goes.
-            CompletedDocument = true;
+            HasBookedDocument = true;
 ```
 
 - [ ] **Step 5: Прогнать тесты**
@@ -386,7 +386,7 @@ git commit -m "feat(returns): report whether the screen actually booked a return
 
 ---
 
-### Task 4: `ExchangeViewModel.CompletedDocument`
+### Task 4: `ExchangeViewModel.HasBookedDocument`
 
 **Files:**
 - Modify: `tests/VvCash.Tests/ExchangeViewModelTest.cs` (новые тесты в конец класса)
@@ -398,17 +398,17 @@ git commit -m "feat(returns): report whether the screen actually booked a return
 
 ```csharp
     [Fact]
-    public async Task SubmitExchange_OnSuccess_MarksCompletedDocument()
+    public async Task SubmitExchange_OnSuccess_MarksHasBookedDocument()
     {
         var rig = BuildForSubmit();
 
         await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.True(rig.Vm.CompletedDocument);
+        Assert.True(rig.Vm.HasBookedDocument);
     }
 
     [Fact]
-    public async Task SubmitExchange_ReturnBookedButPayoutFailed_StillMarksCompletedDocument()
+    public async Task SubmitExchange_ReturnBookedButPayoutFailed_StillMarksHasBookedDocument()
     {
         // The return cannot be cancelled, so a document exists even though the exchange
         // never finished — the register has done something and must re-ask who is selling.
@@ -418,11 +418,11 @@ git commit -m "feat(returns): report whether the screen actually booked a return
         await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
         Assert.NotNull(rig.Vm.ErrorMessage);
-        Assert.True(rig.Vm.CompletedDocument);
+        Assert.True(rig.Vm.HasBookedDocument);
     }
 
     [Fact]
-    public async Task SubmitExchange_WhenTheReturnItselfFails_LeavesCompletedDocumentFalse()
+    public async Task SubmitExchange_WhenTheReturnItselfFails_LeavesHasBookedDocumentFalse()
     {
         // Nothing reached the server at all.
         var rig = BuildForSubmit();
@@ -430,7 +430,7 @@ git commit -m "feat(returns): report whether the screen actually booked a return
 
         await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
-        Assert.False(rig.Vm.CompletedDocument);
+        Assert.False(rig.Vm.HasBookedDocument);
     }
 ```
 
@@ -438,7 +438,7 @@ git commit -m "feat(returns): report whether the screen actually booked a return
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~ExchangeViewModelTest"`
 
-Expected: ошибка сборки `CS1061: 'ExchangeViewModel' does not contain a definition for 'CompletedDocument'`.
+Expected: ошибка сборки `CS1061: 'ExchangeViewModel' does not contain a definition for 'HasBookedDocument'`.
 
 - [ ] **Step 3: Добавить свойство и его выставление**
 
@@ -449,15 +449,15 @@ Expected: ошибка сборки `CS1061: 'ExchangeViewModel' does not contai
     /// the moment the return leg is booked, since a return cannot be cancelled and the
     /// remaining legs may still fail. Read by PosViewModel after the modal closes to
     /// decide whether an operation actually happened and the seller must be re-confirmed.
-    /// Sticky, exactly like ReturnsViewModel.CompletedDocument.</summary>
-    public bool CompletedDocument { get; private set; }
+    /// Sticky, exactly like ReturnsViewModel.HasBookedDocument.</summary>
+    public bool HasBookedDocument { get; private set; }
 ```
 
 В `SubmitExchange`, в блоке шага 1 (`// ---- 1. the return ----`), рядом с уже существующим `_returnBooked = true;`:
 
 ```csharp
                 _returnBooked = true;
-                CompletedDocument = true;
+                HasBookedDocument = true;
 ```
 
 - [ ] **Step 4: Прогнать тесты**
@@ -495,7 +495,7 @@ git commit -m "feat(exchange): report whether the screen wrote any document"
                 // A returns screen that actually booked something ends the operation the
                 // same way a payment does — see EndReceipt. Opened and closed without a
                 // return, it costs nothing.
-                if (returnsVm.CompletedDocument) EndReceipt();
+                if (returnsVm.HasBookedDocument) EndReceipt();
 ```
 
 - [ ] **Step 2: Читать флаг после диалога обмена**
@@ -516,7 +516,7 @@ git commit -m "feat(exchange): report whether the screen wrote any document"
                 // Same rule as returns above. The seller id the exchange documents carry
                 // was snapshotted at construction time, so clearing here cannot affect
                 // what was already sent.
-                if (exchangeVm.CompletedDocument) EndReceipt();
+                if (exchangeVm.HasBookedDocument) EndReceipt();
 ```
 
 - [ ] **Step 3: Прогнать весь набор тестов**

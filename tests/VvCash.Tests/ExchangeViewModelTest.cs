@@ -539,4 +539,40 @@ public class ExchangeViewModelTest
         vm.RemoveIssuedLine(vm.IssuedLines.Single());
         Assert.False(vm.CanSubmit); // nothing selected to issue
     }
+
+    [Fact]
+    public async Task SubmitExchange_OnSuccess_MarksHasBookedDocument()
+    {
+        var rig = BuildForSubmit();
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.True(rig.Vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_ReturnBookedButPayoutFailed_StillMarksHasBookedDocument()
+    {
+        // The return cannot be cancelled, so a document exists even though the exchange
+        // never finished — the register has done something and must re-ask who is selling.
+        var rig = BuildForSubmit();
+        rig.Payout.Outcome = CashOpOutcome.Failed("cash balance would go negative");
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.NotNull(rig.Vm.ErrorMessage);
+        Assert.True(rig.Vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_WhenTheReturnItselfFails_LeavesHasBookedDocumentFalse()
+    {
+        // Nothing reached the server at all.
+        var rig = BuildForSubmit();
+        rig.Returns.Result = false;
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.False(rig.Vm.HasBookedDocument);
+    }
 }

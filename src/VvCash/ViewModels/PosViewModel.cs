@@ -20,6 +20,25 @@ using VvCash.Services.Hardware;
 
 namespace VvCash.ViewModels;
 
+/// <summary>Payload for <see cref="PosViewModel.SellerSwitchRequested"/>. Exists because
+/// not every raise site may offer the seller-switch overlay's manual sign-out control
+/// (<see cref="SellerSwitchViewModel.CanSignOut"/>): <see cref="PosViewModel.AddToCart"/>
+/// and <see cref="PosViewModel.ResumeParkedSale"/> both raise this event while the cart is
+/// still empty <em>by construction</em> — that is exactly the condition their own gates
+/// check — but only because they are about to fill it one statement/moment later. Reading
+/// <see cref="PosViewModel.CanEndSellerSession"/> at the raise site in either case would
+/// read true and be a lie by the time the overlay is actually on screen: the cashier would
+/// see the sign-out button over a cart that, by then, has an item — the exact bug the
+/// critical fix in the 2026-07-31 design doc's addendum closes. Only a raise site that is
+/// not itself about to add to the cart — today, just the manual chip tap
+/// (<see cref="PosViewModel.OpenSellerSwitch"/>) — may set <see cref="CanSignOut"/> true.</summary>
+public sealed class SellerSwitchRequest : EventArgs
+{
+    public bool CanSignOut { get; }
+
+    public SellerSwitchRequest(bool canSignOut) => CanSignOut = canSignOut;
+}
+
 public partial class PosViewModel : ViewModelBase, IDisposable
 {
     private readonly IProductService _productService;
@@ -297,13 +316,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch overlay —
     /// either because the register requires a fresh seller confirmation at the start of a
-    /// receipt (see <see cref="AddToCart"/>) or because the cashier tapped the seller chip
-    /// (see <see cref="OpenSellerSwitch"/>). Plays the same decoupling role as
-    /// <see cref="NavigationRequest"/> and <see cref="CustomerDisplayViewModel"/> —
-    /// PosViewModel raises intent without knowing how it's fulfilled — but unlike those two
-    /// settable delegate/property members, this is a genuine event: the host subscribes to
-    /// it rather than being handed a callback to invoke.</summary>
-    public event EventHandler? SellerSwitchRequested;
+    /// receipt (see <see cref="AddToCart"/>, <see cref="ResumeParkedSale"/>) or because the
+    /// cashier tapped the seller chip (see <see cref="OpenSellerSwitch"/>). Plays the same
+    /// decoupling role as <see cref="NavigationRequest"/> and
+    /// <see cref="CustomerDisplayViewModel"/> — PosViewModel raises intent without knowing
+    /// how it's fulfilled — but unlike those two settable delegate/property members, this
+    /// is a genuine event: the host subscribes to it rather than being handed a callback to
+    /// invoke. Carries a <see cref="SellerSwitchRequest"/> — see its own remarks for why the
+    /// permission it carries must be computed by the raise site itself, at the moment it
+    /// raises, rather than read later by the host.</summary>
+    public event EventHandler<SellerSwitchRequest>? SellerSwitchRequested;
 
     /// <summary>Raised to ask the host (App.axaml.cs) to open the seller-switch
     /// overlay in approval mode (see <see cref="SellerSwitchViewModel.OpenForApproval"/>)
@@ -346,7 +368,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // doesn't apply here.
         if (!IsSellerSwitchEnabled) return;
 
-        SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+        // The one raise site allowed to grant sign-out (see SellerSwitchRequest's own
+        // remarks): tapping the chip does not itself add anything to the cart, unlike
+        // AddToCart/ResumeParkedSale below. CanEndSellerSession read right now is accurate
+        // for this instant — it is not a guarantee that the cart stays empty for as long
+        // as the overlay ends up showing: HandleBarcodeAsync awaits a product lookup
+        // before posting AddToCart, so a scan already in flight before this tap could
+        // still land afterwards. PosView.axaml.cs's keyboard guard (see
+        // IsSellerSwitchOverlayVisible) is what closes the direct route of a scan
+        // reaching the cart while the overlay is up; this comment is only about what this
+        // one read of CanEndSellerSession itself promises.
+        SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(CanEndSellerSession));
     }
 
     [RelayCommand]
@@ -516,6 +548,59 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _sellerSession.Clear();
         _authService.ClearSession();
         LogoutRequested?.Invoke(this, explanation);
+    }
+
+    /// <summary>True when the cart has no items right now — the exact condition
+    /// <see cref="EndReceipt"/>'s own guard checks below, exposed here for the manual
+    /// counterpart to that automatic reset: the seller-switch overlay's "stop selling"
+    /// control (see <see cref="SellerSwitchViewModel.CanSignOut"/>) must never be offered
+    /// mid-receipt, for the same reason EndReceipt itself refuses to fire then —
+    /// AddToCart's gate only re-asks who is selling on an EMPTY cart, so dropping the
+    /// seller with items still in the cart would leave the rest of that receipt with
+    /// nobody confirmed and nothing to re-prompt.
+    ///
+    /// A momentary snapshot, not a durable guarantee: only <see cref="OpenSellerSwitch"/>
+    /// (the manual chip tap, which adds nothing to the cart itself) may read this and pass
+    /// it through <see cref="SellerSwitchRequest.CanSignOut"/> — <see cref="AddToCart"/>
+    /// and <see cref="ResumeParkedSale"/> both observe the cart empty for the same instant
+    /// this property would report true, but only because they are each about to fill it;
+    /// see <see cref="SellerSwitchRequest"/>'s remarks for the bug that reading this at
+    /// those raise sites caused. PosViewModel still has no reason to know
+    /// SellerSwitchViewModel exists — App.axaml.cs forwards whatever value the raising
+    /// method already decided, via <see cref="SellerSwitchRequest.CanSignOut"/>, rather
+    /// than reading this property itself.</summary>
+    public bool CanEndSellerSession => !_cartService.Items.Any();
+
+    /// <summary>Every finished operation is meant to funnel through here — a successful
+    /// payment, the cashier manually clearing the receipt, and a returns/exchange dialog
+    /// that genuinely booked a document — to say "nobody is confirmed any more". The idle
+    /// timeout stays as a second line of defence for a receipt abandoned halfway; this
+    /// one closes the window where the next person starts ringing up within 90 seconds
+    /// and their sale is silently credited to whoever sold last (see the 2026-07-31 spec).
+    ///
+    /// Kept as one method rather than four inline Clear() calls for the same reason
+    /// PerformSignOut above is one method: the next end-of-receipt path added to this
+    /// class must have one obvious place to hook into, or it will quietly skip the reset.
+    ///
+    /// No IsSellerSwitchEnabled guard on purpose: with switching off nobody ever becomes
+    /// Current, and SellerSession.Clear() returns early when Current is already null, so
+    /// this degrades to a no-op on its own.
+    ///
+    /// Guarded on an empty cart: the returns/exchange dialogs are separate windows that
+    /// never touch the POS cart, so a dialog can close having booked a document while the
+    /// current receipt is still mid-ring — clearing here would leave the rest of that
+    /// receipt with nobody confirmed and AddToCart's gate re-asking only on an empty cart,
+    /// so nothing would ever re-prompt. Pay and ClearCart both empty the cart themselves
+    /// before calling this, so the guard is a no-op for them.</summary>
+    private void EndReceipt()
+    {
+        // Never mid-receipt: a returns/exchange dialog can be opened over a cart that is
+        // still being rung up, and AddToCart's gate only re-asks on an EMPTY cart — so
+        // clearing here would leave the rest of that receipt with nobody confirmed and
+        // nothing to prompt. Pay and ClearCart both empty the cart before calling this,
+        // so the guard is a no-op for them.
+        if (_cartService.Items.Any()) return;
+        _sellerSession.Clear();
     }
 
     [RelayCommand]
@@ -1166,8 +1251,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // With seller switching disabled there is no separate identity to confirm —
         // everything on this register is the shift owner's — so the start-of-receipt
         // ask never fires.
+        //
+        // canSignOut is a hard false, never CanEndSellerSession: the cart is only empty
+        // right here because that is this gate's own firing condition — product is about
+        // to land in it a few lines down. Reading CanEndSellerSession at this instant
+        // would read true and stay wrong for as long as the overlay is actually showing
+        // (see SellerSwitchRequest's remarks).
         if (IsSellerSwitchEnabled && !_cartService.Items.Any() && _sellerSession.IsStale)
-            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
 
         // Any add is genuine register activity, not just the first one — resets the idle
         // timer so a long receipt never goes stale mid-sale.
@@ -1204,6 +1295,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ClearActivePromo();
         _approvedById = null;
         _ = _customerDisplayService.ClearAsync();
+
+        // Only this command — the cashier deliberately dropping the receipt. The
+        // internal _cartService.ClearCart() calls (park, auto-park inside
+        // ResumeParkedSale) are mid-operation, not the end of one, and must not reset.
+        EndReceipt();
     }
 
     [RelayCommand]
@@ -1553,8 +1649,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
-                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                var returnsVm = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                dialog.DataContext = returnsVm;
                 await dialog.ShowDialog(mainWindow);
+
+                // A returns screen that actually booked something ends the operation the
+                // same way a payment does — see EndReceipt. Opened and closed without a
+                // return, it costs nothing.
+                if (returnsVm.HasBookedDocument) EndReceipt();
             }
         }
     }
@@ -1562,19 +1664,65 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task OpenExchange()
     {
+        // An exchange writes a replacement-sale document that carries seller_id, and
+        // ExchangeViewModel snapshots _sellerSession.Current?.Id into its constructor below
+        // — so opening this screen with nobody confirmed produces a sale silently credited
+        // to the shift owner, with nothing on screen saying so. That is exactly the
+        // consequence this branch introduced: before EndReceipt() started clearing Current
+        // after every completed operation, a confirmed seller survived between receipts and
+        // an exchange usually carried someone; now the very next customer's "actually, I'd
+        // like to exchange this" reaches an empty session every time.
+        //
+        // This is a "who is selling" gate, not a rights escalation, which is why it raises
+        // SellerSwitchRequested rather than RefundApprovalRequested/CloseShiftApprovalRequested
+        // the way OpenReturns/CloseShift do above. Those two exist so a supervisor can approve
+        // on someone else's behalf without becoming the current seller — the right being
+        // checked (CanRefund/CanCloseShift) is independent of whose id ends up on the
+        // document. Here there is no separate right to escalate: the whole problem is that
+        // nobody's id is available to stamp at all, so the fix is to make someone become
+        // Current, which is what SellerSwitchRequested does and what approval mode
+        // deliberately does not.
+        //
+        // The overlay is non-blocking and carries no continuation (unlike the approval
+        // flows' OpenForApproval), so this press does not open the exchange window — the
+        // cashier confirms who is selling and taps Exchange again, the same shape as
+        // AddToCart, which also asks and lets the next action proceed.
+        //
+        // Same seller-switch-off exception as everywhere else: with IsSellerSwitchEnabled
+        // false there is no separate identity to confirm and the overlay itself is hidden,
+        // so the gate must not fire.
+        //
+        // canSignOut: false, same as the other automatic gates — this method never fills
+        // the POS cart itself (the exchange window is separate), so CanEndSellerSession
+        // would in fact stay accurate for as long as this particular overlay is showing;
+        // false anyway, to keep one simple rule (only the manual chip tap in
+        // OpenSellerSwitch may grant sign-out) rather than a per-site judgment call about
+        // which automatic gates happen to be safe today and might stop being tomorrow.
+        if (IsSellerSwitchEnabled && _sellerSession.IsStale)
+        {
+            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
+            return;
+        }
+
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             var mainWindow = desktop.MainWindow;
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ExchangeWindow();
-                dialog.DataContext = new ExchangeViewModel(
+                var exchangeVm = new ExchangeViewModel(
                     dialog, _returnService, _cashOperationService, _expenseDocumentService,
                     _counterpartyService, _settingsService, _productService, _syncService,
                     _printerService, _features,
                     _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty,
                     _sellerSession.Current?.Id, _session.CashId, IsSystemOnline);
+                dialog.DataContext = exchangeVm;
                 await dialog.ShowDialog(mainWindow);
+
+                // Same rule as returns above. The seller id the exchange documents carry
+                // was snapshotted at construction time, so clearing here cannot affect
+                // what was already sent.
+                if (exchangeVm.HasBookedDocument) EndReceipt();
             }
         }
     }
@@ -1641,8 +1789,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // AddToCart entirely — see this method's own remarks for why this must run before
         // Touch() and before the cart is populated below. Same seller-switch-off
         // exception as AddToCart too: no separate identity to confirm when the flag is off.
+        //
+        // canSignOut: false, same reasoning as AddToCart's own gate — the cart is empty
+        // right here (either it started that way, or the auto-park branch above just
+        // emptied it) but the resumed snapshot's items are about to land in it below, so
+        // CanEndSellerSession would read true now and be wrong for as long as the overlay
+        // is actually showing.
         if (IsSellerSwitchEnabled && _sellerSession.IsStale)
-            SellerSwitchRequested?.Invoke(this, EventArgs.Empty);
+            SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(canSignOut: false));
 
         // Resuming a parked sale is genuine register activity, same as AddToCart's own
         // Touch() call — resets the idle timer so a long-parked receipt that just got
@@ -1757,6 +1911,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         SelectedCustomer = null;
                         ClearActivePromo();
                         _approvedById = null;
+                        // The receipt is done and the document (posted or queued offline)
+                        // already carries this seller's id — from here on nobody is
+                        // confirmed. Only on this success branch: see EndReceipt.
+                        EndReceipt();
                         StatusMessage = "Payment processed. Thank you!";
 
                         if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)

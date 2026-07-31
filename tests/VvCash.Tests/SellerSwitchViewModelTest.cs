@@ -181,7 +181,34 @@ public class SellerSwitchViewModelTest
 
         Assert.Contains(nameof(vm.HasNoApprover), changed);
         Assert.Contains(nameof(vm.HasEmptyRoster), changed);
+        Assert.Contains(nameof(vm.CanSignOut), changed);
         Assert.False(vm.HasEmptyRoster);
+    }
+
+    // Extends the notice above to CanSignOut specifically, covering it alongside
+    // HasNoApprover/HasEmptyRoster rather than only when a roster happens to repopulate:
+    // reopening with a different canSignOut must actually notify, not just change the
+    // property's live value underneath a stale binding. Not a test of Show()'s explicit
+    // NotifyEmptyStateChanged() call in isolation — the roster here is non-empty in both
+    // opens, so Sellers.Clear()+Add() also fires CollectionChanged both times (Clear()
+    // raises a Reset unconditionally, roster or no roster), and that alone would already
+    // make this pass. See Show()'s own remarks for why the explicit call still earns its
+    // place regardless of that overlap.
+    [Fact]
+    public async Task CanSignOut_RaisesPropertyChanged_WhenReopenedWithADifferentPermission()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open(canSignOut: true);
+        Assert.True(vm.CanSignOut); // sanity check on the premise
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        vm.Open(canSignOut: false);
+
+        Assert.Contains(nameof(vm.CanSignOut), changed);
+        Assert.False(vm.CanSignOut);
     }
 
     [Fact]
@@ -399,6 +426,165 @@ public class SellerSwitchViewModelTest
         await submitting;
 
         Assert.False(vm.IsVisible); // the pending submit still resolves normally afterwards
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Manual sign-out (2026-07-31 design, manual counterpart to EndReceipt): the
+    // tile-grid screen's "nobody is selling now" control. Never in approval mode — an
+    // approval verifies a supervisor's PIN on someone else's behalf and deliberately
+    // never touches Current, so signing out there would be nonsense. Never when the
+    // caller (PosViewModel, via CanEndSellerSession) disallowed it, and never when
+    // nobody is confirmed in the first place — nothing to sign out of.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SignOutSeller_ClearsCurrentSeller_AndHidesOverlay()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open();
+
+        vm.SignOutSellerCommand.Execute(null);
+
+        Assert.Null(session.Current);
+        Assert.False(vm.IsVisible);
+    }
+
+    [Fact]
+    public async Task CanSignOut_FalseInApprovalMode()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.OpenForApproval(s => s.CanCloseShift);
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task CanSignOut_FalseWhenCallerDisallowed()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open(canSignOut: false);
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task CanSignOut_FalseWhenNobodyConfirmed()
+    {
+        // SessionWithRoster never switches anyone on, so Current stays null here.
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+
+        vm.Open();
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task Open_WithNoArgument_DefaultsToNotGrantingSignOut()
+    {
+        // The permissive default was exactly the shape of the raise-site bug the
+        // critical fix closed: after that fix, the rule is that only a caller which
+        // actually checked its own permission may grant sign-out, so a caller that
+        // forgets the argument entirely must not get it for free. Someone is confirmed
+        // here specifically to isolate the default from CanSignOut_FalseWhenNobodyConfirmed
+        // above, which would pass regardless of the default since Current stays null there.
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open();
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task CanSignOut_TrueWhenAllowedAndSomeoneConfirmed()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open(canSignOut: true);
+
+        Assert.True(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task SignOutSeller_WhileSubmitIsPending_IsANoOp()
+    {
+        // Same shape as Cancel_WhileSubmitIsPending_IsANoOp above: SignOutSeller must
+        // respect the _isBusy guard like every other mutating entry point in this class.
+        var roster = new List<SellerInfo>
+        {
+            new() { Id = "u-1", FirstName = "Азиз", CanSell = true }
+        };
+        var session = new SlowSession(roster);
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        await vm.AppendDigitCommand.ExecuteAsync("1");
+        await vm.AppendDigitCommand.ExecuteAsync("2");
+        await vm.AppendDigitCommand.ExecuteAsync("3");
+        var submitting = vm.AppendDigitCommand.ExecuteAsync("4"); // now mid-submit (_isBusy == true)
+
+        vm.SignOutSellerCommand.Execute(null);
+        Assert.True(vm.IsVisible); // SignOutSeller is a no-op while busy, same as Cancel/Back/Open
+
+        session.CompleteSwitch(SwitchResult.Ok, vm.Sellers[0]);
+        await submitting;
+
+        Assert.False(vm.IsVisible); // the pending submit still resolves normally afterwards
+    }
+
+    // ---------------------------------------------------------------------------------
+    // CanSignOut tracking ISellerSession.CurrentChanged (code-review fix): a roster
+    // refresh can clear Current out from under an already-open overlay (see
+    // SellerSession.LoadRosterAsync — a seller vanishing from the roster or losing
+    // CanSell does exactly this), and without tracking the event the sign-out button
+    // would keep showing with nobody left to sign out.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task CanSignOut_RaisesPropertyChanged_WhenSessionCurrentChanges()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open(canSignOut: true);
+        Assert.True(vm.CanSignOut); // sanity check on the premise
+        var changed = new List<string?>();
+        vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        session.Clear(); // e.g. a roster refresh dropping the current seller mid-overlay
+
+        Assert.Contains(nameof(vm.CanSignOut), changed);
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task Dispose_UnsubscribesFromSellerSessionCurrentChanged()
+    {
+        // SellerSwitchViewModel is transient like PosViewModel, and ISellerSession is a
+        // singleton — without unsubscribing, every login/logout cycle would leave one
+        // more dead VM reacting to CurrentChanged forever (mirrors
+        // PosViewModelSellerGateTest.Dispose_UnsubscribesFromSellerSessionCurrentChanged).
+        var session = await SessionWithRoster();
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Dispose();
+
+        var raised = false;
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.CanSignOut)) raised = true; };
+
+        await session.SwitchAsync("u-1", "4821");
+
+        Assert.False(raised);
     }
 
     [Fact]

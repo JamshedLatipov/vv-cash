@@ -182,6 +182,7 @@
   "ConfirmWithPin": "Confirm with PIN",
   "NoSellerWithRight": "No seller holds the right for this operation — contact an administrator",
   "SellerRosterEmpty": "The seller list is empty — refresh it or assign sellers to this register",
+  "SignOutSeller": "Nobody is selling",
   "CurrentSeller": "Seller",
   "SellerVerificationFailed": "Could not verify PIN. Try again",
   "CreatePin": "Create a PIN",
