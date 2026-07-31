@@ -116,6 +116,13 @@ public partial class ExchangeViewModel : ViewModelBase
     public bool HasSelectedSale => SelectedSale != null;
     public bool HasMorePages => CurrentPage < PageCount;
 
+    /// <summary>True once this screen has written anything to the server — that is, from
+    /// the moment the return leg is booked, since a return cannot be cancelled and the
+    /// remaining legs may still fail. Read by PosViewModel after the modal closes to
+    /// decide whether an operation actually happened and the seller must be re-confirmed.
+    /// Sticky, exactly like ReturnsViewModel.HasBookedDocument.</summary>
+    public bool HasBookedDocument { get; private set; }
+
     /// <summary>False while nobody has told the register which payment category the
     /// till payout belongs under. Surfaced on the screen as its own warning so the
     /// cashier reads it before building a basket, not after.</summary>
@@ -483,6 +490,7 @@ public partial class ExchangeViewModel : ViewModelBase
                     return;
                 }
                 _returnBooked = true;
+                HasBookedDocument = true;
             }
 
             // ---- 2. the till payout --------------------------------------------
