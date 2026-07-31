@@ -388,6 +388,47 @@ public class CustomerSearchViewModelTest
         Assert.Equal(0, harness.CloseCount);
     }
 
+    /// <summary>Новый поиск снимает выбор: иначе «ВЫБРАТЬ КЛИЕНТА» прикрепило бы
+    /// клиента из прошлой выдачи, которого в текущем списке уже нет.</summary>
+    [Fact]
+    public async Task NewSearch_DropsThePreviousSelection()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse> { Customer("c-1", "Иванов Иван") };
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+        vm.SelectedCounterparty = vm.SearchResults[0];
+
+        harness.Service.Results = new List<CounterpartyResponse>();
+        vm.SearchQuery = "Такогонет";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.SelectedCounterparty);
+        vm.ConfirmSelectionCommand.Execute(null);
+        Assert.Equal(0, harness.CloseCount);
+    }
+
+    /// <summary>А вот провал поиска выбор сохраняет — вместе со списком, в
+    /// котором выбранная строка по-прежнему видна и подсвечена.</summary>
+    [Fact]
+    public async Task SearchFailure_KeepsTheSelection()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse> { Customer("c-1", "Иванов Иван") };
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+        var chosen = vm.SearchResults[0];
+        vm.SelectedCounterparty = chosen;
+
+        harness.Service.Results = null;
+        vm.SearchQuery = "Петров";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Same(chosen, vm.SelectedCounterparty);
+    }
+
     [Fact]
     public void Cancel_ClosesWithNull()
     {

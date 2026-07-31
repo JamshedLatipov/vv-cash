@@ -1419,7 +1419,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             // регистрацию, он вернётся в поиск с целым запросом и списком.
             query => ShowCustomerRegistrationAsync(dialog, query));
 
-        var selected = (CounterpartyResponse?) await dialog.ShowDialog<object>(mainWindow);
+        var selected = await dialog.ShowDialog<object>(mainWindow) as CounterpartyResponse;
         if (selected != null)
         {
             ApplySelectedCustomer(selected);

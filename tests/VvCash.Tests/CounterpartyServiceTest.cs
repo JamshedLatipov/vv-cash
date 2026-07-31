@@ -76,4 +76,22 @@ public class CounterpartyServiceTest
         Assert.Equal("c-2", res[0].Id);
         Assert.Equal("Петров Пётр", res[0].FullName);
     }
+
+    /// <summary>Реальный «ничего не найдено»: сервер отвечает через
+    /// response.EmptyList, а тот поля "status" не несёт, поэтому ответ не
+    /// подходит ни под голый массив, ни под конверт. Именно на этой ветке
+    /// держится всё пустое состояние окна поиска — вернуть отсюда null значило
+    /// бы, что «Клиент не найден» не покажется никогда.</summary>
+    [Fact]
+    public async Task SearchCounterpartiesAsync_EmptyListEnvelope_ReturnsEmptyNotNull()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"body":[],"page_count":0,"total_items":0,"item_per_page":20}"""));
+        var svc = Build(handler);
+
+        var res = await svc.SearchCounterpartiesAsync("Такогонет");
+
+        Assert.NotNull(res);
+        Assert.Empty(res);
+    }
 }

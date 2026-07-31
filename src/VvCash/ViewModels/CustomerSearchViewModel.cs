@@ -107,6 +107,11 @@ public partial class CustomerSearchViewModel : ViewModelBase
 
             ErrorMessage = null;
             SearchResults.Clear();
+            // Явно, а не в расчёте на то, что ListBox отзеркалит Reset обратно в
+            // SelectedItem: иначе «ВЫБРАТЬ КЛИЕНТА» могло бы прикрепить клиента,
+            // которого на экране уже нет, — и это зависело бы от поведения вьюхи,
+            // до которого тест не достаёт.
+            SelectedCounterparty = null;
             foreach (var r in results)
             {
                 SearchResults.Add(r);

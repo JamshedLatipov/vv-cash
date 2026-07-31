@@ -107,6 +107,8 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     [RelayCommand]
     private async Task SubmitAsync()
     {
+        ErrorMessage = null;
+
         var request = new CounterpartyCreateRequest
         {
             FirstName = string.IsNullOrWhiteSpace(FirstName) ? "-" : FirstName.Trim(),
