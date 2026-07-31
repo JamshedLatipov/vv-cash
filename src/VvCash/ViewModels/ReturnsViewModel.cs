@@ -53,7 +53,15 @@ public partial class ReturnsViewModel : ViewModelBase
     /// <summary>True once this screen has actually booked a return on the server. Read by
     /// PosViewModel after the modal closes: a screen that was opened and closed without
     /// booking anything is not the end of an operation and must not cost the cashier a
-    /// fresh PIN. Sticky — several returns in one sitting are still "a document happened".</summary>
+    /// fresh PIN. Sticky — several returns in one sitting are still "a document happened".
+    ///
+    /// If CreateReturnAsync throws, this stays false even when the server actually
+    /// processed the request before the exception happened on our end (e.g. the response
+    /// never arrived) — SubmitReturn has no way to tell that case apart from a genuine
+    /// failure, and PosViewModel will not re-confirm the seller for it. That is accepted:
+    /// the 90-second idle timeout is still the backstop for a receipt genuinely abandoned,
+    /// and clearing on an outcome we don't actually know would cost the cashier a PIN for
+    /// nothing on every ordinary network hiccup.</summary>
     public bool HasBookedDocument { get; private set; }
 
     public ReturnsViewModel(Window? window, IReturnService returnService,

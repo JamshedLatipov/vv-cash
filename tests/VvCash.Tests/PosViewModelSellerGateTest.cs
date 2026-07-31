@@ -2273,4 +2273,47 @@ public class PosViewModelSellerGateTest
         Assert.Same(seller, deps.SellerSession.Current);
     }
 
+    // ---------------------------------------------------------------------------------
+    // Deliberate non-reset points (final-review Finding 2): the design doc's "Точки, где
+    // сброса намеренно нет" names park and auto-park-inside-resume alongside failed payment
+    // (already covered above by Pay_WhenDocumentCreationFails_KeepsCurrentSeller) as points
+    // that must NOT call EndReceipt. These two close that gap.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ConfirmParkSale_KeepsCurrentSeller()
+    {
+        // Parking is a pause, not the end of the seller's work — ResumeParkedSale's own
+        // gate re-asks if the session has since gone stale, so EndReceipt() must never be
+        // reached from here.
+        using var vm = CreateViewModel(out var deps);
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
+
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public async Task ResumeParkedSale_AutoParkingAnInProgressCart_KeepsCurrentSeller()
+    {
+        // The auto-park branch inside ResumeParkedSale (an in-progress cart gets parked
+        // before the requested one loads) is the middle of one operation, not the end of
+        // one — same reasoning as the explicit park command above.
+        using var vm = CreateViewModel(out var deps);
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+        vm.AddToCartCommand.Execute(MakeProduct("p-current", 5m));
+
+        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
+        {
+            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
+        });
+
+        await vm.ResumeParkedSale("parked-1");
+
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
 }
