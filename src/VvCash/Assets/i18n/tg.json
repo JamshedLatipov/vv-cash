@@ -211,5 +211,14 @@
   "IssuedGoods": "Моли баровардашуда",
   "SearchByReceiptNumber": "Рақами чек",
   "ReceiptNotFound": "Чек бо чунин рақам ёфт нашуд",
-  "SearchProductToIssue": "Ҷустуҷӯи мол аз рӯи ном ё штрихкод"
+  "SearchProductToIssue": "Ҷустуҷӯи мол аз рӯи ном ё штрихкод",
+  "UpdateAvailableBadge": "НАВСОЗӢ ДАСТРАС АСТ",
+  "UpdateModalTitle": "Навсозии касса",
+  "UpdateVersionLine": "Нусхаи нав {0}",
+  "UpdateInstallButton": "Навсозӣ",
+  "UpdateLaterButton": "Баъдтар",
+  "UpdateDownloading": "Боргирии навсозӣ...",
+  "UpdateBlockedByCart": "Аввал чеки ҷориро анҷом диҳед",
+  "UpdateDownloadFailed": "Навсозиро боргирӣ карда нашуд. Баъдтар кӯшиш кунед.",
+  "UpdateLaunchFailed": "Насбкуниро оғоз карда нашуд. Файлро дастӣ оғоз кунед:"
 }

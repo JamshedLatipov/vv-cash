@@ -211,5 +211,14 @@
   "IssuedGoods": "Goods issued",
   "SearchByReceiptNumber": "Receipt number",
   "ReceiptNotFound": "No receipt with that number",
-  "SearchProductToIssue": "Search product by name or barcode"
+  "SearchProductToIssue": "Search product by name or barcode",
+  "UpdateAvailableBadge": "UPDATE AVAILABLE",
+  "UpdateModalTitle": "Register update",
+  "UpdateVersionLine": "New version {0}",
+  "UpdateInstallButton": "Update",
+  "UpdateLaterButton": "Later",
+  "UpdateDownloading": "Downloading update...",
+  "UpdateBlockedByCart": "Finish the current receipt first",
+  "UpdateDownloadFailed": "Could not download the update. Try again later.",
+  "UpdateLaunchFailed": "Could not start the installer. Run this file by hand:"
 }

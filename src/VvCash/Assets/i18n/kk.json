@@ -211,5 +211,14 @@
   "IssuedGoods": "Берілетін тауар",
   "SearchByReceiptNumber": "Чек нөмірі",
   "ReceiptNotFound": "Мұндай нөмірлі чек табылмады",
-  "SearchProductToIssue": "Атауы немесе штрихкод бойынша тауар іздеу"
+  "SearchProductToIssue": "Атауы немесе штрихкод бойынша тауар іздеу",
+  "UpdateAvailableBadge": "ЖАҢАРТУ БАР",
+  "UpdateModalTitle": "Касса жаңартуы",
+  "UpdateVersionLine": "Жаңа нұсқа {0}",
+  "UpdateInstallButton": "Жаңарту",
+  "UpdateLaterButton": "Кейінірек",
+  "UpdateDownloading": "Жаңарту жүктелуде...",
+  "UpdateBlockedByCart": "Алдымен ағымдағы чекті аяқтаңыз",
+  "UpdateDownloadFailed": "Жаңартуды жүктеу мүмкін болмады. Кейінірек қайталаңыз.",
+  "UpdateLaunchFailed": "Орнатуды бастау мүмкін болмады. Файлды қолмен іске қосыңыз:"
 }

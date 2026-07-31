@@ -211,5 +211,14 @@
   "IssuedGoods": "Beriladigan mahsulot",
   "SearchByReceiptNumber": "Chek raqami",
   "ReceiptNotFound": "Bunday raqamli chek topilmadi",
-  "SearchProductToIssue": "Nomi yoki shtrix-kod bo'yicha mahsulot qidirish"
+  "SearchProductToIssue": "Nomi yoki shtrix-kod bo'yicha mahsulot qidirish",
+  "UpdateAvailableBadge": "YANGILANISH MAVJUD",
+  "UpdateModalTitle": "Kassa yangilanishi",
+  "UpdateVersionLine": "Yangi versiya {0}",
+  "UpdateInstallButton": "Yangilash",
+  "UpdateLaterButton": "Keyinroq",
+  "UpdateDownloading": "Yangilanish yuklanmoqda...",
+  "UpdateBlockedByCart": "Avval joriy chekni yakunlang",
+  "UpdateDownloadFailed": "Yangilanishni yuklab bo'lmadi. Keyinroq urinib ko'ring.",
+  "UpdateLaunchFailed": "O'rnatishni boshlab bo'lmadi. Faylni qo'lda ishga tushiring:"
 }
