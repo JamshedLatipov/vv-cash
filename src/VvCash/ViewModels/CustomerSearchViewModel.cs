@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models.Api;
+using VvCash.Services;
 using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
@@ -29,6 +30,10 @@ public partial class CustomerSearchViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<CounterpartyResponse> _searchResults = new();
     [ObservableProperty] private CounterpartyResponse? _selectedCounterparty;
     [ObservableProperty] private bool _isLoading;
+
+    /// <summary>Провал поиска, а не его пустой результат. Показывается вместо
+    /// пустого состояния, чтобы «нет связи» не читалось как «клиента нет».</summary>
+    [ObservableProperty] private string? _errorMessage;
 
     /// <summary>Был ли хотя бы один поиск с непустым запросом. Без этого флага
     /// «Клиент не найден» висело бы на только что открытом окне.</summary>
@@ -98,15 +103,28 @@ public partial class CustomerSearchViewModel : ViewModelBase
         try
         {
             var results = await _counterpartyService.SearchCounterpartiesAsync(SearchQuery);
-            SearchResults.Clear();
-            if (results != null)
+            if (results == null)
             {
-                foreach (var r in results)
-                {
-                    SearchResults.Add(r);
-                }
+                // Поиск не состоялся: связи нет или сервер ответил ошибкой.
+                // Ни список, ни HasSearched не трогаем — «Клиент не найден» с
+                // кнопкой «Создать» здесь означало бы приглашение завести дубль
+                // клиента, который на самом деле в базе есть.
+                ErrorMessage = I18nService.Instance["NoConnection"];
+                return;
+            }
+
+            ErrorMessage = null;
+            SearchResults.Clear();
+            foreach (var r in results)
+            {
+                SearchResults.Add(r);
             }
             HasSearched = true;
+        }
+        catch (Exception)
+        {
+            // ICounterpartyService не обещает, что реализация не бросает.
+            ErrorMessage = I18nService.Instance["NoConnection"];
         }
         finally
         {

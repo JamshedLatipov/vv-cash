@@ -90,6 +90,56 @@ public class CustomerSearchViewModelTest
         Assert.Single(vm.SearchResults);
     }
 
+    /// <summary>Провал поиска (нет связи, ошибка сервера) не должен выглядеть
+    /// как «такого клиента нет»: иначе кассир заведёт дубль поверх живого
+    /// клиента вместе со второй дисконтной картой.</summary>
+    [Fact]
+    public async Task SearchFailure_DoesNotShowEmptyState()
+    {
+        var harness = new Harness();
+        harness.Service.Results = null;   // сервис так сообщает о провале
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasSearched);
+        Assert.False(vm.HasNoResults);
+        Assert.NotNull(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SearchFailure_KeepsPreviousResults()
+    {
+        var harness = new Harness();
+        harness.Service.Results = new List<CounterpartyResponse> { Customer("c-1", "Иванов Иван") };
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        harness.Service.Results = null;
+        vm.SearchQuery = "Петров";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.SearchResults);
+    }
+
+    [Fact]
+    public async Task SuccessfulSearchAfterFailure_ClearsTheError()
+    {
+        var harness = new Harness();
+        harness.Service.Results = null;
+        var vm = harness.Build();
+        vm.SearchQuery = "Иванов";
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        harness.Service.Results = new List<CounterpartyResponse>();
+        await vm.SearchCommand.ExecuteAsync(null);
+
+        Assert.Null(vm.ErrorMessage);
+        Assert.True(vm.HasNoResults);
+    }
+
     /// <summary>Иначе «Клиент не найден» моргает на каждом поиске между тем,
     /// как список очищен, и тем, как пришёл ответ.</summary>
     [Fact]

@@ -113,6 +113,11 @@ public class CounterpartyService : ICounterpartyService
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
                 Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
+                // null, а не пустой список: «сервер ответил ошибкой» и «совпадений
+                // нет» — разные события, и окно поиска на них реагирует
+                // по-разному. Пустой список приглашает завести клиента, которого
+                // на самом деле никто не искал.
+                return null;
             }
 
             return allResults;
