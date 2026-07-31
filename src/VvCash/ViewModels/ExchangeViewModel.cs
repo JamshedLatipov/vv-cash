@@ -346,6 +346,11 @@ public partial class ExchangeViewModel : ViewModelBase
     {
         // The single funnel every basket edit goes through, so also where a
         // changed basket stops being a retry of the previous exchange.
+        //
+        // HasBookedDocument is deliberately NOT reset here, unlike everything else in
+        // this block: it tracks whether this screen ever wrote to the server, which a
+        // basket edit cannot undo — see its own doc comment. Resetting it would tell
+        // PosViewModel nothing happened and leave the previous seller confirmed.
         _documentHash = null;
         _returnBooked = false;
         OnPropertyChanged(nameof(ReturnedTotal));
@@ -489,6 +494,10 @@ public partial class ExchangeViewModel : ViewModelBase
                     ErrorMessage = ReturnFailed(returnError);
                     return;
                 }
+                // Both flip here, but they are not the same fact: _returnBooked is retry
+                // bookkeeping for these particular baskets and dies with them, while
+                // HasBookedDocument records that the one irreversible write in this flow
+                // has happened and stays true for the rest of the screen's life.
                 _returnBooked = true;
                 HasBookedDocument = true;
             }
