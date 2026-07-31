@@ -369,9 +369,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         if (!IsSellerSwitchEnabled) return;
 
         // The one raise site allowed to grant sign-out (see SellerSwitchRequest's own
-        // remarks): tapping the chip does not itself add anything to the cart, so
-        // CanEndSellerSession read right now stays true for as long as the overlay is
-        // actually showing — unlike AddToCart/ResumeParkedSale below.
+        // remarks): tapping the chip does not itself add anything to the cart, unlike
+        // AddToCart/ResumeParkedSale below. CanEndSellerSession read right now is accurate
+        // for this instant — it is not a guarantee that the cart stays empty for as long
+        // as the overlay ends up showing: HandleBarcodeAsync awaits a product lookup
+        // before posting AddToCart, so a scan already in flight before this tap could
+        // still land afterwards. PosView.axaml.cs's keyboard guard (see
+        // IsSellerSwitchOverlayVisible) is what closes the direct route of a scan
+        // reaching the cart while the overlay is up; this comment is only about what this
+        // one read of CanEndSellerSession itself promises.
         SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(CanEndSellerSession));
     }
 
