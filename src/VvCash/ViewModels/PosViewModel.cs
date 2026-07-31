@@ -1501,45 +1501,76 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task OpenCustomerSearch()
     {
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        if (Avalonia.Application.Current?.ApplicationLifetime is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop) return;
+
+        var mainWindow = desktop.MainWindow;
+        if (mainWindow == null) return;
+
+        var dialog = new VvCash.Views.CustomerSearchWindow();
+        dialog.DataContext = new CustomerSearchViewModel(
+            _counterpartyService,
+            IsCustomerRegistrationEnabled,
+            result => dialog.Close(result),
+            // Владелец — окно поиска, а не главное окно: если кассир отменит
+            // регистрацию, он вернётся в поиск с целым запросом и списком.
+            query => ShowCustomerRegistrationAsync(dialog, query));
+
+        var selected = await dialog.ShowDialog<object>(mainWindow) as CounterpartyResponse;
+        if (selected != null)
         {
-            var mainWindow = desktop.MainWindow;
-            if (mainWindow != null)
-            {
-                var dialog = new VvCash.Views.CustomerSearchWindow();
-                dialog.DataContext = new CustomerSearchViewModel(dialog, _counterpartyService);
-                var result = (VvCash.Models.Api.CounterpartyResponse?) await dialog.ShowDialog<object>(mainWindow);
-                if (result != null)
-                {
-                    SelectedCustomer = result;
-                    if (result.DiscountCard != null && result.DiscountCard.Discount > 0)
-                    {
-                        _cartService.SetCustomerDiscount(result.DiscountCard.Discount); // offline fallback
-                        StatusMessage = $"Клиент: {result.FullName} • Скидка по карте: {result.DiscountCard.Discount}%";
-                    }
-                    else
-                    {
-                        _cartService.ClearCustomerDiscount();
-                        StatusMessage = $"Выбран клиент: {result.FullName}";
-                    }
-                    TriggerRequote();
-                }
-            }
+            ApplySelectedCustomer(selected);
         }
     }
 
     private async Task OpenCustomerRegistration()
     {
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        if (Avalonia.Application.Current?.ApplicationLifetime is not Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop) return;
+
+        var mainWindow = desktop.MainWindow;
+        if (mainWindow == null) return;
+
+        var created = await ShowCustomerRegistrationAsync(mainWindow, string.Empty);
+        if (created != null)
         {
-            var mainWindow = desktop.MainWindow;
-            if (mainWindow != null)
-            {
-                var dialog = new VvCash.Views.CustomerRegistrationWindow();
-                dialog.DataContext = new CustomerRegistrationViewModel(dialog, _counterpartyService);
-                await dialog.ShowDialog(mainWindow);
-            }
+            ApplySelectedCustomer(created);
         }
+    }
+
+    /// <summary>Единственное место, где открывается окно регистрации. Оба входа —
+    /// кнопка в тулбаре и «Создать клиента» из окна поиска — отличаются только
+    /// владельцем окна и наличием строки для префилла.</summary>
+    private async Task<CounterpartyResponse?> ShowCustomerRegistrationAsync(Avalonia.Controls.Window owner, string searchQuery)
+    {
+        var dialog = new VvCash.Views.CustomerRegistrationWindow();
+        var vm = new CustomerRegistrationViewModel(dialog, _counterpartyService);
+        vm.ApplyPrefill(CustomerPrefill.FromSearchQuery(searchQuery));
+        dialog.DataContext = vm;
+
+        // as, а не каст: окно закрывается либо созданным клиентом, либо null, но
+        // ошибиться здесь означало бы уронить кассу на InvalidCastException.
+        // Тот же приём уже применён в OpenParkedSales.
+        return await dialog.ShowDialog<object>(owner) as CounterpartyResponse;
+    }
+
+    /// <summary>Клиент выбран — неважно, найден в базе или только что создан.
+    /// Отдельный метод, а не копия в двух местах: правило «применить карту
+    /// скидки и пересчитать корзину» должно жить в одном месте, иначе следующий
+    /// вход в выбор клиента просто забудет про requote, и расхождение будет
+    /// молчаливым — ровно так тулбарная кнопка регистрации и теряла клиента.</summary>
+    private void ApplySelectedCustomer(CounterpartyResponse customer)
+    {
+        SelectedCustomer = customer;
+        if (customer.DiscountCard != null && customer.DiscountCard.Discount > 0)
+        {
+            _cartService.SetCustomerDiscount(customer.DiscountCard.Discount); // offline fallback
+            StatusMessage = $"Клиент: {customer.FullName} • Скидка по карте: {customer.DiscountCard.Discount}%";
+        }
+        else
+        {
+            _cartService.ClearCustomerDiscount();
+            StatusMessage = $"Выбран клиент: {customer.FullName}";
+        }
+        TriggerRequote();
     }
 
     private ParkedSaleSnapshot BuildSnapshot(string? label) => new()

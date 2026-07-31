@@ -3,26 +3,72 @@ using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Avalonia.Controls;
 using VvCash.Models.Api;
+using VvCash.Services;
 using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
 
 public partial class CustomerSearchViewModel : ViewModelBase
 {
-    private readonly Window _window;
     private readonly ICounterpartyService _counterpartyService;
+
+    /// <summary>Закрыть окно, отдав выбранного (или только что созданного)
+    /// клиента, либо null. Делегат, а не Window: создание клиента открывает
+    /// дочернее окно, и владеть этим должна вызывающая сторона — иначе view
+    /// model нельзя сконструировать в тесте, а тест с window == null проверял
+    /// бы ветку, которой в проде нет.</summary>
+    private readonly Action<CounterpartyResponse?> _close;
+
+    /// <summary>Открыть регистрацию, предзаполнив её строкой поиска, и вернуть
+    /// созданного клиента. null — отмена или провал создания; для окна поиска
+    /// это одно и то же: остаёмся на месте.</summary>
+    private readonly Func<string, Task<CounterpartyResponse?>> _createCustomer;
 
     [ObservableProperty] private string _searchQuery = string.Empty;
     [ObservableProperty] private ObservableCollection<CounterpartyResponse> _searchResults = new();
     [ObservableProperty] private CounterpartyResponse? _selectedCounterparty;
-    [ObservableProperty] private bool _isLoading = false;
 
-    public CustomerSearchViewModel(Window window, ICounterpartyService counterpartyService)
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoResults))]
+    private bool _isLoading;
+
+    /// <summary>Провал поиска, а не его пустой результат. Взаимоисключение с
+    /// пустым состоянием обеспечено здесь, а не в разметке: HasNoResults читает
+    /// это поле, поэтому неудавшийся поиск не может выдать себя за отсутствие
+    /// клиента — что бы ни привязала вьюха.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoResults))]
+    private string? _errorMessage;
+
+    /// <summary>Был ли хотя бы один поиск с непустым запросом. Без этого флага
+    /// «Клиент не найден» висело бы на только что открытом окне.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoResults))]
+    private bool _hasSearched;
+
+    /// <summary>Снимок cash_customer_registration_enabled на момент открытия
+    /// окна — тот же флаг, что прячет кнопку регистрации в тулбаре. Окно поиска
+    /// не должно быть обходом флага.</summary>
+    public bool IsCreateEnabled { get; }
+
+    /// <summary>Промежуточные состояния списка (Clear, затем Add на каждый
+    /// результат) гасит сам же !IsLoading: всё наполнение идёт под IsLoading ==
+    /// true, а сбрасывается он в finally, последним — когда список уже принял
+    /// окончательный вид. Поэтому хватает уведомления по двум флагам, следить
+    /// за CollectionChanged не нужно.</summary>
+    public bool HasNoResults => HasSearched && !IsLoading && ErrorMessage == null && SearchResults.Count == 0;
+
+    public CustomerSearchViewModel(
+        ICounterpartyService counterpartyService,
+        bool canCreateCustomer,
+        Action<CounterpartyResponse?> close,
+        Func<string, Task<CounterpartyResponse?>> createCustomer)
     {
-        _window = window;
         _counterpartyService = counterpartyService;
+        _close = close;
+        _createCustomer = createCustomer;
+        IsCreateEnabled = canCreateCustomer;
     }
 
     [RelayCommand]
@@ -30,6 +76,13 @@ public partial class CustomerSearchViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(SearchQuery))
         {
+            // Пустой запрос — это «не искали», а не «не нашли», в том числе
+            // когда до него был успешный поиск: иначе очистка строки оставляла
+            // бы «Клиент не найден» висеть над пустым запросом. По той же
+            // причине снимается и ошибка: «нет связи» от прошлого поиска — не
+            // факт о поиске, которого не было.
+            HasSearched = false;
+            ErrorMessage = null;
             SearchResults.Clear();
             return;
         }
@@ -38,14 +91,37 @@ public partial class CustomerSearchViewModel : ViewModelBase
         try
         {
             var results = await _counterpartyService.SearchCounterpartiesAsync(SearchQuery);
-            SearchResults.Clear();
-            if (results != null)
+            if (results == null)
             {
-                foreach (var r in results)
-                {
-                    SearchResults.Add(r);
-                }
+                // Поиск не состоялся: связи нет или сервер ответил ошибкой.
+                // Ни список, ни HasSearched не трогаем — «Клиент не найден» с
+                // кнопкой «Создать» здесь означало бы приглашение завести дубль
+                // клиента, который на самом деле в базе есть. Выделение тоже
+                // сохраняется намеренно и по той же причине, что и список:
+                // кассир должен видеть, кого именно прикрепит «ВЫБРАТЬ
+                // КЛИЕНТА», а снятое выделение поверх оставшегося списка было
+                // бы половинчатым и непонятным.
+                ErrorMessage = I18nService.Instance["NoConnection"];
+                return;
             }
+
+            ErrorMessage = null;
+            SearchResults.Clear();
+            // Явно, а не в расчёте на то, что ListBox отзеркалит Reset обратно в
+            // SelectedItem: иначе «ВЫБРАТЬ КЛИЕНТА» могло бы прикрепить клиента,
+            // которого на экране уже нет, — и это зависело бы от поведения вьюхи,
+            // до которого тест не достаёт.
+            SelectedCounterparty = null;
+            foreach (var r in results)
+            {
+                SearchResults.Add(r);
+            }
+            HasSearched = true;
+        }
+        catch (Exception)
+        {
+            // ICounterpartyService не обещает, что реализация не бросает.
+            ErrorMessage = I18nService.Instance["NoConnection"];
         }
         finally
         {
@@ -59,18 +135,32 @@ public partial class CustomerSearchViewModel : ViewModelBase
         SelectedCounterparty = counterparty;
     }
 
+    // CanExecute на флаге, а не только в разметке: окно поиска не должно быть
+    // обходом cash_customer_registration_enabled, даже если кнопку кто-то
+    // привяжет мимо IsCreateEnabled. Флаг — снимок на момент открытия окна и
+    // больше не меняется, поэтому NotifyCanExecuteChangedFor не нужен.
+    [RelayCommand(CanExecute = nameof(IsCreateEnabled))]
+    private async Task CreateCustomerAsync()
+    {
+        var created = await _createCustomer(SearchQuery);
+        if (created != null)
+        {
+            _close(created);
+        }
+    }
+
     [RelayCommand]
     private void ConfirmSelection()
     {
         if (SelectedCounterparty != null)
         {
-            _window.Close(SelectedCounterparty);
+            _close(SelectedCounterparty);
         }
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        _window.Close(null);
+        _close(null);
     }
 }

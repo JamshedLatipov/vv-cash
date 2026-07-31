@@ -70,7 +70,6 @@ public class CounterpartyService : ICounterpartyService
 
     public async Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query)
     {
-        var allResults = new List<CounterpartyResponse>();
         try
         {
             var baseUrl = _settingsService.BackendUrl;
@@ -113,9 +112,20 @@ public class CounterpartyService : ICounterpartyService
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
                 Debug.WriteLine($"[CounterpartyService] API returned error: {response.StatusCode} - {errorContent}");
+                // null, а не пустой список: «сервер ответил ошибкой» и «совпадений
+                // нет» — разные события, и окно поиска на них реагирует
+                // по-разному. Пустой список приглашает завести клиента, которого
+                // на самом деле никто не искал.
+                return null;
             }
 
-            return allResults;
+            // Успешный ответ, который не подошёл ни под голый массив, ни под конверт
+            // {status, body} — это и есть реальный «ничего не найдено»: сервер отвечает
+            // на пустой результат через response.EmptyList, а тот поля "status" не несёт.
+            // Ветка нагружена: на ней держится всё пустое состояние окна поиска, поэтому
+            // список здесь именно пустой, а не null — «нашли ноль» отличается от «поиск
+            // не состоялся».
+            return new List<CounterpartyResponse>();
         }
         catch (Exception ex)
         {
