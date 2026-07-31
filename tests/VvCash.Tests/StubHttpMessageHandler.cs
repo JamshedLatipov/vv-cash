@@ -12,6 +12,12 @@ public class StubHttpMessageHandler : HttpMessageHandler
     public HttpRequestMessage? LastRequest { get; private set; }
     public string? LastRequestBody { get; private set; }
 
+    /// <summary>Content type of every stubbed response. Defaults to JSON, which is what
+    /// every existing caller assumed. UpdateServiceTest overrides it to reproduce the
+    /// SPA fallback on proffi.io, which answers a missing path with text/html under
+    /// status 200.</summary>
+    public string ContentType { get; set; } = "application/json";
+
     public StubHttpMessageHandler(Func<HttpRequestMessage, (HttpStatusCode, string)> responder)
         => _responder = responder;
 
@@ -23,7 +29,7 @@ public class StubHttpMessageHandler : HttpMessageHandler
         var (code, body) = _responder(request);
         return new HttpResponseMessage(code)
         {
-            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+            Content = new StringContent(body, System.Text.Encoding.UTF8, ContentType)
         };
     }
 }
