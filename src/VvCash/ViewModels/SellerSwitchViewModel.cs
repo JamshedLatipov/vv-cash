@@ -143,11 +143,12 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     ///    <see cref="ISellerSession.Current"/> — see the class-level remarks — so a
     ///    sign-out control there would be nonsense.
     ///  - Only when the caller allowed it (<see cref="_callerAllowsSignOut"/>, set by
-    ///    <see cref="Open"/>'s canSignOut parameter). PosViewModel sources this from
-    ///    <c>CanEndSellerSession</c> — the same cart-empty rule its own EndReceipt
-    ///    guards on, since dropping the seller mid-receipt would leave the rest of it
-    ///    with nobody confirmed and nothing to re-prompt (AddToCart's gate only re-asks
-    ///    on an EMPTY cart).
+    ///    <see cref="Open"/>'s canSignOut parameter). PosViewModel's manual chip tap
+    ///    grants it; every automatic gate withholds it, since those fire while a product
+    ///    is about to land in the cart. It used to be withheld on a non-empty cart too,
+    ///    on the premise that AddToCart only re-asked on an EMPTY cart — that premise is
+    ///    gone (it re-asks whenever nobody is confirmed, and Pay refuses without a
+    ///    seller), so see PosViewModel.OpenSellerSwitch for why that came off.
     ///  - Only once somebody is actually <see cref="ISellerSession.Current"/> — nothing
     ///    to sign out of otherwise.</summary>
     public bool CanSignOut => !IsApprovalMode && _callerAllowsSignOut && _session.Current != null;
@@ -211,10 +212,10 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// (see <see cref="SellerSwitchRequest"/>'s own remarks), the rule is that only a
     /// caller which actually checked its own permission may grant this, so the permissive
     /// value must never be what a forgotten argument silently produces. PosViewModel's
-    /// <c>OpenSellerSwitch</c> is the one caller that passes its own
-    /// <c>CanEndSellerSession</c> (true only on an empty cart, for the same reason
-    /// EndReceipt itself is guarded there) — every other caller either omits the argument
-    /// on purpose or passes <c>false</c> explicitly.</summary>
+    /// <c>OpenSellerSwitch</c> — the manual chip tap, which adds nothing to the cart
+    /// itself — is the one caller that grants it; every other caller either omits the
+    /// argument on purpose or passes <c>false</c> explicitly, because each of them fires
+    /// with a product about to land in the cart.</summary>
     public void Open(bool canSignOut = false) => Show(_ => true, approvalMode: false, canSignOut: canSignOut);
 
     /// <summary>Opens the overlay to approve an operation the current seller lacks
