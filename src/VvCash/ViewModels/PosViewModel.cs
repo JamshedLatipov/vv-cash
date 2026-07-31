@@ -531,8 +531,24 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     ///
     /// No IsSellerSwitchEnabled guard on purpose: with switching off nobody ever becomes
     /// Current, and SellerSession.Clear() returns early when Current is already null, so
-    /// this degrades to a no-op on its own.</summary>
-    private void EndReceipt() => _sellerSession.Clear();
+    /// this degrades to a no-op on its own.
+    ///
+    /// Guarded on an empty cart: the returns/exchange dialogs are separate windows that
+    /// never touch the POS cart, so a dialog can close having booked a document while the
+    /// current receipt is still mid-ring — clearing here would leave the rest of that
+    /// receipt with nobody confirmed and AddToCart's gate re-asking only on an empty cart,
+    /// so nothing would ever re-prompt. Pay and ClearCart both empty the cart themselves
+    /// before calling this, so the guard is a no-op for them.</summary>
+    private void EndReceipt()
+    {
+        // Never mid-receipt: a returns/exchange dialog can be opened over a cart that is
+        // still being rung up, and AddToCart's gate only re-asks on an EMPTY cart — so
+        // clearing here would leave the rest of that receipt with nobody confirmed and
+        // nothing to prompt. Pay and ClearCart both empty the cart before calling this,
+        // so the guard is a no-op for them.
+        if (_cartService.Items.Any()) return;
+        _sellerSession.Clear();
+    }
 
     [RelayCommand]
     private async Task FullReinitializeAsync()

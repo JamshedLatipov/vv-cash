@@ -31,7 +31,12 @@ namespace VvCash.Tests;
 /// What this file does NOT cover: the seller chip's XAML binding, the SellerSwitchView
 /// overlay actually appearing on screen, or App.axaml.cs's event wiring — none of that is
 /// reachable without a running Avalonia application, so it was verified by reading the XAML/
-/// code-behind, not by an automated test.
+/// code-behind, not by an automated test. Same reason for
+/// PosViewModel.ShowReturnsDialogAsync / OpenExchange reading HasBookedDocument once
+/// ShowDialog returns: both need a live Avalonia Window, which this xunit host never
+/// provides — that wiring was verified by reading, and the flag's own correctness (when it
+/// does and doesn't get set) is covered by ReturnsViewModelTest / ExchangeViewModelTest
+/// instead.
 public class PosViewModelSellerGateTest
 {
     // ---------------------------------------------------------------------------------
@@ -2208,4 +2213,64 @@ public class PosViewModelSellerGateTest
         Assert.Null(deps.SellerSession.Current);
         Assert.Equal(0, chipChanges);
     }
+
+    // ---------------------------------------------------------------------------------
+    // Mid-receipt guard (final-review Finding 1): a returns/exchange dialog is a separate
+    // window that never touches the POS cart, so it can close having booked a document
+    // while the current receipt is still mid-ring — EndReceipt() must not clear the seller
+    // in that case, or the rest of the receipt is left with nobody confirmed and nothing to
+    // re-prompt (AddToCart's gate only fires on an EMPTY cart). See EndReceipt's own remarks
+    // and docs/superpowers/specs/2026-07-31-seller-reset-on-receipt-end-design.md.
+    //
+    // Coverage note: EndReceipt() has exactly four callers. Two of them —
+    // ShowReturnsDialogAsync and OpenExchange, the two the guard actually protects — need a
+    // live Avalonia Window (they no-op silently without a desktop
+    // IClassicDesktopStyleApplicationLifetime on Application.Current), which this xunit host
+    // never provides — see this file's class-level remarks. That leaves no reachable route
+    // to invoke EndReceipt() with a non-empty cart from here, so neither test below can
+    // actually fail without the guard (both already empty the cart, or never call
+    // EndReceipt at all, before the assertion): they document the guard's no-op contract for
+    // the two reachable callers rather than reproducing the dialog bug itself. The dialog
+    // bug fix was verified by reading ShowReturnsDialogAsync/OpenExchange plus manual
+    // reasoning through the guard's condition, not by an automated test — a real regression
+    // test would need an Avalonia.Headless-style host this project does not have.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ClearCart_WithItemsStillInCart_ClearsCurrentSeller()
+    {
+        // ClearCart empties the cart itself before calling EndReceipt(), so the new guard
+        // ("only reset when the cart is empty") is a no-op here regardless of how many
+        // items were sitting in the cart a moment ago — the legitimate reset must still go
+        // through.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 20m));
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.Empty(deps.CartService.Items);
+        Assert.Null(deps.SellerSession.Current);
+    }
+
+    [Fact]
+    public void Cart_WithItemsStillOpen_NeverClearsTheSellerOnItsOwn()
+    {
+        // The other half of the contract the guard protects, as far as this host can prove
+        // it: simply having items in the cart never drops the confirmed seller by itself —
+        // nothing short of an actual end-of-receipt call (Pay success, ClearCart, or a
+        // dialog that booked a document) does. Contrast with the test above: there, the
+        // seller drops because the cart got emptied, not because items were rung up.
+        using var vm = CreateViewModel(out var deps);
+        var seller = MakeSeller("s1");
+        deps.SellerSession.SetCurrent(seller);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 20m));
+
+        Assert.Equal(2, deps.CartService.Items.Count);
+        Assert.Same(seller, deps.SellerSession.Current);
+    }
+
 }
