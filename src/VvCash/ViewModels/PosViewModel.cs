@@ -1574,8 +1574,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
-                dialog.DataContext = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                var returnsVm = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                dialog.DataContext = returnsVm;
                 await dialog.ShowDialog(mainWindow);
+
+                // A returns screen that actually booked something ends the operation the
+                // same way a payment does — see EndReceipt. Opened and closed without a
+                // return, it costs nothing.
+                if (returnsVm.HasBookedDocument) EndReceipt();
             }
         }
     }
@@ -1589,13 +1595,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ExchangeWindow();
-                dialog.DataContext = new ExchangeViewModel(
+                var exchangeVm = new ExchangeViewModel(
                     dialog, _returnService, _cashOperationService, _expenseDocumentService,
                     _counterpartyService, _settingsService, _productService, _syncService,
                     _printerService, _features,
                     _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty,
                     _sellerSession.Current?.Id, _session.CashId, IsSystemOnline);
+                dialog.DataContext = exchangeVm;
                 await dialog.ShowDialog(mainWindow);
+
+                // Same rule as returns above. The seller id the exchange documents carry
+                // was snapshotted at construction time, so clearing here cannot affect
+                // what was already sent.
+                if (exchangeVm.HasBookedDocument) EndReceipt();
             }
         }
     }
