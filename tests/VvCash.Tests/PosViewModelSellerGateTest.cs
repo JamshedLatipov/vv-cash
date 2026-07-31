@@ -596,151 +596,48 @@ public class PosViewModelSellerGateTest
     // The gate
     // ---------------------------------------------------------------------------------
 
-    [Fact]
-    public void AddToCart_EmptyCartAndStaleSession_RaisesSellerSwitchRequested()
-    {
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.TimedOut = true; // also implied by Current == null, set explicitly for intent
-        var raisedCount = 0;
-        vm.SellerSwitchRequested += (s, e) => raisedCount++;
-
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
-
-        Assert.Equal(1, raisedCount);
-    }
-
-    [Fact]
-    public void AddToCart_EmptyCartAndStaleSession_NeverGrantsSignOut()
-    {
-        // Critical fix: AddToCart's gate fires while the cart is still empty by
-        // construction (its own condition requires !_cartService.Items.Any()), but the
-        // product lands one line later — so by the time the overlay is actually showing,
-        // the cart has an item. CanEndSellerSession read at this instant would be true
-        // (the cart genuinely is empty right now) but would be a lie by the time it
-        // matters, which is exactly what let the sign-out button show over a mid-receipt
-        // cart. The event must carry a hard false here regardless of the cart's
-        // momentary state, never PosViewModel.CanEndSellerSession.
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.TimedOut = true;
-        SellerSwitchRequest? request = null;
-        vm.SellerSwitchRequested += (s, e) => request = e;
-
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
-
-        Assert.NotNull(request);
-        Assert.False(request!.CanSignOut);
-    }
+    // The register asks who is selling in exactly one place: Pay. AddToCart and
+    // ResumeParkedSale used to ask too, and the tests below are what is left of that.
+    //
+    // Asking while the receipt was being built was wrong twice over. It put the overlay
+    // over the screen at the busiest moment at the till, on the first product of every
+    // receipt; and it could not actually block the add, so the product landed whether or
+    // not anyone answered — which is how a dismissed ask left a cart with items, nobody
+    // confirmed, and (once the empty-cart guard read that cart as "receipt in progress")
+    // no way back to the question. Moving the ask to Pay removes the interruption and the
+    // dead end together: nothing is attributed until money is taken, and that is the point
+    // where refusing is still free.
 
     [Fact]
-    public void AddToCart_EmptyCartButSessionNotStale_DoesNotRaise()
+    public void AddToCart_NeverAsksWhoIsSelling_WhateverTheSessionState()
     {
-        // IsStale is false only once a seller has actually been confirmed (Current != null)
-        // and the idle clock hasn't elapsed — the real SellerSession can never be "not
-        // stale" with nobody selected, so the fake must be put in that same state, not just
-        // told to report false.
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.SetCurrent(new SellerInfo { Id = "s0", FirstName = "Prior", LastName = "Seller" });
-        var raisedCount = 0;
-        vm.SellerSwitchRequested += (s, e) => raisedCount++;
-
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
-
-        Assert.Equal(0, raisedCount);
-    }
-
-    [Fact]
-    public void AddToCart_NobodyEverConfirms_KeepsAskingOnEveryItem()
-    {
-        // This test used to assert the opposite — that a second item must NOT re-ask,
-        // because the gate was guarded on an empty cart. It was written to protect "a
-        // receipt being rung up by one person asks once, not once per item", but its own
-        // setup never confirms anyone, so what it actually pinned was the dead end: the
-        // ask is not modal to AddToCart, the product lands whether or not the overlay was
-        // answered, and that non-empty cart then suppressed every later ask. A cashier who
-        // dismissed the overlay could not get it back, and once Pay() started refusing
-        // without a seller there was no way forward from the catalog at all.
-        //
-        // The guarantee it was reaching for is real and still holds — it just needs
-        // somebody actually confirmed to be the scenario it claims to be. That is
-        // AddToCart_OnceSomebodyIsConfirmed_NeverAsksAgainMidReceipt above.
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.TimedOut = true;
-        var raisedCount = 0;
-        vm.SellerSwitchRequested += (s, e) => raisedCount++;
-
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
-        Assert.Equal(1, raisedCount);
-        Assert.True(deps.SellerSession.IsStale); // Touch() cannot clear this while Current is still null
-
-        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
-
-        Assert.Equal(2, raisedCount);
-    }
-
-    [Fact]
-    public void AddToCart_AfterTheAskWasDismissed_AsksAgainOnTheNextProduct()
-    {
-        // The dead end reported from the floor. The ask is not modal to AddToCart: it
-        // raises the overlay and then adds the product anyway, so dismissing the overlay
-        // leaves nobody confirmed AND a non-empty cart. The gate's own empty-cart guard
-        // then reads that cart as "receipt already in progress" and stays silent for
-        // every later product — the cashier sees the overlay once, dismisses it (by
-        // accident or on purpose), and can never get it back by scanning. Harmless while
-        // Pay() still paid; a dead end now that Pay() refuses without a seller.
+        // All three states that used to raise the overlay from here. None may now.
         using var vm = CreateViewModel(out var deps);
         var raised = 0;
         vm.SellerSwitchRequested += (s, e) => raised++;
 
+        // Nobody confirmed at all.
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
-        Assert.Equal(1, raised);
 
-        // Dismissing the overlay is a no-op on the session — SellerSwitchViewModel.Cancel
-        // deliberately leaves Current exactly as it was — so this is the whole simulation.
-        Assert.Null(deps.SellerSession.Current);
-        Assert.Single(deps.CartService.Items); // the product landed regardless
-
-        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
-
-        Assert.Equal(2, raised);
-    }
-
-    [Fact]
-    public void AddToCart_OnceSomebodyIsConfirmed_NeverAsksAgainMidReceipt()
-    {
-        // The other half of the rule, and the reason the fix above cannot simply be "ask
-        // on every add": a receipt being rung up by someone who already confirmed must
-        // never be interrupted, however many items it has.
-        using var vm = CreateViewModel(out var deps);
+        // Somebody confirmed, but the idle timeout lapsed.
         deps.SellerSession.SetCurrent(MakeSeller("s1"));
-        var raised = 0;
-        vm.SellerSwitchRequested += (s, e) => raised++;
-
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        deps.SellerSession.TimedOut = true;
         vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
+
+        // Somebody confirmed and the session is live.
+        deps.SellerSession.Touch();
         vm.AddToCartCommand.Execute(MakeProduct("p3", 7m));
 
         Assert.Equal(0, raised);
+        Assert.Equal(3, deps.CartService.Items.Count); // and every product still landed
     }
 
-    [Fact]
-    public void AddToCart_ConfirmedSellerButIdleExpired_StillAsksAtTheStartOfTheNextReceipt()
-    {
-        // The idle timeout must keep working for the case it exists for: somebody
-        // confirmed, then walked away long enough for the session to go stale, and the
-        // next person starts a fresh receipt. Current is non-null here, so a gate that
-        // only asked when nobody was confirmed would credit that receipt to whoever
-        // walked away — exactly the misattribution the timeout exists to prevent.
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.SetCurrent(MakeSeller("s1"));
-        deps.SellerSession.TimedOut = true;
-        var raised = 0;
-        vm.SellerSwitchRequested += (s, e) => raised++;
-
-        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
-
-        Assert.Equal(1, raised);
-    }
-
+    
+    
+    
+    
+    
+    
     [Fact]
     public void AddToCart_AlwaysTouchesSessionOnGenuineActivity()
     {
@@ -817,29 +714,28 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void SignOutMidReceipt_NextItemReAsks_AndPayStillRefuses()
+    public void SignOutMidReceipt_PayStillRefuses()
     {
-        // What makes granting sign-out mid-receipt safe, rather than a hole: the receipt
-        // left behind cannot quietly finish under nobody's name. The very next item
-        // re-asks, and Pay() refuses regardless. Without both of these the old empty-cart
-        // restriction would still be earning its keep.
+        // What makes granting sign-out mid-receipt safe rather than a hole: the receipt
+        // left behind cannot quietly finish under nobody's name. Pay refuses and asks, and
+        // that refusal is the whole safety net now that nothing upstream asks at all.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("s0"));
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
 
         deps.SellerSession.Clear(); // what SellerSwitchViewModel.SignOutSeller does
-        var raised = 0;
-        vm.SellerSwitchRequested += (s, e) => raised++;
-
         vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
-        Assert.Equal(1, raised); // re-asked despite the cart being non-empty
 
         var navigated = 0;
         vm.NavigationRequest = _ => navigated++;
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
+
         vm.PayCommand.Execute(null);
 
         Assert.Equal(0, navigated);
         Assert.Null(deps.ExpenseDocumentService.LastRequest);
+        Assert.Equal(1, raised);
     }
 
     // ---------------------------------------------------------------------------------
@@ -940,14 +836,9 @@ public class PosViewModelSellerGateTest
     [Fact]
     public void Pay_SellerSwitchEnabled_NoCurrentSeller_RefusesAndAsksWhoIsSelling()
     {
-        // The bug this gate closes: AddToCart's start-of-receipt ask raises a NON-modal
-        // overlay and then adds the item regardless, so dismissing that overlay left a
-        // full cart with Current still null and every later step — payment screen, the
-        // document, the drawer — ran anyway. The sale went out unattributed.
-        //
-        // Reproduced exactly as it happens at the till: the gate fires, nobody completes
-        // the switch (no SetCurrent), and Pay is pressed on the cart that got filled
-        // anyway. Nothing may reach NavigationRequest, and the ask must be repeated.
+        // The one gate the register has. Nothing upstream asks any more, so a whole
+        // receipt can be rung up with nobody confirmed — this is what must catch it, and
+        // it is the last point where catching it is still free.
         using var vm = CreateViewModel(out var deps);
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
         Assert.Null(deps.SellerSession.Current);
@@ -970,11 +861,13 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void Pay_AfterSellerConfirmsOnTheSecondAttempt_GoesThrough()
+    public async Task Pay_TheAnswerToTheGateResumesThePaymentByItself()
     {
-        // The gate must be a re-ask, not a dead end: once someone actually confirms,
-        // pressing Pay again pays the same cart and stamps them onto the document. A
-        // guard that refused forever would be as broken as one that never refused.
+        // What makes the gate a pause rather than a rejected press. The cashier presses
+        // Pay, answers "who is selling?", and the payment screen opens off the back of
+        // that answer — no second press. Without this the refusal is indistinguishable
+        // from a dead button: nothing on screen says the same control now needs pressing
+        // again.
         using var vm = CreateViewModel(out var deps);
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
 
@@ -983,12 +876,19 @@ public class PosViewModelSellerGateTest
         {
             if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
         };
+        SellerSwitchRequest? request = null;
+        vm.SellerSwitchRequested += (s, e) => request = e;
 
         vm.PayCommand.Execute(null);
-        Assert.Null(mixedPaymentVm); // refused: nobody confirmed
+        Assert.Null(mixedPaymentVm); // refused, as it must be
+        Assert.NotNull(request);
+        Assert.NotNull(request!.OnSwitched);
 
-        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-7", FirstName = "Anna", LastName = "Lee" });
-        vm.PayCommand.Execute(null);
+        // Exactly what SellerSwitchViewModel does on a successful PIN: set the seller,
+        // then run the continuation the caller handed over.
+        var seller = MakeSeller("seller-7");
+        deps.SellerSession.SetCurrent(seller);
+        await request.OnSwitched!(seller);
 
         Assert.NotNull(mixedPaymentVm);
         mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
@@ -999,15 +899,17 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void Pay_SellerConfirmedButSessionWentStale_StillPays()
+    public void Pay_SellerConfirmedButSessionWentStale_RefusesAndAsksAgain()
     {
-        // The gate reads Current, not IsStale, deliberately. A long receipt can outlive
-        // the idle timeout while the person who confirmed it is still standing there;
-        // gating on staleness would demand a fresh PIN at the moment the customer is
-        // handing over money. What must never happen is paying with nobody confirmed at
-        // all, and that is exactly what Current == null means.
+        // Being the only gate left, this one carries the idle timeout too. Somebody
+        // confirmed, then the register sat idle long enough to lapse — the next person
+        // must not have their receipt signed by whoever walked away. Current is non-null
+        // here, so a gate that only checked "is anybody confirmed" would wave this
+        // through, which is the misattribution the timeout exists for.
+        //
+        // Touch() runs on every add, so an actively rung-up receipt never reaches this.
         using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-7", FirstName = "Anna", LastName = "Lee" });
+        deps.SellerSession.SetCurrent(MakeSeller("seller-7"));
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
         deps.SellerSession.TimedOut = true;
         Assert.True(deps.SellerSession.IsStale);
@@ -1017,9 +919,37 @@ public class PosViewModelSellerGateTest
         {
             if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
         };
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
 
         vm.PayCommand.Execute(null);
 
+        Assert.Null(mixedPaymentVm);
+        Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public void Pay_ActivelyRungUpReceipt_NeverAsksAtTheTill()
+    {
+        // The other side of gating on IsStale: adding items keeps the session alive, so a
+        // receipt being rung up normally reaches Pay with nothing to ask. If this ever
+        // fails, every sale would prompt for a PIN at the moment money changes hands.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("seller-7"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 20m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+        var raised = 0;
+        vm.SellerSwitchRequested += (s, e) => raised++;
+
+        vm.PayCommand.Execute(null);
+
+        Assert.Equal(0, raised);
         Assert.NotNull(mixedPaymentVm);
     }
 
@@ -1707,54 +1637,16 @@ public class PosViewModelSellerGateTest
     // ---------------------------------------------------------------------------------
 
     [Fact]
-    public async Task ResumeParkedSale_SessionStale_RequestsSellerSwitchOverlay()
+    public async Task ResumeParkedSale_NeverAsksWhoIsSelling()
     {
-        // No SetCurrent call: Current stays null, exactly the "register just restarted,
-        // nobody has confirmed on yet" scenario from the bug report — resuming is the
-        // cashier's very first action, never touching AddToCart at all.
+        // Resuming used to ask, because it fills the cart without going through AddToCart
+        // and so slipped past that gate. With the only gate now at Pay, that reason is
+        // gone: a resumed receipt reaches the till like any other and is asked there.
+        //
+        // Covers the worst case for attribution — nobody confirmed at all, the "register
+        // just restarted and resuming is the cashier's first action" scenario. Even then
+        // nothing is asked here; Pay is what refuses.
         using var vm = CreateViewModel(out var deps);
-        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
-        {
-            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
-        });
-        var raisedCount = 0;
-        vm.SellerSwitchRequested += (s, e) => raisedCount++;
-
-        await vm.ResumeParkedSale("parked-1");
-
-        Assert.Equal(1, raisedCount);
-        // The gate does not block the resume itself — the parked items still land in the
-        // cart; the overlay is a request the host opens on top, not a hard stop here.
-        Assert.Single(deps.CartService.Items);
-    }
-
-    [Fact]
-    public async Task ResumeParkedSale_SessionStale_NeverGrantsSignOut()
-    {
-        // Same shape as AddToCart_EmptyCartAndStaleSession_NeverGrantsSignOut: the gate
-        // fires while the cart is momentarily empty (either it started empty, or the
-        // auto-park branch above just emptied it), but the parked snapshot's items land
-        // in the cart moments later — so CanEndSellerSession read right now would read
-        // true and be stale by the time it matters. Must be a hard false.
-        using var vm = CreateViewModel(out var deps);
-        deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
-        {
-            Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
-        });
-        SellerSwitchRequest? request = null;
-        vm.SellerSwitchRequested += (s, e) => request = e;
-
-        await vm.ResumeParkedSale("parked-1");
-
-        Assert.NotNull(request);
-        Assert.False(request!.CanSignOut);
-    }
-
-    [Fact]
-    public async Task ResumeParkedSale_SessionFreshWithActiveSeller_DoesNotRequestOverlay()
-    {
-        using var vm = CreateViewModel(out var deps);
-        deps.SellerSession.SetCurrent(MakeSeller("s1"));
         deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
         {
             Items = new List<ParkedCartItem> { new() { Product = MakeProduct("p1", 100m), Quantity = 1 } }
@@ -1765,37 +1657,34 @@ public class PosViewModelSellerGateTest
         await vm.ResumeParkedSale("parked-1");
 
         Assert.Equal(0, raisedCount);
+        Assert.Single(deps.CartService.Items); // the resume itself is unaffected
+        Assert.Null(deps.SellerSession.Current); // still nobody — Pay is what catches this
     }
 
     [Fact]
-    public async Task ResumeParkedSale_RestoredApprovedById_IsUnaffectedBySellerGateFiring()
+    public async Task ResumeParkedSale_RestoredApprovedById_SurvivesAnAbsentSeller()
     {
         // A genuine park -> (session goes stale, e.g. the register restarted before anyone
         // resumed) -> resume round trip through FakeParkedSaleService, proving the discount
-        // approval carried by ParkedSaleSnapshot.ApprovedById survives completely
-        // independently of whether the new seller gate fires on the same resume — the two
-        // concerns (who authorised the discount vs. who is selling) must never conflate.
+        // approval carried by ParkedSaleSnapshot.ApprovedById survives an absent seller on
+        // the resume — the two concerns (who authorised the discount vs. who is selling)
+        // must never conflate.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("cashier", maxDiscount: 15m));
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
         vm.ApplyApprovedDiscount("supervisor-9", 40m);
         await vm.ConfirmParkSaleCommand.ExecuteAsync(null);
 
-        // Simulate the session going stale/absent before the resume (e.g. a restart with
-        // no seller persisted, or the idle timeout) — this is exactly what makes the new
-        // gate fire below.
+        // The register restarted with no seller persisted, or the idle timeout lapsed.
         deps.SellerSession.Clear();
-        var raisedCount = 0;
-        vm.SellerSwitchRequested += (s, e) => raisedCount++;
 
         await vm.ResumeParkedSale(deps.ParkedSaleService.LastParkedId!);
 
-        Assert.Equal(1, raisedCount); // sanity check: the gate did fire for this resume
         Assert.Equal(40m, deps.CartService.ManualDiscountPercent); // the approved discount still came back
 
-        // Whoever picked the resumed receipt up confirms at the overlay the gate just
-        // raised — without that, Pay()'s no-seller gate refuses and this test would be
-        // asserting against a document that was never built.
+        // Whoever picked the resumed receipt up confirms at the till, where Pay's gate
+        // asks — without that, Pay refuses and this test would be asserting against a
+        // document that was never built.
         deps.SellerSession.SetCurrent(MakeSeller("cashier"));
 
         MixedPaymentViewModel? mixedPaymentVm = null;
@@ -1809,17 +1698,15 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public async Task ResumeParkedSale_AutoParksExistingCart_GateStillFiresOnlyOnce()
+    public async Task ResumeParkedSale_AutoParksExistingCart_LeavesOnlyTheResumedReceipt()
     {
         // Resuming while the cart already holds an in-progress receipt auto-parks that
         // receipt first, then loads the requested one — two cart-clearing/filling steps in
-        // a single call. The gate must still fire at most once, not once per step.
+        // a single call. This used to also pin "the seller gate fires at most once, not
+        // once per step"; there is no gate here any more, so what is left to protect is
+        // that the two steps land the right cart.
         using var vm = CreateViewModel(out var deps);
-        // Cart starts with an item from a receipt already in progress under a stale
-        // session (mirrors AddToCart_NobodyEverConfirms_KeepsAskingOnEveryItem:
-        // Touch() alone can never clear staleness while Current stays null).
         vm.AddToCartCommand.Execute(MakeProduct("p-current", 5m));
-        Assert.True(deps.SellerSession.IsStale);
 
         deps.ParkedSaleService.SeedParkedSnapshot("parked-1", new ParkedSaleSnapshot
         {
@@ -1830,7 +1717,7 @@ public class PosViewModelSellerGateTest
 
         await vm.ResumeParkedSale("parked-1");
 
-        Assert.Equal(1, raisedCount);
+        Assert.Equal(0, raisedCount);
         Assert.Single(deps.CartService.Items);
         Assert.Equal("p1", deps.CartService.Items[0].Product.Id);
     }
@@ -2465,10 +2352,12 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void AddToCart_AfterReceiptEnded_AsksAgainWithoutWaitingOutTheIdleTimeout()
+    public void PayAfterReceiptEnded_AsksAgainWithoutWaitingOutTheIdleTimeout()
     {
         // The whole point of the reset: the idle clock has NOT elapsed (AddToCart's own
-        // Touch() just reset it), and the gate must still fire for the next receipt.
+        // Touch() keeps resetting it), yet the next receipt must still be asked about,
+        // because the previous one ended and dropped whoever sold it. Used to be proven at
+        // AddToCart, which no longer asks — Pay is where the same guarantee now shows up.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("s1"));
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
@@ -2479,8 +2368,14 @@ public class PosViewModelSellerGateTest
         Assert.False(deps.SellerSession.TimedOut);
 
         vm.AddToCartCommand.Execute(MakeProduct("p2", 10m));
+        Assert.Equal(0, raisedCount); // building the next receipt asks nothing
+
+        var navigated = 0;
+        vm.NavigationRequest = _ => navigated++;
+        vm.PayCommand.Execute(null);
 
         Assert.Equal(1, raisedCount);
+        Assert.Equal(0, navigated);
     }
 
     [Fact]
@@ -2503,12 +2398,10 @@ public class PosViewModelSellerGateTest
     }
 
     // ---------------------------------------------------------------------------------
-    // Manual sign-out gate (2026-07-31 design, manual counterpart to EndReceipt):
-    // CanEndSellerSession mirrors EndReceipt's own guard exactly (see EndReceipt's
-    // remarks) so App.axaml.cs can hand the seller-switch overlay's manual "stop
-    // selling" control the same permission the automatic reset already enforces —
-    // never mid-receipt, since AddToCart's gate only re-asks who is selling on an
-    // EMPTY cart.
+    // CanEndSellerSession: "no receipt is in progress". It used to also gate the overlay's
+    // manual "stop selling" control; it no longer does (see OpenSellerSwitch). What it
+    // still does is keep EndReceipt from treating a returns/exchange dialog closing as the
+    // end of a receipt that is still being rung up.
     // ---------------------------------------------------------------------------------
 
     [Fact]

@@ -33,19 +33,24 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     private readonly ISellerSession _session;
     private readonly ISellerRosterService _rosterService;
 
-    /// <summary>The continuation for the approval currently in flight (or about to be),
-    /// set by <see cref="OpenForApproval"/> and consumed exactly once — by a successful
-    /// PIN in <see cref="SubmitAsync"/>, or discarded by <see cref="Cancel"/>. Every call
-    /// to <see cref="Show"/> (both <see cref="Open"/> and <see cref="OpenForApproval"/>)
-    /// overwrites this, so each approval owns only its own follow-up: a cancelled or
-    /// superseded approval can never cause a later, unrelated one to run the wrong
-    /// operation — there is only ever one slot, and it always reflects the most recent
-    /// open call. This replaces an earlier design where every caller shared one
+    /// <summary>The continuation for whatever this overlay is currently open for, set by
+    /// <see cref="Open"/> or <see cref="OpenForApproval"/> and consumed exactly once — by
+    /// a successful PIN in <see cref="SubmitAsync"/>, or discarded by <see cref="Cancel"/>.
+    /// Every call to <see cref="Show"/> overwrites this, so each open owns only its own
+    /// follow-up: a cancelled or superseded one can never cause a later, unrelated open to
+    /// run the wrong operation — there is only ever one slot, and it always reflects the
+    /// most recent open call. This replaces an earlier design where every caller shared one
     /// <see cref="Approved"/> event and guarded it with its own boolean "is this approval
     /// for me" flag, which does not scale past a single flow (two flags can both end up
     /// armed at once) and cannot be cleared by a cancel that this class didn't know had
-    /// happened.</summary>
-    private Func<SellerInfo, Task>? _onApproved;
+    /// happened.
+    ///
+    /// Serves both modes rather than approval alone, deliberately kept as one slot: the
+    /// switch flow needs a continuation too, so that the operation which had to stop and
+    /// ask who is selling resumes by itself instead of making the cashier repeat the press
+    /// that triggered the question. Two slots would reintroduce exactly the "both end up
+    /// armed at once" problem the single slot exists to rule out.</summary>
+    private Func<SellerInfo, Task>? _onCompleted;
 
     // Set for the duration of SubmitAsync (and, for the PIN-setup flow, its own
     // network round-trip) and checked by every other entry point that mutates
@@ -63,7 +68,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// <summary>The caller's permission for whether the manual sign-out control may be
     /// offered at all — see <see cref="Open"/>'s canSignOut parameter and
     /// <see cref="CanSignOut"/>. Assigned inside <see cref="Show"/>'s _isBusy guard for
-    /// the same reason <see cref="_onApproved"/> is (see Show's remarks): a call that
+    /// the same reason <see cref="_onCompleted"/> is (see Show's remarks): a call that
     /// arrives while a submit is genuinely in flight must not overwrite state for that
     /// still-pending submit.</summary>
     private bool _callerAllowsSignOut = true;
@@ -215,15 +220,22 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// <c>OpenSellerSwitch</c> — the manual chip tap, which adds nothing to the cart
     /// itself — is the one caller that grants it; every other caller either omits the
     /// argument on purpose or passes <c>false</c> explicitly, because each of them fires
-    /// with a product about to land in the cart.</summary>
-    public void Open(bool canSignOut = false) => Show(_ => true, approvalMode: false, canSignOut: canSignOut);
+    /// with a product about to land in the cart.
+    ///
+    /// <paramref name="onSwitched"/> resumes whatever had to stop and ask. A gate that
+    /// refuses an operation because nobody is confirmed leaves the cashier holding a press
+    /// that did nothing; without a continuation they have to work out that the same button
+    /// needs pressing again once the PIN is in. Runs only on a successful switch — a
+    /// cancelled or failed one discards it, same as approval mode.</summary>
+    public void Open(bool canSignOut = false, Func<SellerInfo, Task>? onSwitched = null)
+        => Show(_ => true, approvalMode: false, onSwitched, canSignOut: canSignOut);
 
     /// <summary>Opens the overlay to approve an operation the current seller lacks
     /// <paramref name="hasRight"/> for. Lists only sellers holding that right, and a
     /// successful PIN here never changes <see cref="ISellerSession.Current"/> — it
     /// raises <see cref="Approved"/> and, if given, invokes <paramref name="onApproved"/>
     /// with the approving seller. <paramref name="onApproved"/> is how the caller's own
-    /// operation actually resumes — see <see cref="_onApproved"/> for why each call owns
+    /// operation actually resumes — see <see cref="_onCompleted"/> for why each call owns
     /// its own continuation instead of every caller sharing one event. Passes
     /// <c>canSignOut: false</c> explicitly as defence in depth — <see cref="CanSignOut"/>'s
     /// own <c>!IsApprovalMode</c> check already rules the control out regardless of what
@@ -232,7 +244,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     public void OpenForApproval(Func<SellerInfo, bool> hasRight, Func<SellerInfo, Task>? onApproved = null)
         => Show(hasRight, approvalMode: true, onApproved, canSignOut: false);
 
-    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onApproved = null, bool canSignOut = false)
+    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onCompleted = null, bool canSignOut = false)
     {
         // A fresh Open()/OpenForApproval() while a submit is in flight would
         // reset SelectedSeller/Pin/Sellers out from under SubmitAsync's still-
@@ -244,12 +256,12 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         // Assigned here, inside the same busy guard as everything else Show() resets,
         // rather than by the public Open()/OpenForApproval() methods before calling
         // Show(): otherwise a call that arrives while a submit is genuinely in flight
-        // would overwrite _onApproved for that still-pending submit even though Show()
-        // itself goes on to no-op. Open() always passes null, which is what clears a
-        // stale continuation left behind by an approval that opened but was then
-        // cancelled or superseded rather than completed. _callerAllowsSignOut is
-        // assigned the same way and for the same reason.
-        _onApproved = onApproved;
+        // would overwrite _onCompleted for that still-pending submit even though Show()
+        // itself goes on to no-op. A caller with no follow-up passes null, which is what
+        // clears a stale continuation left behind by an open that was then cancelled or
+        // superseded rather than completed. _callerAllowsSignOut is assigned the same way
+        // and for the same reason.
+        _onCompleted = onCompleted;
         _callerAllowsSignOut = canSignOut;
 
         IsApprovalMode = approvalMode;
@@ -348,7 +360,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// SellerSwitchView.axaml) and, via Escape, from either state. What "cancel" means
     /// depends on the mode it interrupts:
     ///  - Approval (<see cref="IsApprovalMode"/>): abandons the operation that requested
-    ///    it. <see cref="_onApproved"/> is discarded before hiding, so nothing runs — and
+    ///    it. <see cref="_onCompleted"/> is discarded before hiding, so nothing runs — and
     ///    because each approval owns its own continuation slot (see its remarks), a later,
     ///    unrelated approval can never be mistaken for permission to run this one.
     ///  - Switch: leaves <see cref="ISellerSession.Current"/> exactly as it was. If nobody
@@ -363,7 +375,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     {
         if (_isBusy) return;
 
-        _onApproved = null;
+        _onCompleted = null;
         HideAndReset();
     }
 
@@ -375,10 +387,10 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// <see cref="SelectSeller"/>/<see cref="Back"/>/<see cref="Cancel"/>, it trusts the
     /// view to only invoke it when the bound control is actually visible.
     ///
-    /// Mirrors <see cref="Cancel"/>'s dismissal exactly — same <see cref="_onApproved"/>
+    /// Mirrors <see cref="Cancel"/>'s dismissal exactly — same <see cref="_onCompleted"/>
     /// discard (harmless here in practice, since reaching this while <see cref="CanSignOut"/>
     /// is true already implies <see cref="IsApprovalMode"/> is false and therefore
-    /// <see cref="_onApproved"/> is already null, but kept for the same defensive
+    /// <see cref="_onCompleted"/> is already null, but kept for the same defensive
     /// not-this-class's-job-to-assume-that reason as <see cref="Cancel"/>) and the same
     /// <see cref="HideAndReset"/> — plus the one thing Cancel deliberately never does:
     /// actually clearing <see cref="ISellerSession.Current"/>. A no-op while
@@ -393,7 +405,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     {
         if (_isBusy) return;
 
-        _onApproved = null;
+        _onCompleted = null;
         _session.Clear();
         HideAndReset();
     }
@@ -401,11 +413,15 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     private async Task SubmitAsync()
     {
         if (SelectedSeller == null) return;
-        var sellerId = SelectedSeller.Id;
+        // Captured before any exit path runs: every one of them goes through
+        // HideAndReset, which nulls SelectedSeller, so the continuation below would have
+        // nobody to hand over if it read the property afterwards.
+        var seller = SelectedSeller;
+        var sellerId = seller.Id;
 
         if (IsSettingPin)
         {
-            await SubmitPinSetupStepAsync(sellerId);
+            await SubmitPinSetupStepAsync(seller);
             return;
         }
 
@@ -433,9 +449,9 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
                 // Consumed (and cleared) here, before Succeed()/Approved fire: a
                 // continuation that itself opens another approval (unlikely today, but
                 // not this class's job to rule out) must not find its own call still
-                // sitting in _onApproved.
-                var continuation = _onApproved;
-                _onApproved = null;
+                // sitting in _onCompleted.
+                var continuation = _onCompleted;
+                _onCompleted = null;
 
                 Succeed();
                 Approved?.Invoke(this, approver);
@@ -458,7 +474,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            Succeed();
+            await SucceedAndResumeAsync(seller);
         }
         finally
         {
@@ -494,8 +510,10 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// either the first entry, the confirming second entry (compared locally, no
     /// network yet), or — once both agree and pass <see cref="IsTrivialPin"/> —
     /// the actual <see cref="ISellerRosterService.SetPinAsync"/> round-trip.</summary>
-    private async Task SubmitPinSetupStepAsync(string sellerId)
+    private async Task SubmitPinSetupStepAsync(SellerInfo seller)
     {
+        var sellerId = seller.Id;
+
         if (!IsConfirmingNewPin)
         {
             // First entry: reject the obviously-trivial patterns the backend also
@@ -577,7 +595,11 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            Succeed();
+            // Setting a PIN on first use ends with this seller selected exactly as an
+            // ordinary switch does, so whatever was waiting on "who is selling?" resumes
+            // here too — otherwise the one cashier who had to set a PIN is the one left
+            // pressing the button a second time.
+            await SucceedAndResumeAsync(seller);
         }
         finally
         {
@@ -660,6 +682,22 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// after success was harmless while every consumer gates on <see cref="IsVisible"/>,
     /// but inconsistent with the rest of the class.</summary>
     private void Succeed() => HideAndReset();
+
+    /// <summary>Closes the overlay on a successful switch and then runs whatever the
+    /// caller was in the middle of, if anything (see <see cref="_onCompleted"/>). The
+    /// continuation is taken and cleared before it runs, for the same reason approval mode
+    /// does it: a continuation that itself opens this overlay again must not find its own
+    /// call still sitting in the slot. Closing first, then resuming, so the operation
+    /// resumes against a screen that is no longer covered by the PIN pad.</summary>
+    private async Task SucceedAndResumeAsync(SellerInfo seller)
+    {
+        var continuation = _onCompleted;
+        _onCompleted = null;
+
+        Succeed();
+
+        if (continuation != null) await continuation(seller);
+    }
 
     private void Fail(string message)
     {

@@ -89,7 +89,7 @@ public partial class App : Application
                 // gain an item that wasn't there yet when the gate fired. This wiring just
                 // forwards the decision; PosViewModel still never learns
                 // SellerSwitchViewModel exists.
-                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open(e.CanSignOut);
+                posVm.SellerSwitchRequested += (s, e) => sellerSwitchVm.Open(e.CanSignOut, e.OnSwitched);
 
                 // Closing a shift without CanCloseShift escalates through the same
                 // overlay, in approval mode (see SellerSwitchViewModel.OpenForApproval).

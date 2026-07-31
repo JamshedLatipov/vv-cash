@@ -404,6 +404,73 @@ public class SellerSwitchViewModelTest
     }
 
     [Fact]
+    public async Task Open_WithContinuation_RunsItOnASuccessfulSwitch_CarryingTheSeller()
+    {
+        // The switch flow needs a continuation for the same reason approval mode has one:
+        // PosViewModel.Pay stops and asks who is selling, and the payment has to resume off
+        // the answer rather than make the cashier press Pay a second time.
+        var session = await SessionWithRoster();
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        SellerInfo? resumedWith = null;
+        var visibleWhenResumed = true;
+
+        vm.Open(onSwitched: s =>
+        {
+            resumedWith = s;
+            visibleWhenResumed = vm.IsVisible;
+            return Task.CompletedTask;
+        });
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        foreach (var d in "4821") // Sellers[0] is "u-1" Азиз — see SessionWithRoster
+            await vm.AppendDigitCommand.ExecuteAsync(d.ToString());
+
+        Assert.NotNull(resumedWith);
+        Assert.Equal(vm.Sellers[0].Id, resumedWith!.Id);
+        Assert.Same(resumedWith, session.Current); // the switch really happened
+        // Closed before resuming: the operation must not come back up underneath a PIN pad.
+        Assert.False(visibleWhenResumed);
+    }
+
+    [Fact]
+    public async Task Open_WithContinuation_DiscardsItOnCancel()
+    {
+        // Dismissing the question abandons what was waiting on it — the cashier said no,
+        // so the payment they were refused must not go through anyway.
+        var session = await SessionWithRoster();
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        var ran = false;
+
+        vm.Open(onSwitched: _ => { ran = true; return Task.CompletedTask; });
+        vm.CancelCommand.Execute(null);
+
+        // And a later switch, which nothing was waiting on, must not run the abandoned one.
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        foreach (var d in "4821") // Sellers[0] is "u-1" Азиз — see SessionWithRoster
+            await vm.AppendDigitCommand.ExecuteAsync(d.ToString());
+
+        Assert.Equal("u-1", session.Current?.Id); // the later switch really did succeed
+        Assert.False(ran);
+    }
+
+    [Fact]
+    public async Task Open_WithContinuation_DoesNotRunItOnAWrongPin()
+    {
+        var session = await SessionWithRoster();
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        var ran = false;
+
+        vm.Open(onSwitched: _ => { ran = true; return Task.CompletedTask; });
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        foreach (var d in "0000")
+            await vm.AppendDigitCommand.ExecuteAsync(d.ToString());
+
+        Assert.False(ran);
+        Assert.True(vm.HasError);
+        Assert.True(vm.IsVisible); // still up for a retry, continuation still armed
+    }
+
+    [Fact]
     public async Task Cancel_WhileSubmitIsPending_IsANoOp()
     {
         var roster = new List<SellerInfo>
