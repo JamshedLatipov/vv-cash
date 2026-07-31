@@ -2215,6 +2215,45 @@ public class PosViewModelSellerGateTest
     }
 
     // ---------------------------------------------------------------------------------
+    // Manual sign-out gate (2026-07-31 design, manual counterpart to EndReceipt):
+    // CanEndSellerSession mirrors EndReceipt's own guard exactly (see EndReceipt's
+    // remarks) so App.axaml.cs can hand the seller-switch overlay's manual "stop
+    // selling" control the same permission the automatic reset already enforces —
+    // never mid-receipt, since AddToCart's gate only re-asks who is selling on an
+    // EMPTY cart.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void CanEndSellerSession_FalseWithItemsInCart()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        Assert.False(vm.CanEndSellerSession);
+    }
+
+    [Fact]
+    public void CanEndSellerSession_TrueOnceCartIsEmptyAgain()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        Assert.False(vm.CanEndSellerSession); // sanity check on the premise
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.True(vm.CanEndSellerSession);
+    }
+
+    [Fact]
+    public void CanEndSellerSession_TrueOnAFreshEmptyCart()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        Assert.True(vm.CanEndSellerSession);
+    }
+
+    // ---------------------------------------------------------------------------------
     // Mid-receipt guard (final-review Finding 1): a returns/exchange dialog is a separate
     // window that never touches the POS cart, so it can close having booked a document
     // while the current receipt is still mid-ring — EndReceipt() must not clear the seller

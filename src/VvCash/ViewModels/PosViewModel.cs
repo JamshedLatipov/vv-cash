@@ -518,6 +518,20 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         LogoutRequested?.Invoke(this, explanation);
     }
 
+    /// <summary>True when the cart has no items — the exact condition <see cref="EndReceipt"/>'s
+    /// own guard checks below, exposed here for the manual counterpart to that automatic
+    /// reset: the seller-switch overlay's "stop selling" control (see
+    /// <see cref="SellerSwitchViewModel.CanSignOut"/>) must never be offered mid-receipt,
+    /// for the same reason EndReceipt itself refuses to fire then — AddToCart's gate only
+    /// re-asks who is selling on an EMPTY cart, so dropping the seller with items still in
+    /// the cart would leave the rest of that receipt with nobody confirmed and nothing to
+    /// re-prompt. Read once by App.axaml.cs when it opens the overlay for a plain switch
+    /// (<c>sellerSwitchVm.Open(canSignOut: posVm.CanEndSellerSession)</c>) rather than kept
+    /// live for binding — PosViewModel has no reason to know SellerSwitchViewModel exists,
+    /// so it never reaches into the overlay itself; the caller reads this at the moment it
+    /// asks the overlay to open.</summary>
+    public bool CanEndSellerSession => !_cartService.Items.Any();
+
     /// <summary>Every finished operation is meant to funnel through here — a successful
     /// payment, the cashier manually clearing the receipt, and a returns/exchange dialog
     /// that genuinely booked a document — to say "nobody is confirmed any more". The idle

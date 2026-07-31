@@ -60,6 +60,14 @@ public partial class SellerSwitchViewModel : ViewModelBase
     // overlapping setup attempt — out from under the still-pending call.
     private bool _isBusy;
 
+    /// <summary>The caller's permission for whether the manual sign-out control may be
+    /// offered at all — see <see cref="Open"/>'s canSignOut parameter and
+    /// <see cref="CanSignOut"/>. Assigned inside <see cref="Show"/>'s _isBusy guard for
+    /// the same reason <see cref="_onApproved"/> is (see Show's remarks): a call that
+    /// arrives while a submit is genuinely in flight must not overwrite state for that
+    /// still-pending submit.</summary>
+    private bool _callerAllowsSignOut = true;
+
     [ObservableProperty] private bool _isVisible;
     [ObservableProperty] private bool _isPinEntry;
     [ObservableProperty] private SellerInfo? _selectedSeller;
@@ -127,12 +135,30 @@ public partial class SellerSwitchViewModel : ViewModelBase
     /// the shift owner, see <see cref="Cancel"/>.</summary>
     public bool HasEmptyRoster => !IsApprovalMode && Sellers.Count == 0;
 
+    /// <summary>True when the tile-grid screen should offer a manual "stop selling"
+    /// control — the way for the person at the register to explicitly become nobody,
+    /// without switching to someone else. Three conditions, all required:
+    ///  - Never in approval mode (<see cref="IsApprovalMode"/>): an approval verifies a
+    ///    supervisor's PIN on someone else's behalf and deliberately never touches
+    ///    <see cref="ISellerSession.Current"/> — see the class-level remarks — so a
+    ///    sign-out control there would be nonsense.
+    ///  - Only when the caller allowed it (<see cref="_callerAllowsSignOut"/>, set by
+    ///    <see cref="Open"/>'s canSignOut parameter). PosViewModel sources this from
+    ///    <c>CanEndSellerSession</c> — the same cart-empty rule its own EndReceipt
+    ///    guards on, since dropping the seller mid-receipt would leave the rest of it
+    ///    with nobody confirmed and nothing to re-prompt (AddToCart's gate only re-asks
+    ///    on an EMPTY cart).
+    ///  - Only once somebody is actually <see cref="ISellerSession.Current"/> — nothing
+    ///    to sign out of otherwise.</summary>
+    public bool CanSignOut => !IsApprovalMode && _callerAllowsSignOut && _session.Current != null;
+
     partial void OnIsApprovalModeChanged(bool value) => NotifyEmptyStateChanged();
 
     private void NotifyEmptyStateChanged()
     {
         OnPropertyChanged(nameof(HasNoApprover));
         OnPropertyChanged(nameof(HasEmptyRoster));
+        OnPropertyChanged(nameof(CanSignOut));
     }
 
     /// <summary>Raised when an escalation PIN was accepted, carrying the approving seller.</summary>
@@ -151,8 +177,12 @@ public partial class SellerSwitchViewModel : ViewModelBase
         Sellers.CollectionChanged += (_, _) => NotifyEmptyStateChanged();
     }
 
-    /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.</summary>
-    public void Open() => Show(_ => true, approvalMode: false);
+    /// <summary>Opens the overlay to switch the current seller. Lists the whole roster.
+    /// <paramref name="canSignOut"/> is the caller's permission for whether the manual
+    /// sign-out control should be offered at all this time (see <see cref="CanSignOut"/>)
+    /// — PosViewModel passes its own <c>CanEndSellerSession</c>, true only on an empty
+    /// cart, for the same reason EndReceipt itself is guarded there.</summary>
+    public void Open(bool canSignOut = true) => Show(_ => true, approvalMode: false, canSignOut: canSignOut);
 
     /// <summary>Opens the overlay to approve an operation the current seller lacks
     /// <paramref name="hasRight"/> for. Lists only sellers holding that right, and a
@@ -160,11 +190,13 @@ public partial class SellerSwitchViewModel : ViewModelBase
     /// raises <see cref="Approved"/> and, if given, invokes <paramref name="onApproved"/>
     /// with the approving seller. <paramref name="onApproved"/> is how the caller's own
     /// operation actually resumes — see <see cref="_onApproved"/> for why each call owns
-    /// its own continuation instead of every caller sharing one event.</summary>
+    /// its own continuation instead of every caller sharing one event. Never offers the
+    /// sign-out control — see <see cref="CanSignOut"/> for why approval mode rules it out
+    /// regardless of what a caller here would pass.</summary>
     public void OpenForApproval(Func<SellerInfo, bool> hasRight, Func<SellerInfo, Task>? onApproved = null)
         => Show(hasRight, approvalMode: true, onApproved);
 
-    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onApproved = null)
+    private void Show(Func<SellerInfo, bool> filter, bool approvalMode, Func<SellerInfo, Task>? onApproved = null, bool canSignOut = true)
     {
         // A fresh Open()/OpenForApproval() while a submit is in flight would
         // reset SelectedSeller/Pin/Sellers out from under SubmitAsync's still-
@@ -179,8 +211,10 @@ public partial class SellerSwitchViewModel : ViewModelBase
         // would overwrite _onApproved for that still-pending submit even though Show()
         // itself goes on to no-op. Open() always passes null, which is what clears a
         // stale continuation left behind by an approval that opened but was then
-        // cancelled or superseded rather than completed.
+        // cancelled or superseded rather than completed. _callerAllowsSignOut is
+        // assigned the same way and for the same reason.
         _onApproved = onApproved;
+        _callerAllowsSignOut = canSignOut;
 
         IsApprovalMode = approvalMode;
 
@@ -200,6 +234,17 @@ public partial class SellerSwitchViewModel : ViewModelBase
         IsConfirmingNewPin = false;
         _pendingNewPin = null;
         IsVisible = true;
+
+        // Sellers.CollectionChanged (above) already re-raises HasNoApprover/HasEmptyRoster/
+        // CanSignOut whenever the roster rebuild above actually adds or removes an item —
+        // which covers IsApprovalMode flipping too, since OnIsApprovalModeChanged calls the
+        // same method. The one gap that leaves: two consecutive Show() calls that both land
+        // on an empty Sellers collection (Clear() on an already-empty ObservableCollection
+        // raises no event, and the Add() loop never runs) never touch the collection at all,
+        // so a canSignOut that changed between those two calls — the one piece of state
+        // Show() itself owns outright, not derived from the roster — would otherwise go
+        // unnotified. An explicit call here closes that gap for CanSignOut specifically.
+        NotifyEmptyStateChanged();
     }
 
     [RelayCommand]
@@ -282,6 +327,32 @@ public partial class SellerSwitchViewModel : ViewModelBase
         if (_isBusy) return;
 
         _onApproved = null;
+        HideAndReset();
+    }
+
+    /// <summary>The manual counterpart to <c>PosViewModel.EndReceipt</c>: explicitly stops
+    /// being the current seller — "nobody is selling now" — without switching to anyone
+    /// else. Only ever reachable while <see cref="CanSignOut"/> is true (see its remarks
+    /// for the three conditions that gate it, in particular that this never runs in
+    /// approval mode), but this method does not re-check that itself: like
+    /// <see cref="SelectSeller"/>/<see cref="Back"/>/<see cref="Cancel"/>, it trusts the
+    /// view to only invoke it when the bound control is actually visible.
+    ///
+    /// Mirrors <see cref="Cancel"/>'s dismissal exactly — same <see cref="_onApproved"/>
+    /// discard (harmless here in practice, since reaching this while <see cref="CanSignOut"/>
+    /// is true already implies <see cref="IsApprovalMode"/> is false and therefore
+    /// <see cref="_onApproved"/> is already null, but kept for the same defensive
+    /// not-this-class's-job-to-assume-that reason as <see cref="Cancel"/>) and the same
+    /// <see cref="HideAndReset"/> — plus the one thing Cancel deliberately never does:
+    /// actually clearing <see cref="ISellerSession.Current"/>. A no-op while
+    /// <see cref="_isBusy"/>, same as every other mutating entry point in this class.</summary>
+    [RelayCommand]
+    private void SignOut()
+    {
+        if (_isBusy) return;
+
+        _onApproved = null;
+        _session.Clear();
         HideAndReset();
     }
 

@@ -401,6 +401,103 @@ public class SellerSwitchViewModelTest
         Assert.False(vm.IsVisible); // the pending submit still resolves normally afterwards
     }
 
+    // ---------------------------------------------------------------------------------
+    // Manual sign-out (2026-07-31 design, manual counterpart to EndReceipt): the
+    // tile-grid screen's "nobody is selling now" control. Never in approval mode — an
+    // approval verifies a supervisor's PIN on someone else's behalf and deliberately
+    // never touches Current, so signing out there would be nonsense. Never when the
+    // caller (PosViewModel, via CanEndSellerSession) disallowed it, and never when
+    // nobody is confirmed in the first place — nothing to sign out of.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SignOut_ClearsCurrentSeller_AndHidesOverlay()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open();
+
+        vm.SignOutCommand.Execute(null);
+
+        Assert.Null(session.Current);
+        Assert.False(vm.IsVisible);
+    }
+
+    [Fact]
+    public async Task CanSignOut_FalseInApprovalMode()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.OpenForApproval(s => s.CanCloseShift);
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task CanSignOut_FalseWhenCallerDisallowed()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open(canSignOut: false);
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task CanSignOut_FalseWhenNobodyConfirmed()
+    {
+        // SessionWithRoster never switches anyone on, so Current stays null here.
+        var vm = new SellerSwitchViewModel(await SessionWithRoster(), new FakeSellerRosterService());
+
+        vm.Open();
+
+        Assert.False(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task CanSignOut_TrueWhenAllowedAndSomeoneConfirmed()
+    {
+        var session = await SessionWithRoster();
+        await session.SwitchAsync("u-1", "4821");
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+
+        vm.Open(); // canSignOut defaults to true
+
+        Assert.True(vm.CanSignOut);
+    }
+
+    [Fact]
+    public async Task SignOut_WhileSubmitIsPending_IsANoOp()
+    {
+        // Same shape as Cancel_WhileSubmitIsPending_IsANoOp above: SignOut must respect
+        // the _isBusy guard like every other mutating entry point in this class.
+        var roster = new List<SellerInfo>
+        {
+            new() { Id = "u-1", FirstName = "Азиз", CanSell = true }
+        };
+        var session = new SlowSession(roster);
+        var vm = new SellerSwitchViewModel(session, new FakeSellerRosterService());
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        await vm.AppendDigitCommand.ExecuteAsync("1");
+        await vm.AppendDigitCommand.ExecuteAsync("2");
+        await vm.AppendDigitCommand.ExecuteAsync("3");
+        var submitting = vm.AppendDigitCommand.ExecuteAsync("4"); // now mid-submit (_isBusy == true)
+
+        vm.SignOutCommand.Execute(null);
+        Assert.True(vm.IsVisible); // SignOut is a no-op while busy, same as Cancel/Back/Open
+
+        session.CompleteSwitch(SwitchResult.Ok, vm.Sellers[0]);
+        await submitting;
+
+        Assert.False(vm.IsVisible); // the pending submit still resolves normally afterwards
+    }
+
     [Fact]
     public async Task Open_AfterAPreviousFailedAttempt_ClearsErrorAndPin()
     {

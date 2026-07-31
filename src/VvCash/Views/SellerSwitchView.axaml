@@ -110,6 +110,23 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+
+                    <!-- Manual counterpart to the automatic end-of-receipt reset (see
+                         PosViewModel.EndReceipt / CanEndSellerSession): lets the cashier
+                         explicitly say "nobody is selling now" without switching to
+                         someone else. CanSignOut is false in approval mode, while the
+                         cart still has items (the caller's canSignOut permission, sourced
+                         from CanEndSellerSession), or while nobody is confirmed yet —
+                         nothing to sign out of. OutlinedButton matches the same
+                         secondary-action style used for dismissal controls elsewhere in
+                         this app's modals (e.g. ParkedSalesWindow's "Skip"). -->
+                    <Button Classes="OutlinedButton" HorizontalAlignment="Center"
+                            Command="{Binding SignOutCommand}" IsVisible="{Binding CanSignOut}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <material:MaterialIcon Kind="Logout" Width="20" Height="20"/>
+                            <TextBlock Text="{Binding [SignOutSeller], Source={x:Static services:I18nService.Instance}}"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <!-- Dismiss control for State 1 only: the PIN pad already has its own way

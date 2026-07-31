@@ -182,6 +182,7 @@
   "ConfirmWithPin": "PIN bilan tasdiqlang",
   "NoSellerWithRight": "Hech bir sotuvchida bu amal uchun huquq yo'q — administratorga murojaat qiling",
   "SellerRosterEmpty": "Sotuvchilar ro'yxati bo'sh — ro'yxatni yangilang yoki bu kassaga sotuvchilarni tayinlang",
+  "SignOutSeller": "Hech kim sotmayapti",
   "CurrentSeller": "Sotuvchi",
   "SellerVerificationFailed": "PIN-ni tekshirib bo'lmadi. Qayta urinib ko'ring",
   "CreatePin": "PIN o'ylab toping",
