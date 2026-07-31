@@ -518,9 +518,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         LogoutRequested?.Invoke(this, explanation);
     }
 
-    /// <summary>The place every finished operation goes through — a successful payment,
-    /// the cashier manually clearing the receipt, and a returns/exchange dialog that
-    /// genuinely booked a document — to say "nobody is confirmed any more". The idle
+    /// <summary>Every finished operation is meant to funnel through here — a successful
+    /// payment, the cashier manually clearing the receipt, and a returns/exchange dialog
+    /// that genuinely booked a document — to say "nobody is confirmed any more". The idle
     /// timeout stays as a second line of defence for a receipt abandoned halfway; this
     /// one closes the window where the next person starts ringing up within 90 seconds
     /// and their sale is silently credited to whoever sold last (see the 2026-07-31 spec).
