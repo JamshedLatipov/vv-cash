@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Controls;
 using VvCash.Models.Api;
+using VvCash.Models;
 using VvCash.Services.Api;
 
 namespace VvCash.ViewModels;
@@ -61,6 +62,17 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     {
         _window = window;
         _counterpartyService = counterpartyService;
+    }
+
+    /// <summary>Переносит строку поиска в форму, когда регистрацию открыли из
+    /// окна поиска. Пустые поля префилла не затирают уже введённое: метод
+    /// зовётся до показа окна, но правило «пустое не пишем» держит его
+    /// безопасным и при повторном вызове.</summary>
+    public void ApplyPrefill(CustomerPrefill prefill)
+    {
+        if (!string.IsNullOrEmpty(prefill.PhoneNumber)) PhoneNumber = prefill.PhoneNumber;
+        if (!string.IsNullOrEmpty(prefill.FirstName)) FirstName = prefill.FirstName;
+        if (!string.IsNullOrEmpty(prefill.LastName)) LastName = prefill.LastName;
     }
 
     partial void OnPhoneNumberChanged(string value)
