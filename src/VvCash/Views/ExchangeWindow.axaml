@@ -91,16 +91,51 @@
             <TextBlock Grid.Row="0" Text="{Binding [RefundTotal], Source={x:Static services:I18nService.Instance}}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,8"/>
             <Grid Grid.Row="1">
               <TextBlock Text="{Binding [SelectSaleToExchange], Source={x:Static services:I18nService.Instance}}" IsVisible="{Binding !HasSelectedSale}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="15" Foreground="{StaticResource Slate400Brush}" TextWrapping="Wrap"/>
-              <ItemsControl ItemsSource="{Binding ReturnedLines}" IsVisible="{Binding HasSelectedSale}">
+              <!-- Scrolled since the cards carry the sale's own figures and are several
+                   lines tall: a long receipt would otherwise run off the bottom of the
+                   column with no way to reach the lines below. -->
+              <ScrollViewer IsVisible="{Binding HasSelectedSale}">
+              <ItemsControl ItemsSource="{Binding ReturnedLines}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate DataType="vm:ReturnLineVm">
                     <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4" IsEnabled="{Binding IsReturnable}">
                       <Grid ColumnDefinitions="*,Auto,Auto">
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <!-- Everything the cashier needs to tell this line apart from a
+                             lookalike on the shelf (article, barcode) and to see what the
+                             customer actually paid for it, which is what comes back out of
+                             the till. The discount row appears only when the sale was
+                             discounted: the register cannot name the promotion — the API
+                             records it on the document, not on the line — so the card shows
+                             the percent and the money that came off instead. -->
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
                           <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
-                          <TextBlock FontSize="11" Foreground="{StaticResource Slate500Brush}">
-                            <Run Text="{Binding [SoldQty], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding SoldQty}"/>
-                          </TextBlock>
+
+                          <StackPanel Orientation="Horizontal" Spacing="10">
+                            <TextBlock FontSize="11" Foreground="{StaticResource Slate500Brush}" IsVisible="{Binding HasArticle}">
+                              <Run Text="{Binding [Article], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding Article}"/>
+                            </TextBlock>
+                            <TextBlock FontSize="11" Foreground="{StaticResource Slate500Brush}" IsVisible="{Binding HasBarcode}">
+                              <Run Text="{Binding [Barcode], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding Barcode}"/>
+                            </TextBlock>
+                          </StackPanel>
+
+                          <StackPanel Orientation="Horizontal" Spacing="10">
+                            <TextBlock FontSize="11" Foreground="{StaticResource Slate500Brush}">
+                              <Run Text="{Binding [SoldQty], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding SoldQty}"/>
+                            </TextBlock>
+                            <TextBlock FontSize="11" Foreground="{StaticResource Slate600Brush}">
+                              <Run Text="{Binding [Paid], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding PaidTotal, StringFormat='{}{0:N2}'}"/>
+                            </TextBlock>
+                          </StackPanel>
+
+                          <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding HasDiscount}">
+                            <TextBlock FontSize="11" Foreground="{StaticResource Red500Brush}">
+                              <Run Text="{Binding [Discount], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding DiscountPercent, StringFormat='{}{0:0.##}%'}"/><Run Text=" (−"/><Run Text="{Binding LineDiscount, StringFormat='{}{0:N2}'}"/><Run Text=")"/>
+                            </TextBlock>
+                            <TextBlock FontSize="11" Foreground="{StaticResource Slate500Brush}">
+                              <Run Text="{Binding [PriceBeforeDiscount], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding SoldPrice, StringFormat='{}{0:N2}'}"/>
+                            </TextBlock>
+                          </StackPanel>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,10,0">
                           <Button Classes="OutlinedButton" Command="{Binding DecrementCommand}" Padding="6,2"><TextBlock Text="−"/></Button>
@@ -113,6 +148,7 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
+              </ScrollViewer>
             </Grid>
           </Grid>
         </Border>

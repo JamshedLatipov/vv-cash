@@ -50,4 +50,68 @@ public class ReturnLineVmTest
         vm.ReturnQty = 1;
         Assert.Equal(0, vm.ReturnQty);
     }
+
+    [Fact]
+    public void IdentifiersComeFromTheProduct()
+    {
+        var vm = new ReturnLineVm(new ReturnDetailLine
+        {
+            Product = new ReturnProduct { Id = "p", Name = "Salad", Article = "A-17", Barcode = "4780000000001" },
+            Quantity = 1, AfterDiscount = 50m,
+        });
+        Assert.Equal("A-17", vm.Article);
+        Assert.Equal("4780000000001", vm.Barcode);
+        Assert.True(vm.HasArticle);
+        Assert.True(vm.HasBarcode);
+    }
+
+    [Fact]
+    public void MissingIdentifiersAreNotShown()
+    {
+        var vm = Make(1, 0, 50m);
+        Assert.False(vm.HasArticle);
+        Assert.False(vm.HasBarcode);
+    }
+
+    [Fact]
+    public void PaidTotal_IsWhatTheLineActuallyCost()
+    {
+        // Sold 3 at a catalog 60, paid 150 for the line — i.e. 30 came off.
+        var vm = new ReturnLineVm(new ReturnDetailLine
+        {
+            Product = new ReturnProduct { Id = "p", Name = "Salad" },
+            Quantity = 3, SoldPrice = 60m, AfterDiscount = 150m, DiscountInPercent = 16.67m,
+        });
+        Assert.Equal(150m, vm.PaidTotal);
+        Assert.Equal(60m, vm.SoldPrice);
+        Assert.Equal(30m, vm.LineDiscount);
+        Assert.Equal(16.67m, vm.DiscountPercent);
+        Assert.True(vm.HasDiscount);
+    }
+
+    [Fact]
+    public void UndiscountedLine_ShowsNoDiscount()
+    {
+        var vm = new ReturnLineVm(new ReturnDetailLine
+        {
+            Product = new ReturnProduct { Id = "p", Name = "Salad" },
+            Quantity = 2, SoldPrice = 25m, AfterDiscount = 50m,
+        });
+        Assert.Equal(0m, vm.LineDiscount);
+        Assert.False(vm.HasDiscount);
+    }
+
+    [Fact]
+    public void LegacyLineWithoutSoldPrice_ShowsNoDiscount()
+    {
+        // Older rows carry sold_price 0 with after_discount still filled; deriving the
+        // discount from them would print a negative "discount" the size of the line.
+        var vm = new ReturnLineVm(new ReturnDetailLine
+        {
+            Product = new ReturnProduct { Id = "p", Name = "Salad" },
+            Quantity = 2, SoldPrice = 0m, AfterDiscount = 50m,
+        });
+        Assert.Equal(0m, vm.LineDiscount);
+        Assert.False(vm.HasDiscount);
+    }
 }
