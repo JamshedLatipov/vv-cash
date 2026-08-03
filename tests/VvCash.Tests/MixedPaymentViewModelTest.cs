@@ -62,4 +62,21 @@ public class MixedPaymentViewModelTest
         Assert.Equal(0m, vm.RemainingAmount);
         Assert.True(vm.ConfirmPaymentCommand.CanExecute(null));
     }
+
+    [Fact]
+    public void ExactTender_SettlesATotalThatStillCarriesSubCentFractions()
+    {
+        // A total is supposed to arrive already rounded to the store's money
+        // scale, but the payment screen must not deadlock if one ever does not:
+        // the quick-tender "exact" chip pays 621.88 against 621.884, and a
+        // remainder nobody can see (or hand over) must not keep the confirm
+        // button disabled with "remaining 0.00" on screen.
+        var vm = new MixedPaymentViewModel(621.884m, (_, __, ___) => { });
+
+        vm.SetQuickAmountCommand.Execute(vm.ExactAmount);
+
+        Assert.Equal(621.88m, vm.CashAmount);
+        Assert.True(vm.IsFullyPaid);
+        Assert.True(vm.ConfirmPaymentCommand.CanExecute(null));
+    }
 }

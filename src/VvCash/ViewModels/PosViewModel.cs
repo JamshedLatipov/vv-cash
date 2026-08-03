@@ -897,28 +897,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _ = Task.WhenAll(products.Where(p => !string.IsNullOrEmpty(p.ImagePath)).Select(LoadProductImageAsync));
     }
 
-    private async Task LoadProductImageAsync(Product product)
-    {
-        if (string.IsNullOrEmpty(product.ImagePath)) return;
-        try
-        {
-            var backendUrl = _settingsService.BackendUrl;
-            if (string.IsNullOrEmpty(backendUrl)) return;
-            var uri = new Uri(backendUrl);
-            var origin = $"{uri.Scheme}://{uri.Authority}";
-            var url = $"{origin}/{product.ImagePath.TrimStart('/')}";
-            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Loading product image '{product.Name}': {url}");
-            var bytes = await _httpClient.GetByteArrayAsync(url);
-            using var ms = new MemoryStream(bytes);
-            var bitmap = new Bitmap(ms);
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => product.ImageBitmap = bitmap);
-            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Loaded product image '{product.Name}' OK");
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Failed product image '{product.Name}': {ex.Message}");
-        }
-    }
+    /// <summary>Through the shared loader rather than fetching here, so the catalog grid,
+    /// the cart and the exchange screen all read one cache: the same product shown on two
+    /// screens costs one download, not one per screen.</summary>
+    private Task LoadProductImageAsync(Product product)
+        => ProductImageLoader.LoadIntoAsync(_httpClient, _settingsService.BackendUrl, product);
 
     private async Task LoadCategoryImageAsync(Category category)
     {
@@ -1791,7 +1774,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 var exchangeVm = new ExchangeViewModel(
                     dialog, _returnService, _cashOperationService, _expenseDocumentService,
                     _counterpartyService, _settingsService, _productService, _syncService,
-                    _printerService, _features, _quoteService,
+                    _printerService, _features, _quoteService, _httpClient,
                     _promotionProvider.MoneyPolicy, CurrentShiftId ?? string.Empty,
                     _sellerSession.Current?.Id, _session.CashId, _session.WarehouseId, IsSystemOnline);
                 dialog.DataContext = exchangeVm;

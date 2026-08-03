@@ -99,7 +99,21 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate DataType="vm:ReturnLineVm">
                     <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4" IsEnabled="{Binding IsReturnable}">
-                      <Grid ColumnDefinitions="*,Auto,Auto">
+                      <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                        <!-- The picture, matched out of the register's own catalog since the
+                             receipt endpoint carries none. A name and an article identify a
+                             line to the back office; the cashier is holding the thing. -->
+                        <Border Grid.Column="0" Width="44" Height="44" CornerRadius="8" Margin="0,0,10,0"
+                                Background="{StaticResource Slate100Brush}" BorderBrush="{StaticResource Slate200Brush}"
+                                BorderThickness="1" ClipToBounds="True" VerticalAlignment="Center">
+                          <Panel>
+                            <material:MaterialIcon Kind="ImageOutline" Width="20" Height="20" Foreground="{StaticResource Slate400Brush}"
+                                                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                   IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                            <Image Source="{Binding ImageBitmap}" Stretch="UniformToFill"
+                                   IsVisible="{Binding ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                          </Panel>
+                        </Border>
                         <!-- Everything the cashier needs to tell this line apart from a
                              lookalike on the shelf (article, barcode) and to see what the
                              customer actually paid for it, which is what comes back out of
@@ -107,7 +121,7 @@
                              discounted: the register cannot name the promotion — the API
                              records it on the document, not on the line — so the card shows
                              the percent and the money that came off instead. -->
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                           <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
 
                           <StackPanel Orientation="Horizontal" Spacing="10">
@@ -137,12 +151,12 @@
                             </TextBlock>
                           </StackPanel>
                         </StackPanel>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,10,0">
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,10,0">
                           <Button Classes="OutlinedButton" Command="{Binding DecrementCommand}" Padding="6,2"><TextBlock Text="−"/></Button>
                           <TextBlock Text="{Binding ReturnQty}" FontSize="15" FontWeight="Bold" MinWidth="24" TextAlignment="Center" VerticalAlignment="Center"/>
                           <Button Classes="OutlinedButton" Command="{Binding IncrementCommand}" Padding="6,2"><TextBlock Text="+"/></Button>
                         </StackPanel>
-                        <TextBlock Grid.Column="2" Text="{Binding LineRefund, StringFormat='{}{0:N2}'}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" MinWidth="60" TextAlignment="Right"/>
+                        <TextBlock Grid.Column="3" Text="{Binding LineRefund, StringFormat='{}{0:N2}'}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" MinWidth="60" TextAlignment="Right"/>
                       </Grid>
                     </Border>
                   </DataTemplate>
@@ -171,13 +185,45 @@
               </Button>
             </Grid>
 
-            <ItemsControl Grid.Row="2" ItemsSource="{Binding IssuedLines}">
+            <!-- Scrolled for the same reason the returned column is: the cards carry a
+                 thumbnail and a discount row now, so a handful of them runs off the bottom
+                 with no way to reach the lines below. -->
+            <ScrollViewer Grid.Row="2">
+            <ItemsControl ItemsSource="{Binding IssuedLines}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate DataType="cart:CartItem">
                   <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4">
-                    <Grid ColumnDefinitions="*,Auto,Auto">
-                      <TextBlock Grid.Column="0" Text="{Binding Product.Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,10,0">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                      <Border Grid.Column="0" Width="44" Height="44" CornerRadius="8" Margin="0,0,10,0"
+                              Background="{StaticResource Slate100Brush}" BorderBrush="{StaticResource Slate200Brush}"
+                              BorderThickness="1" ClipToBounds="True" VerticalAlignment="Center">
+                        <Panel>
+                          <material:MaterialIcon Kind="ImageOutline" Width="20" Height="20" Foreground="{StaticResource Slate400Brush}"
+                                                 VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                 IsVisible="{Binding Product.ImageBitmap, Converter={x:Static ObjectConverters.IsNull}}"/>
+                          <Image Source="{Binding Product.ImageBitmap}" Stretch="UniformToFill"
+                                 IsVisible="{Binding Product.ImageBitmap, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                        </Panel>
+                      </Border>
+
+                      <!-- The badge and the discount row show only once the server has
+                           actually priced this line down. Without them the card read at the
+                           catalog price with the promotion visible nowhere but the footer's
+                           single total, so a cashier could not tell which of the replacement
+                           goods the discount had come off. -->
+                      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <TextBlock Text="{Binding Product.Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                          <Border IsVisible="{Binding HasLineDiscount}" Background="{StaticResource Red100Brush}" CornerRadius="4" Padding="5,1" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding QuotedDiscountPercent, StringFormat='-{0:0.##}%'}" Foreground="{StaticResource Red600Brush}" FontSize="10" FontWeight="Black"/>
+                          </Border>
+                        </StackPanel>
+                        <TextBlock FontSize="11" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding HasLineDiscount}">
+                          <Run Text="{Binding [Discount], Source={x:Static services:I18nService.Instance}}"/><Run Text=": −"/><Run Text="{Binding LineDiscount, StringFormat='{}{0:N2}'}"/>
+                        </TextBlock>
+                      </StackPanel>
+
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,10,0">
                         <Button Classes="QtyButton" Width="26" Height="26" FontSize="14" CornerRadius="8"
                                 Command="{Binding DataContext.DecrementIssuedCommand, ElementName=RootWindow}"
                                 CommandParameter="{Binding}" Content="-"/>
@@ -186,12 +232,21 @@
                                 Command="{Binding DataContext.IncrementIssuedCommand, ElementName=RootWindow}"
                                 CommandParameter="{Binding}" Content="+"/>
                       </StackPanel>
-                      <TextBlock Grid.Column="2" Text="{Binding LineTotal, StringFormat='{}{0:N2}'}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center" MinWidth="60" TextAlignment="Right"/>
+
+                      <!-- What this line actually costs, with the pre-discount figure struck
+                           through above it — the same shape the sale's own totals take, so
+                           the cards add up to the issued total rather than past it. -->
+                      <StackPanel Grid.Column="3" VerticalAlignment="Center" MinWidth="60">
+                        <TextBlock Text="{Binding LineTotal, StringFormat='{}{0:N2}'}" FontSize="11" Foreground="{StaticResource Slate400Brush}"
+                                   TextDecorations="Strikethrough" TextAlignment="Right" IsVisible="{Binding HasLineDiscount}"/>
+                        <TextBlock Text="{Binding LineFinalTotal, StringFormat='{}{0:N2}'}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" TextAlignment="Right"/>
+                      </StackPanel>
                     </Grid>
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            </ScrollViewer>
           </Grid>
         </Border>
       </Grid>

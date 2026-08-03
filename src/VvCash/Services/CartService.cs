@@ -66,7 +66,10 @@ public class CartService : ICartService
         }
     }
 
-    public decimal Subtotal => _items.Sum(i => i.LineTotal);
+    /// <summary>Rounded to the store's money scale: a line is price × quantity and
+    /// a weighed quantity is fractional, so the raw sum can land below the smallest
+    /// coin the cashier can actually take.</summary>
+    public decimal Subtotal => MoneyPolicy.Round(_items.Sum(i => i.LineTotal));
 
     /// <summary>The legacy flat path: applied coupons plus the customer's card
     /// percent. Offline this competes with the best local promotion.</summary>
@@ -103,7 +106,13 @@ public class CartService : ICartService
             var manualFlat = ManualDiscountAmount;
 
             var total = baseDiscount + manualPercent + manualFlat;
-            return Math.Min(total, subtotal);
+            // Rounded like the subtotal, and for the same reason: a percent
+            // discount divides, so it produces sub-cent amounts on its own.
+            // Leaving them in makes TotalAmount unpayable — the payment screen
+            // renders it to two places, the cashier tenders exactly what is on
+            // screen, and a remainder nobody can see or hand over keeps the
+            // receipt open.
+            return MoneyPolicy.Round(Math.Min(total, subtotal));
         }
     }
 

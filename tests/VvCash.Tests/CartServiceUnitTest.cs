@@ -129,4 +129,33 @@ public class CartServiceUnitTest
         Assert.Equal(2m, c.Items[0].Quantity);
         Assert.Equal(0.48m, c.Items[0].QuantityInUnit);
     }
+
+    [Fact]
+    public void TotalAmount_IsRoundedToTheStoresMoneyScale_AfterAPercentDiscount()
+    {
+        // A percent discount divides, so it lands below the smallest coin the
+        // cashier can take: 10% of 690.98 is 69.098 and leaves 621.882 to pay.
+        // Handed on unrounded, the payment screen shows "621.88" everywhere and
+        // still counts 0.002 as outstanding, so the confirm button never enables.
+        var c = NewCart();
+        c.AddProduct(new Product { Id = "p3", Name = "Товар", Price = 690.98m });
+
+        c.SetCustomerDiscount(10m);
+
+        Assert.Equal(69.10m, c.TotalDiscount);
+        Assert.Equal(621.88m, c.TotalAmount);
+    }
+
+    [Fact]
+    public void Subtotal_IsRoundedToTheStoresMoneyScale_ForAWeighedLine()
+    {
+        // Weighed goods multiply price by a fractional quantity, which is the
+        // other way sub-cent amounts get into a cart.
+        var c = NewCart();
+        c.AddProduct(new Product { Id = "p4", Name = "Сыр", Price = 12.37m });
+        c.SetQuantity(c.Items[0], 1.235m);
+
+        Assert.Equal(15.28m, c.Subtotal);
+        Assert.Equal(15.28m, c.TotalAmount);
+    }
 }

@@ -59,6 +59,7 @@ public partial class ExchangeViewModel : ViewModelBase
     private readonly IPrinterService? _printerService;
     private readonly ICashFeatureService? _features;
     private readonly IQuoteService? _quoteService;
+    private readonly System.Net.Http.HttpClient? _httpClient;
     private readonly MoneyPolicy _moneyPolicy;
     private readonly string _shiftId;
     private readonly string? _sellerId;
@@ -188,6 +189,8 @@ public partial class ExchangeViewModel : ViewModelBase
     /// is not told which warehouse its cash stocks from, and the server resolves it from
     /// the cash token instead. Passed through only so the quote request can name it on a
     /// register that does happen to know.</param>
+    /// <param name="httpClient">Only ever used to pull product thumbnails; null leaves
+    /// both baskets showing the placeholder icon and changes nothing else.</param>
     /// <param name="isOnline">Snapshot of the register's connectivity at the
     /// moment the screen opens; kept live afterwards via <paramref name="syncService"/>.</param>
     public ExchangeViewModel(
@@ -202,6 +205,7 @@ public partial class ExchangeViewModel : ViewModelBase
         IPrinterService? printerService = null,
         ICashFeatureService? features = null,
         IQuoteService? quoteService = null,
+        System.Net.Http.HttpClient? httpClient = null,
         MoneyPolicy? moneyPolicy = null,
         string shiftId = "",
         string? sellerId = null,
@@ -220,6 +224,7 @@ public partial class ExchangeViewModel : ViewModelBase
         _printerService = printerService;
         _features = features;
         _quoteService = quoteService;
+        _httpClient = httpClient;
         _moneyPolicy = moneyPolicy ?? MoneyPolicy.Default;
         _shiftId = shiftId;
         _sellerId = sellerId;
@@ -342,6 +347,10 @@ public partial class ExchangeViewModel : ViewModelBase
             var body = await _returnService.GetReturnableLinesAsync(expenseId);
             if (SelectedSale?.Id != expenseId) return; // selection changed during load; ignore stale result
             SetReturnedLines(body.Details.Select(d => new ReturnLineVm(d)));
+            // Fire-and-forget, exactly like the catalog grid's own image loading: the
+            // lines are already usable and a thumbnail arriving late costs nothing,
+            // whereas awaiting it would hold the whole basket behind the slowest jpeg.
+            _ = AttachReturnedImagesAsync(expenseId);
         }
         catch (Exception)
         {
@@ -353,6 +362,43 @@ public partial class ExchangeViewModel : ViewModelBase
         {
             if (SelectedSale?.Id == expenseId)
                 IsLoadingLines = false;
+        }
+    }
+
+    /// <summary>Puts a thumbnail on every returned line the register can find a product
+    /// for. The receipt endpoint carries no image, so the picture is matched out of the
+    /// synced catalog by product id — a product the register has never synced simply
+    /// keeps its placeholder.
+    ///
+    /// Bails out the moment the cashier looks up a different receipt: the lines this was
+    /// started for are gone by then, and stamping bitmaps onto them would only race the
+    /// newer load.</summary>
+    private async Task AttachReturnedImagesAsync(string expenseId)
+    {
+        if (_productService == null || _httpClient == null) return;
+
+        IEnumerable<Product> catalog;
+        try
+        {
+            catalog = await _productService.GetAllProductsAsync();
+        }
+        catch (Exception)
+        {
+            return; // no catalog, no pictures — the lines themselves are unaffected
+        }
+        if (SelectedSale?.Id != expenseId) return;
+
+        var byId = new Dictionary<string, string>();
+        foreach (var p in catalog)
+            if (!string.IsNullOrWhiteSpace(p.ImagePath) && !byId.ContainsKey(p.Id))
+                byId[p.Id] = p.ImagePath;
+
+        foreach (var line in ReturnedLines.ToList())
+        {
+            if (SelectedSale?.Id != expenseId) return;
+            if (!byId.TryGetValue(line.ProductId, out var imagePath)) continue;
+            var bitmap = await ProductImageLoader.GetAsync(_httpClient, _settingsService?.BackendUrl, imagePath);
+            if (bitmap != null && SelectedSale?.Id == expenseId) line.ImageBitmap = bitmap;
         }
     }
 
@@ -407,9 +453,18 @@ public partial class ExchangeViewModel : ViewModelBase
 
         var existing = IssuedLines.FirstOrDefault(l => l.Product.Id == product.Id);
         if (existing != null)
+        {
             existing.Quantity += 1;
+        }
         else
+        {
             AddIssuedLine(new CartItem { Product = product, Quantity = 1 });
+            // The product came out of the catalog with only its image path filled in —
+            // nothing has decoded the picture for this screen yet. Fire-and-forget, same
+            // as the catalog grid: the line is usable without it.
+            if (_httpClient != null)
+                _ = ProductImageLoader.LoadIntoAsync(_httpClient, _settingsService?.BackendUrl, product);
+        }
 
         IssuedSearchQuery = string.Empty;
     }
@@ -426,9 +481,10 @@ public partial class ExchangeViewModel : ViewModelBase
 
     private void OnIssuedLinePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // QuotedUnitPrice is excluded on purpose: applying a quote sets it on every line,
-        // and treating that as a basket edit would re-enter the quote path in a loop and,
-        // worse, clear the retry bookkeeping RaiseTotalsChanged resets.
+        // The quote-stamped properties (price, discount, percent) are excluded on purpose:
+        // applying a quote sets them on every line, and treating that as a basket edit
+        // would re-enter the quote path in a loop and, worse, clear the retry bookkeeping
+        // RaiseTotalsChanged resets.
         if (e.PropertyName == nameof(CartItem.Quantity))
             OnIssuedBasketChanged();
     }
@@ -527,12 +583,27 @@ public partial class ExchangeViewModel : ViewModelBase
     /// AddIssuedProduct merges a repeated product onto one line, so the id is unambiguous.
     /// The stamped price is the line's price BEFORE discount (that is what the quote's
     /// unit_price carries); the discount itself stays document-level, in
-    /// <see cref="IssuedDiscount"/>, which is the shape the sale request declares it in.</summary>
+    /// <see cref="IssuedDiscount"/>, which is the shape the sale request declares it in.
+    ///
+    /// The quote's per-line discount is stamped alongside it, purely so each card can show
+    /// what came off it. The sale is still booked with one document-level figure — a
+    /// cashier reading a card that says the catalog price while the footer quietly shows a
+    /// discount cannot tell which of the replacement goods a running promotion actually
+    /// touched, and that is what the screen was doing.</summary>
     private void ApplyIssuedQuote(QuoteResult? result)
     {
         _issuedQuote = result;
         foreach (var item in IssuedLines)
-            item.QuotedUnitPrice = result?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id)?.UnitPrice;
+        {
+            var line = result?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id);
+            item.QuotedUnitPrice = line?.UnitPrice;
+            // Per unit, not per line, so the card still reads as discounted during the
+            // window between a quantity change and the replacement quote landing.
+            item.QuotedUnitDiscount = line != null && line.Quantity > 0
+                ? line.DiscountAmount / line.Quantity
+                : null;
+            item.QuotedDiscountPercent = line?.DiscountPercent ?? 0m;
+        }
         NotifyTotalsChanged();
     }
 

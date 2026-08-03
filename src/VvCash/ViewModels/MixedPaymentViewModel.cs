@@ -40,7 +40,12 @@ public partial class MixedPaymentViewModel : ViewModelBase
     public decimal PaidAmount => CashAmount + CardAmount + GiftAmount;
     public decimal RemainingDue => Math.Max(0, RemainingAmount);
     public decimal ChangeAmount => Math.Max(0, -RemainingAmount);
-    public bool IsFullyPaid => RemainingAmount <= 0;
+    /// <summary>Under half a cent counts as settled. Totals reach this screen
+    /// already rounded to the store's money scale, so normally the comparison is
+    /// exact; the tolerance is there so that an amount which slips through
+    /// unrounded cannot deadlock the receipt, showing "remaining 0.00" next to a
+    /// confirm button that refuses to enable.</summary>
+    public bool IsFullyPaid => RemainingAmount < 0.005m;
     public bool HasChange => ChangeAmount > 0;
     public double ProgressPercent => TotalAmount > 0
         ? Math.Min(100.0, (double)(PaidAmount / TotalAmount) * 100.0)

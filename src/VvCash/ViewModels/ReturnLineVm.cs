@@ -1,4 +1,5 @@
 using System;
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VvCash.Models.Api;
@@ -47,6 +48,14 @@ public partial class ReturnLineVm : ObservableObject
     /// quantity again.</summary>
     public decimal UnitPrice { get; }
     public bool IsReturnable => MaxReturnable > 0;
+
+    /// <summary>The product's thumbnail, filled in after the fact by whoever built this
+    /// line. The receipt endpoint carries no image — its product block is id, name,
+    /// barcode and article — so the picture has to be matched out of the register's own
+    /// synced catalog, and stays null for a product that has none or was never synced.
+    /// A returned line is a product on a shelf the cashier has to recognise, and a name
+    /// alone does not separate two colours of the same shirt.</summary>
+    [ObservableProperty] private Bitmap? _imageBitmap;
 
     public event Action? RefundChanged;
 

@@ -704,6 +704,41 @@ public class ExchangeViewModelTest
     }
 
     [Fact]
+    public void IssuedBasket_ServerDiscountsIt_TheLineItselfShowsWhatCameOffIt()
+    {
+        // The totals block alone said a discount existed but not which of the replacement
+        // goods it came off, so every card still read at the catalog price. The line now
+        // carries the quote's own figures, which is what the card prints.
+        var (vm, quotes) = BuildForPricing();
+        quotes.Result = MakeQuote("p2", unitPrice: 100m, quantity: 1m, percent: 50m);
+        var line = MakeIssuedLine(100m);
+
+        vm.AddIssuedLine(line);
+
+        Assert.True(line.HasLineDiscount);
+        Assert.Equal(50m, line.LineDiscount);
+        Assert.Equal(50m, line.QuotedDiscountPercent);
+        Assert.Equal(100m, line.LineTotal);      // struck through on screen
+        Assert.Equal(50m, line.LineFinalTotal);  // what the customer is charged for it
+    }
+
+    [Fact]
+    public void IssuedBasket_NoQuote_LineShowsNoDiscountAtAll()
+    {
+        // Catalog fallback: nothing was priced, so nothing may claim to have been
+        // discounted — a zero-percent badge on every card would be worse than none.
+        var (vm, quotes) = BuildForPricing();
+        quotes.Result = null;
+        var line = MakeIssuedLine(100m);
+
+        vm.AddIssuedLine(line);
+
+        Assert.False(line.HasLineDiscount);
+        Assert.Equal(0m, line.LineDiscount);
+        Assert.Equal(100m, line.LineFinalTotal);
+    }
+
+    [Fact]
     public void IssuedBasket_EmptiedAgain_DropsTheDiscountWithIt()
     {
         // The discount belongs to a basket, not to the screen: removing the goods it
