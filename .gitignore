@@ -37,3 +37,6 @@ Thumbs.db
 
 IconTest.*
 test.*
+
+# Server details for build/installer/release.ps1 -Publish. Local only.
+build/installer/publish.local.json

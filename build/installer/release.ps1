@@ -27,6 +27,12 @@ param(
     [Parameter(ParameterSetName = 'Build')]
     [string]$Notes = '',
 
+    # Upload to the server over ssh after building, then verify what landed. Connection
+    # details come from publish.local.json beside this script - see the template written
+    # on first use. That file is gitignored; nothing about the server belongs in the repo.
+    [Parameter(ParameterSetName = 'Build')]
+    [switch]$Publish,
+
     # Check the live manifest and installer on the server instead of building.
     [Parameter(Mandatory = $true, ParameterSetName = 'Verify')]
     [switch]$Verify,
@@ -43,6 +49,7 @@ $publishExe = Join-Path $root 'publish\win-x64\VvCash.exe'
 $outputDir = Join-Path $PSScriptRoot 'Output'
 $builtExe  = Join-Path $outputDir 'VvCashInstaller.exe'
 $manifest  = Join-Path $outputDir 'kassa-latest.json'
+$publishCfg = Join-Path $PSScriptRoot 'publish.local.json'
 
 function Write-Step($text) { Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok($text)   { Write-Host "    OK  $text" -ForegroundColor Green }
@@ -75,9 +82,35 @@ function Get-Sha256($path) {
     return (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
 }
 
-# ---------------------------------------------------------------- verify mode
+function Invoke-Native($exe, $argList, $what) {
+    & $exe @argList
+    if ($LASTEXITCODE -ne 0) { throw "$what failed ($LASTEXITCODE)" }
+}
 
-if ($PSCmdlet.ParameterSetName -eq 'Verify') {
+# Upload a file, then move it into place on the server as a second step. scp writes
+# straight to the destination path, so a large upload interrupted halfway leaves a
+# truncated file live on the server for as long as it takes to notice. Registers would
+# download that, fail the hash check and retry hourly. Landing on a temp name and moving
+# means the visible file is only ever a complete one.
+function Send-File($localPath, $remoteDir, $remoteName, $sshTarget, $sshPort) {
+    $tempName = "$remoteName.uploading"
+    $scpArgs = @()
+    $sshArgs = @()
+    if ($sshPort) {
+        $scpArgs += @('-P', "$sshPort")
+        $sshArgs += @('-p', "$sshPort")
+    }
+    $scpArgs += @($localPath, "${sshTarget}:$remoteDir/$tempName")
+    Invoke-Native 'scp' $scpArgs "scp of $remoteName"
+
+    $sshArgs += @($sshTarget, "mv -f '$remoteDir/$tempName' '$remoteDir/$remoteName'")
+    Invoke-Native 'ssh' $sshArgs "remote move of $remoteName"
+    Write-Ok "uploaded $remoteName"
+}
+
+# ---------------------------------------------------------------- verify
+
+function Invoke-Verify($ManifestUrl) {
     Write-Step "Fetching $ManifestUrl"
 
     try {
@@ -139,6 +172,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Verify') {
 
     Write-Host ''
     Write-Host "Published release $($live.version) is consistent and reachable." -ForegroundColor Green
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'Verify') {
+    Invoke-Verify $ManifestUrl
     return
 }
 
@@ -222,14 +259,65 @@ Write-Host ''
 Write-Host "  installer  $keptExe ($mb MB)"
 Write-Host "  sha256     $sha"
 Write-Host "  manifest   $manifest"
+if (-not $Publish) {
+    Write-Host ''
+    Write-Host 'Upload both, keeping these names:' -ForegroundColor Cyan
+    Write-Host "  $keptExe  ->  $downloadUrl"
+    Write-Host "  $manifest  ->  $ManifestUrl"
+    Write-Host ''
+    Write-Host 'Then confirm the server really has them:' -ForegroundColor Cyan
+    Write-Host '  powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Verify'
+    Write-Host ''
+    Write-Host 'Or let the script do it:  -Publish' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host 'Uploading the installer without the manifest leaves every register on the old' -ForegroundColor Yellow
+    Write-Host 'version silently. Uploading the manifest without the installer is worse: registers' -ForegroundColor Yellow
+    Write-Host 'download whatever is there, fail the hash check, and retry every hour.' -ForegroundColor Yellow
+    return
+}
+
+# ---------------------------------------------------------------- publish
+
+if (-not (Test-Path $publishCfg)) {
+    $template = @"
+{
+  "sshTarget": "user@proffi.io",
+  "remoteDir": "/var/www/html/downloads",
+  "sshPort": null
+}
+"@
+    [System.IO.File]::WriteAllText($publishCfg, $template, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host ''
+    Write-Warn "No publish config found, so a template was written to:"
+    Write-Warn "  $publishCfg"
+    Write-Warn 'Fill in the real ssh target and the directory the web server serves /downloads'
+    Write-Warn 'from, then re-run with -Publish. The file is gitignored - server details do not'
+    Write-Warn 'belong in the repository.'
+    throw 'Publish config was missing; a template has been created.'
+}
+
+$cfg = Get-Content $publishCfg -Raw | ConvertFrom-Json
+foreach ($field in @('sshTarget', 'remoteDir')) {
+    if ([string]::IsNullOrWhiteSpace($cfg.$field)) { throw "publish.local.json is missing '$field'." }
+}
+$sshPort = $null
+if ($cfg.PSObject.Properties.Name.Contains('sshPort') -and $cfg.sshPort) { $sshPort = $cfg.sshPort }
+
+$remoteExeName = [System.IO.Path]::GetFileName(([Uri]$downloadUrl).AbsolutePath)
+$remoteManifestName = [System.IO.Path]::GetFileName(([Uri]$ManifestUrl).AbsolutePath)
+
+Write-Step "Publishing to $($cfg.sshTarget):$($cfg.remoteDir)"
+
+# Order is not a style choice. The manifest is what makes a release visible to the
+# registers, so it goes last: if the installer upload fails, nothing has changed and
+# every register stays on the old version. Publish the manifest first and a failed
+# installer upload leaves the fleet downloading whatever stale file is still there,
+# failing the hash check, and retrying every hour with no way to tell the cashier why.
+Send-File $keptExe   $cfg.remoteDir $remoteExeName      $cfg.sshTarget $sshPort
+Send-File $manifest  $cfg.remoteDir $remoteManifestName $cfg.sshTarget $sshPort
+
 Write-Host ''
-Write-Host 'Upload both, keeping these names:' -ForegroundColor Cyan
-Write-Host "  $keptExe  ->  $downloadUrl"
-Write-Host "  $manifest  ->  $ManifestUrl"
+Invoke-Verify $ManifestUrl
+
 Write-Host ''
-Write-Host 'Then confirm the server really has them:' -ForegroundColor Cyan
-Write-Host '  powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Verify'
-Write-Host ''
-Write-Host 'Uploading the installer without the manifest leaves every register on the old' -ForegroundColor Yellow
-Write-Host 'version silently. Uploading the manifest without the installer is worse: registers' -ForegroundColor Yellow
-Write-Host 'download whatever is there, fail the hash check, and retry every hour.' -ForegroundColor Yellow
+Write-Host "Release $Version is live." -ForegroundColor Green
