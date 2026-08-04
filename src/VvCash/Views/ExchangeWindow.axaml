@@ -188,9 +188,10 @@
             <TextBlock Grid.Row="0" Text="{Binding [IssuedGoods], Source={x:Static services:I18nService.Instance}}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,8"/>
 
             <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,12" IsEnabled="{Binding HasSelectedSale}">
-              <TextBox Grid.Column="0" Text="{Binding IssuedSearchQuery}" Classes="IconTextBox"
+              <TextBox Grid.Column="0" x:Name="IssuedSearchBox" Text="{Binding IssuedSearchQuery}" Classes="IconTextBox"
                        Watermark="{Binding [SearchProductToIssue], Source={x:Static services:I18nService.Instance}}"
-                       FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0">
+                       FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"
+                       KeyDown="OnIssuedSearchKeyDown">
                 <TextBox.InnerLeftContent>
                   <material:MaterialIcon Kind="Magnify" Width="18" Height="18" Foreground="{StaticResource Slate400Brush}" Margin="10,0,8,0"/>
                 </TextBox.InnerLeftContent>

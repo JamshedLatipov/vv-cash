@@ -61,4 +61,12 @@ public partial class ExchangeWindow : Window
             vm.ScanReturnBarcodeCommand.Execute(null);
         e.Handled = true;
     }
+
+    private void OnIssuedSearchKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        if (DataContext is ExchangeViewModel vm && vm.AddIssuedProductCommand.CanExecute(null))
+            vm.AddIssuedProductCommand.Execute(null);
+        e.Handled = true;
+    }
 }
