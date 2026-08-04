@@ -137,7 +137,7 @@
                              records it on the document, not on the line — so the card shows
                              the percent and the money that came off instead. -->
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                          <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                          <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" TextTrimming="CharacterEllipsis"/>
 
                           <StackPanel Orientation="Horizontal" Spacing="10">
                             <TextBlock FontSize="11" Foreground="{StaticResource Slate500Brush}" IsVisible="{Binding HasArticle}">

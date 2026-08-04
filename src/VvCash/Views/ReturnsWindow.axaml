@@ -111,7 +111,7 @@
                   <Border Classes.scanned="{Binding IsRecentlyScanned}" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4" IsEnabled="{Binding IsReturnable}">
                     <Grid ColumnDefinitions="*,Auto,Auto">
                       <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
+                        <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" TextTrimming="CharacterEllipsis"/>
                         <TextBlock FontSize="12" Foreground="{StaticResource Slate500Brush}">
                           <Run Text="{Binding [SoldQty], Source={x:Static services:I18nService.Instance}}"/><Run Text=": "/><Run Text="{Binding SoldQty}"/>
                           <Run Text="  •  "/>
