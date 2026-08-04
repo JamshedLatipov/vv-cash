@@ -891,7 +891,12 @@ public partial class ExchangeViewModel : ViewModelBase
         if ((_features?.Current.IsEnabled(CashFeatureCodes.ReturnPrintReceipt) ?? true)
             && _printerService != null)
         {
-            try { await _printerService.PrintExchangeReceiptAsync(returnedReceiptLines, issuedReceiptLines, difference, documentNumber); }
+            try
+            {
+                await _printerService.PrintExchangeReceiptAsync(
+                    returnedReceiptLines, issuedReceiptLines, difference, documentNumber,
+                    SelectedSale?.WarehouseName, SelectedSale?.Creator, SelectedSale?.FormattedSelectedDate);
+            }
             catch { }
         }
     }

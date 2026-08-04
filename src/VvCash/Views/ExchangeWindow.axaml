@@ -68,7 +68,7 @@
                   <Run Text="#"/><Run Text="{Binding DocumentNumber}"/>
                 </TextBlock>
                 <TextBlock Text="{Binding Creator}" FontSize="12" Foreground="{StaticResource Slate600Brush}"/>
-                <TextBlock Text="{Binding SelectedDate}" FontSize="11" Foreground="{StaticResource Slate500Brush}"/>
+                <TextBlock Text="{Binding FormattedSelectedDate}" FontSize="11" Foreground="{StaticResource Slate500Brush}"/>
               </StackPanel>
               <TextBlock Grid.Column="1" Text="{Binding ToPay, StringFormat='{}{0:N2}'}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource PrimaryBrush}" VerticalAlignment="Center"/>
             </Grid>

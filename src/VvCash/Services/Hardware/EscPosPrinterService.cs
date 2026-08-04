@@ -197,7 +197,8 @@ public class EscPosPrinterService : IPrinterService
 
     public static byte[] BuildReturnReceipt(
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
-        decimal totalRefund, string documentNumber)
+        decimal totalRefund, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         using var ms = new MemoryStream();
         Write(ms, CmdInit);
@@ -206,6 +207,9 @@ public class EscPosPrinterService : IPrinterService
         WriteLine(ms, "RETURN / VOZVRAT");
         Write(ms, CmdDoubleSizeOff);
         WriteLine(ms, $"Doc #{documentNumber}");
+        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}");
+        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}");
         WriteLine(ms, "----------------------------");
         Write(ms, CmdAlignLeft);
         foreach (var l in lines)
@@ -222,11 +226,12 @@ public class EscPosPrinterService : IPrinterService
 
     public async Task<bool> PrintReturnReceiptAsync(
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
-        decimal totalRefund, string documentNumber)
+        decimal totalRefund, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         try
         {
-            await SendAsync(BuildReturnReceipt(lines, totalRefund, documentNumber));
+            await SendAsync(BuildReturnReceipt(lines, totalRefund, documentNumber, warehouseName, sellerName, saleDate));
             return true;
         }
         catch
@@ -258,7 +263,8 @@ public class EscPosPrinterService : IPrinterService
     public static byte[] BuildExchangeReceipt(
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
-        decimal difference, string documentNumber)
+        decimal difference, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         using var ms = new MemoryStream();
         Write(ms, CmdInit);
@@ -267,6 +273,9 @@ public class EscPosPrinterService : IPrinterService
         WriteLine(ms, "EXCHANGE / OBMEN");
         Write(ms, CmdDoubleSizeOff);
         WriteLine(ms, $"Doc #{documentNumber}");
+        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}");
+        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}");
         WriteLine(ms, "----------------------------");
         Write(ms, CmdAlignLeft);
 
@@ -294,11 +303,12 @@ public class EscPosPrinterService : IPrinterService
     public async Task<bool> PrintExchangeReceiptAsync(
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
-        decimal difference, string documentNumber)
+        decimal difference, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         try
         {
-            await SendAsync(BuildExchangeReceipt(returned, issued, difference, documentNumber));
+            await SendAsync(BuildExchangeReceipt(returned, issued, difference, documentNumber, warehouseName, sellerName, saleDate));
             return true;
         }
         catch

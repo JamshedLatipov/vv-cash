@@ -41,9 +41,13 @@ public class MockPrinterService : IPrinterService
     }
 
     public Task<bool> PrintReturnReceiptAsync(
-        IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber)
+        IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         Console.WriteLine($"=== RETURN #{documentNumber} ===");
+        if (!string.IsNullOrWhiteSpace(saleDate)) Console.WriteLine(saleDate);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) Console.WriteLine($"Whse: {warehouseName}");
+        if (!string.IsNullOrWhiteSpace(sellerName)) Console.WriteLine($"Seller: {sellerName}");
         foreach (var l in lines)
             Console.WriteLine($"  {l.Name} x{l.Quantity}  {l.LineRefund:F2}");
         Console.WriteLine($"REFUND: {totalRefund:F2}");
@@ -54,9 +58,13 @@ public class MockPrinterService : IPrinterService
     public Task<bool> PrintExchangeReceiptAsync(
         IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
         IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
-        decimal difference, string documentNumber)
+        decimal difference, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         Console.WriteLine($"=== EXCHANGE #{documentNumber} ===");
+        if (!string.IsNullOrWhiteSpace(saleDate)) Console.WriteLine(saleDate);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) Console.WriteLine($"Whse: {warehouseName}");
+        if (!string.IsNullOrWhiteSpace(sellerName)) Console.WriteLine($"Seller: {sellerName}");
         Console.WriteLine("RETURNED:");
         foreach (var l in returned)
             Console.WriteLine($"  {l.Name} x{l.Quantity}  {l.LineRefund:F2}");

@@ -236,7 +236,12 @@ public partial class ReturnsViewModel : ViewModelBase
         {
             var receiptLines = Lines.Where(l => l.ReturnQty > 0)
                 .Select(l => new ReturnReceiptLine(l.Name, l.ReturnQty, l.LineRefund));
-            try { await _printerService.PrintReturnReceiptAsync(receiptLines, TotalRefund, documentNumber); }
+            try
+            {
+                await _printerService.PrintReturnReceiptAsync(
+                    receiptLines, TotalRefund, documentNumber,
+                    SelectedSale?.WarehouseName, SelectedSale?.Creator, SelectedSale?.FormattedSelectedDate);
+            }
             catch { }
         }
     }
