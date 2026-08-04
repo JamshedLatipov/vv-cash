@@ -224,5 +224,6 @@
   "UpdateDownloading": "Yangilanish yuklanmoqda...",
   "UpdateBlockedByCart": "Avval joriy chekni yakunlang",
   "UpdateDownloadFailed": "Yangilanishni yuklab bo'lmadi. Keyinroq urinib ko'ring.",
-  "UpdateLaunchFailed": "O'rnatishni boshlab bo'lmadi. Faylni qo'lda ishga tushiring:"
+  "UpdateLaunchFailed": "O'rnatishni boshlab bo'lmadi. Faylni qo'lda ishga tushiring:",
+  "PhoneRequired": "Telefon raqamini kiriting"
 }
