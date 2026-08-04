@@ -167,24 +167,41 @@ public class ReturnsViewModelTest
     }
 
     [Fact]
-    public async Task ScanReturnBarcode_DoesNotBlockOnTheHighlightFlash_SoAFastSecondScanIsNotDropped()
+    public void ScanReturnBarcode_DoesNotBlockOnTheHighlightFlash_SoAFastSecondScanIsNotDropped()
     {
-        // The command used to await the 700ms highlight in-line, which left
-        // AsyncRelayCommand's own CanExecute false for that whole window — a second
-        // scan arriving at ordinary scanner speed would be silently ignored by
-        // OnReturnScanKeyDown's CanExecute(null) check. The command's Task must
-        // complete (and CanExecute must go back to true) as soon as the quantity is
-        // bumped, not after the cosmetic flash finishes.
+        // Pins the fix itself, not just its downstream symptom. Both the buggy and
+        // the fixed command eventually leave CanExecute true again — awaiting
+        // ExecuteAsync to completion and THEN checking CanExecute (an earlier
+        // version of this test did that) passes either way, and only a wall-clock
+        // assertion — flaky in CI — would actually tell the two apart.
+        //
+        // Instead: fire the scan through the plain ICommand.Execute, exactly how
+        // OnReturnScanKeyDown fires it, and check CanExecute the instant that call
+        // returns, with no await anywhere in this test. That only reads true here
+        // because the command body itself has no blocking await before its own
+        // return: the fixed body hands back an already-completed Task, and
+        // awaiting an already-completed task never actually suspends the awaiting
+        // method — so AsyncRelayCommand's whole ExecuteAsync, including flipping
+        // IsRunning back off, runs to completion synchronously before Execute
+        // returns control here. Against the old body — an async method that
+        // genuinely awaited Task.Delay(700) before returning — that inner await
+        // does suspend for real, so Execute would return with the command still
+        // "running" and CanExecute would read false here. That was the bug: a
+        // second scan arriving at scanner speed found the command refusing to run,
+        // and its digits sat in the now-cleared box with nothing to fire them.
         var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
         vm.Lines[0] = new ReturnLineVm(new ReturnDetailLine
         { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 });
         vm.ReturnScanQuery = "111";
 
-        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
-        Assert.True(vm.ScanReturnBarcodeCommand.CanExecute(null));
+        vm.ScanReturnBarcodeCommand.Execute(null);
 
+        Assert.True(vm.ScanReturnBarcodeCommand.CanExecute(null));
+        Assert.Equal(1, vm.Lines[0].ReturnQty);
+
+        // The second scan, arriving right behind the first, must not be dropped.
         vm.ReturnScanQuery = "111";
-        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+        vm.ScanReturnBarcodeCommand.Execute(null);
 
         Assert.Equal(2, vm.Lines[0].ReturnQty);
     }

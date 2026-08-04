@@ -508,9 +508,21 @@ public partial class ExchangeViewModel : ViewModelBase
 
     private static async Task FlashScannedAsync(ReturnLineVm line)
     {
-        line.IsRecentlyScanned = true;
-        await Task.Delay(700);
-        line.IsRecentlyScanned = false;
+        try
+        {
+            line.IsRecentlyScanned = true;
+            await Task.Delay(700);
+            line.IsRecentlyScanned = false;
+        }
+        catch (Exception ex)
+        {
+            // Detached task, same as PosViewModel.RequoteSafeAsync: nothing awaits
+            // this one, so a failure here must not vanish silently nor crash. Purely
+            // cosmetic either way — a missed highlight costs the cashier nothing but
+            // the visual cue, so this only logs and swallows rather than surfacing
+            // an ErrorMessage over a flash nobody but the cashier's eye depends on.
+            System.Diagnostics.Debug.WriteLine($"[ExchangeViewModel] Scan highlight flash failed: {ex}");
+        }
     }
 
     [RelayCommand]
