@@ -98,11 +98,20 @@ public partial class CustomerRegistrationViewModel : ViewModelBase
     {
         ErrorMessage = null;
 
-        // Пустой телефон законен — клиент без телефона нормальная запись. А вот
-        // начатый и не дописанный раньше молча превращался в Phone = null:
+        // Телефон — единственное обязательное поле карточки клиента: без него
+        // потом нельзя ни найти клиента на кассе, ни связаться с ним. Остальные
+        // поля (имя, фамилия, email, дата рождения, пол) как были необязательными,
+        // так и остаются.
+        if (PhoneNumber.Length == 0)
+        {
+            ErrorMessage = I18nService.Instance["PhoneRequired"];
+            return;
+        }
+
+        // Начатый и не дописанный номер раньше молча превращался в Phone = null:
         // кассир набирал восемь цифр из девяти, жал «Сохранить» и получал
         // клиента без телефона, ничего об этом не узнав.
-        if (PhoneNumber.Length > 0 && PhoneNumber.Length != _phoneFormat.DigitCount)
+        if (PhoneNumber.Length != _phoneFormat.DigitCount)
         {
             ErrorMessage = I18nService.Instance["PhoneIncomplete"];
             return;

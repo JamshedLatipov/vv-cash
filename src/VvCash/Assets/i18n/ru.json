@@ -203,5 +203,8 @@
   "UpdateDownloading": "Загрузка обновления...",
   "UpdateBlockedByCart": "Завершите текущий чек",
   "UpdateDownloadFailed": "Не удалось загрузить обновление. Попробуйте позже.",
-  "UpdateLaunchFailed": "Не удалось запустить установку. Запустите файл вручную:"
+  "UpdateLaunchFailed": "Не удалось запустить установку. Запустите файл вручную:",
+  "PhoneRequired": "Укажите номер телефона",
+  "ScanReturnItem": "Сканируйте товар",
+  "BarcodeNotFoundInReceipt": "Товар с этим штрихкодом не найден в этом чеке"
 }

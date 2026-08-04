@@ -142,18 +142,25 @@ public class ExchangeViewModelTest
         public decimal? LastDifference;
         public string? LastDocumentNumber;
         public List<ReturnReceiptLine>? LastIssuedLines;
+
+        /// <summary>What the last PrintExchangeReceiptAsync call actually received in each
+        /// slot — WarehouseName/Creator/FormattedSelectedDate are all same-typed
+        /// (string?), so a transposition at the call site would compile clean and
+        /// pass every other assertion here without this.</summary>
+        public string? LastWarehouseName; public string? LastSellerName; public string? LastSaleDate;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged { add { } remove { } }
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
-        public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d) => Task.FromResult(true);
-        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber)
+        public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
+        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
         {
             ExchangeReceipt++;
             LastDifference = difference;
             LastDocumentNumber = documentNumber;
             LastIssuedLines = issued.ToList();
+            LastWarehouseName = warehouseName; LastSellerName = sellerName; LastSaleDate = saleDate;
             return Task.FromResult(true);
         }
     }
@@ -206,7 +213,11 @@ public class ExchangeViewModelTest
             cashId: cashId,
             isOnline: true);
 
-        rig.Vm.SelectedSale = new ExpenseListItem { Id = "doc1", DocumentNumber = "9" };
+        rig.Vm.SelectedSale = new ExpenseListItem
+        {
+            Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z",
+            WarehouseName = "Central Store", Creator = "Ivanov I."
+        };
         rig.Vm.SetReturnedLines(new[] { MakeReturnedLine(returnedPrice) });
         rig.Vm.AddIssuedLine(MakeIssuedLine(issuedPrice));
         return rig;
@@ -247,6 +258,13 @@ public class ExchangeViewModelTest
         Assert.Equal(100m, sale.Payment.ToPay);
         Assert.Equal(100m, sale.Payment.PaidInCash);
         Assert.Equal(0m, sale.Payment.Remained);
+
+        // Each SelectedSale field must land in ITS OWN printer slot — not a
+        // neighboring one. WarehouseName and Creator are deliberately distinct
+        // strings in BuildForSubmit so a transposition between them would fail here.
+        Assert.Equal("Central Store", rig.Printer.LastWarehouseName);
+        Assert.Equal("Ivanov I.", rig.Printer.LastSellerName);
+        Assert.Equal(rig.Vm.SelectedSale!.FormattedSelectedDate, rig.Printer.LastSaleDate);
     }
 
     [Fact]
@@ -900,5 +918,88 @@ public class ExchangeViewModelTest
         Assert.Equal(0m, rig.Printer.LastDifference);     // 50 issued against 50 returned
         var issued = Assert.Single(rig.Printer.LastIssuedLines!);
         Assert.Equal(50m, issued.LineRefund);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Scanning a physical item instead of hunting for its line among the returned ones.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ScanReturnBarcode_MatchingLine_IncrementsItsReturnQty()
+    {
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[]
+        {
+            new ReturnLineVm(new ReturnDetailLine
+            { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }),
+        });
+        vm.ReturnScanQuery = "111";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.ReturnedLines[0].ReturnQty);
+        Assert.Equal(string.Empty, vm.ReturnScanQuery);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ScanReturnBarcode_NoMatch_SetsAnError()
+    {
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[]
+        {
+            new ReturnLineVm(new ReturnDetailLine
+            { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }),
+        });
+        vm.ReturnScanQuery = "does-not-exist";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.NotNull(vm.ErrorMessage);
+        Assert.Equal(0, vm.ReturnedLines[0].ReturnQty);
+    }
+
+    [Fact]
+    public void ScanReturnBarcode_DoesNotBlockOnTheHighlightFlash_SoAFastSecondScanIsNotDropped()
+    {
+        // Same fix, and the same test shape, as ReturnsViewModel's own copy of this
+        // test. Pins the fix itself, not just its downstream symptom. Both the buggy
+        // and the fixed command eventually leave CanExecute true again — awaiting
+        // ExecuteAsync to completion and THEN checking CanExecute passes either way,
+        // and only a wall-clock assertion — flaky in CI — would actually tell the
+        // two apart.
+        //
+        // Instead: fire the scan through the plain ICommand.Execute, exactly how
+        // OnReturnScanKeyDown fires it, and check CanExecute the instant that call
+        // returns, with no await anywhere in this test. That only reads true here
+        // because the command body itself has no blocking await before its own
+        // return: the fixed body hands back an already-completed Task, and awaiting
+        // an already-completed task never actually suspends the awaiting method —
+        // so AsyncRelayCommand's whole ExecuteAsync, including flipping IsRunning
+        // back off, runs to completion synchronously before Execute returns control
+        // here. Against the old body — an async method that genuinely awaited
+        // Task.Delay(700) before returning — that inner await does suspend for
+        // real, so Execute would return with the command still "running" and
+        // CanExecute would read false here. That was the bug: a second scan
+        // arriving at scanner speed found the command refusing to run, and its
+        // digits sat in the now-cleared box with nothing to fire them.
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[]
+        {
+            new ReturnLineVm(new ReturnDetailLine
+            { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }),
+        });
+        vm.ReturnScanQuery = "111";
+
+        vm.ScanReturnBarcodeCommand.Execute(null);
+
+        Assert.True(vm.ScanReturnBarcodeCommand.CanExecute(null));
+        Assert.Equal(1, vm.ReturnedLines[0].ReturnQty);
+
+        // The second scan, arriving right behind the first, must not be dropped.
+        vm.ReturnScanQuery = "111";
+        vm.ScanReturnBarcodeCommand.Execute(null);
+
+        Assert.Equal(2, vm.ReturnedLines[0].ReturnQty);
     }
 }

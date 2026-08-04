@@ -129,11 +129,12 @@ public class CompositePrinterService : IPrinterService
     }
 
     public async Task<bool> PrintReturnReceiptAsync(
-        IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber)
+        IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         if (!_printers.Any()) return false;
         var list = lines.ToList();
-        var tasks = _printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber)).ToList();
+        var tasks = _printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber, warehouseName, sellerName, saleDate)).ToList();
         await Task.WhenAll(tasks);
         return tasks.Any(t => t.Result);
     }
@@ -141,12 +142,13 @@ public class CompositePrinterService : IPrinterService
     public async Task<bool> PrintExchangeReceiptAsync(
         IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
         IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
-        decimal difference, string documentNumber)
+        decimal difference, string documentNumber,
+        string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         if (!_printers.Any()) return false;
         var returnedList = returned.ToList();
         var issuedList = issued.ToList();
-        var tasks = _printers.Select(p => p.PrintExchangeReceiptAsync(returnedList, issuedList, difference, documentNumber)).ToList();
+        var tasks = _printers.Select(p => p.PrintExchangeReceiptAsync(returnedList, issuedList, difference, documentNumber, warehouseName, sellerName, saleDate)).ToList();
         await Task.WhenAll(tasks);
         return tasks.Any(t => t.Result);
     }

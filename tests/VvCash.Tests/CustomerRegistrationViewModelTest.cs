@@ -25,7 +25,7 @@ public class CustomerRegistrationViewModelTest
 
         /// <summary>Что вернёт создание. null — провал: именно так сервис
         /// сообщает об отказе сервера или отсутствии связи.</summary>
-        public CounterpartyResponse? CreateResult = new() { Id = "c-1", FullName = "Новый Клиент" };
+        public CounterpartyResponse? CreateResult = new() { Id = "c-1", FullNameRaw = "Новый Клиент" };
 
         public Task<CounterpartyResponse?> CreateCounterpartyAsync(CounterpartyCreateRequest request)
         {
@@ -192,10 +192,10 @@ public class CustomerRegistrationViewModelTest
         Assert.Equal("79001234567", harness.Service.LastRequest?.Phone);
     }
 
-    /// <summary>Клиент без телефона — нормальная запись, и отказ на неполном
-    /// номере не должен был её запретить.</summary>
+    /// <summary>Телефон — единственное обязательное поле карточки клиента: без
+    /// него сохранять больше нельзя, даже если остальные поля заполнены.</summary>
     [Fact]
-    public async Task EmptyPhone_SubmitsWithoutOne()
+    public async Task EmptyPhone_IsRefusedAndNeverSent()
     {
         var harness = new Harness();
         var vm = harness.Build("TJ");
@@ -203,10 +203,9 @@ public class CustomerRegistrationViewModelTest
 
         await vm.SubmitCommand.ExecuteAsync(null);
 
-        Assert.Null(vm.ErrorMessage);
-        Assert.Equal(1, harness.Service.CreateCount);
-        Assert.Null(harness.Service.LastRequest?.Phone);
-        Assert.Equal(1, harness.CloseCount);
+        Assert.NotNull(vm.ErrorMessage);
+        Assert.Equal(0, harness.Service.CreateCount);
+        Assert.Equal(0, harness.CloseCount);
     }
 
     /// <summary>Провал создания оставляет окно открытым с заполненной формой:

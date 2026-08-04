@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace VvCash.Models.Api;
@@ -20,12 +22,24 @@ public class ExpenseListItem
     [JsonPropertyName("state")] public string? State { get; set; }
     [JsonPropertyName("creator")] public string? Creator { get; set; }
     [JsonPropertyName("counterparty")] public string? Counterparty { get; set; }
+    [JsonPropertyName("warehouse_name")] public string? WarehouseName { get; set; }
     [JsonPropertyName("document_number")] public string? DocumentNumber { get; set; }
     [JsonPropertyName("cost")] public decimal Cost { get; set; }
     [JsonPropertyName("to_pay")] public decimal ToPay { get; set; }
     [JsonPropertyName("discount")] public decimal Discount { get; set; }
     [JsonPropertyName("payed")] public decimal Payed { get; set; }
     [JsonPropertyName("remain")] public decimal Remain { get; set; }
+
+    /// <summary>SelectedDate formatted for a cashier to read. The API sends UTC
+    /// ISO-8601 (e.g. "2026-06-06T17:32:55.052Z"); both the sale-picker card and
+    /// the printed return/exchange receipt were showing that raw string verbatim.
+    /// Falls back to the raw string when it doesn't parse, rather than showing
+    /// nothing.</summary>
+    [JsonIgnore]
+    public string FormattedSelectedDate
+        => DateTimeOffset.TryParse(SelectedDate, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto)
+            ? dto.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
+            : SelectedDate ?? string.Empty;
 }
 
 // GET /documents/return/{id}/

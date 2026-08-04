@@ -57,6 +57,12 @@ public partial class ReturnLineVm : ObservableObject
     /// alone does not separate two colours of the same shirt.</summary>
     [ObservableProperty] private Bitmap? _imageBitmap;
 
+    /// <summary>True for a brief moment right after a barcode scan matches this
+    /// line, so the cashier can see which row among several the scan landed on —
+    /// bumping ReturnQty alone is silent and a busy receipt makes it easy to lose
+    /// track of which line just changed. Cleared by the view model that set it.</summary>
+    [ObservableProperty] private bool _isRecentlyScanned;
+
     public event Action? RefundChanged;
 
     private int _returnQty;

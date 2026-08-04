@@ -54,4 +54,19 @@ public class EscPosExchangeTest
         Assert.DoesNotContain("DUE", text);
         Assert.Contains("NO DIFFERENCE", text);
     }
+
+    [Fact]
+    public void ExchangeReceiptBuffer_IncludesWarehouseSellerAndDate_WhenGiven()
+    {
+        var returned = new List<ReturnReceiptLine> { new("Old Shirt", 1, 80m) };
+        var issued = new List<ReturnReceiptLine> { new("New Shirt", 1, 130m) };
+
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(
+            returned, issued, 50m, "9", warehouseName: "Central Store", sellerName: "Ivanov I.", saleDate: "06.06.2026 17:32");
+        var text = Encoding.UTF8.GetString(bytes);
+
+        Assert.Contains("Central Store", text);
+        Assert.Contains("Ivanov I.", text);
+        Assert.Contains("06.06.2026 17:32", text);
+    }
 }

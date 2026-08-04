@@ -52,13 +52,24 @@ public class ReturnsViewModelTest
     private sealed class CountingPrinter : IPrinterService
     {
         public int Drawer; public int Receipt;
+
+        /// <summary>What the last PrintReturnReceiptAsync call actually received in each
+        /// slot — WarehouseName/Creator/FormattedSelectedDate are all same-typed
+        /// (string?), so a transposition at the call site would compile clean and
+        /// pass every other assertion here without this.</summary>
+        public string? LastWarehouseName; public string? LastSellerName; public string? LastSaleDate;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged;
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
-        public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d) { Receipt++; return Task.FromResult(true); }
-        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber) => Task.FromResult(true);
+        public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
+        {
+            Receipt++;
+            LastWarehouseName = warehouseName; LastSellerName = sellerName; LastSaleDate = saleDate;
+            return Task.FromResult(true);
+        }
+        public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
     }
 
     private sealed class FakeSettings : ISettingsService
@@ -93,7 +104,8 @@ public class ReturnsViewModelTest
         var vm = new ReturnsViewModel(null, svc, printer, settings, features ?? new FakeCashFeatureService());
         vm.SelectedSale = new ExpenseListItem
         {
-            Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z"
+            Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z",
+            WarehouseName = "Central Store", Creator = "Ivanov I."
         };
         // after_discount is the whole line's discounted total, so these are 50 and 10
         // a unit respectively — the figures the assertions below are written against.
@@ -127,6 +139,74 @@ public class ReturnsViewModelTest
     }
 
     [Fact]
+    public async Task ScanReturnBarcode_MatchingLine_IncrementsItsReturnQty()
+    {
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
+        vm.Lines[0] = new ReturnLineVm(new ReturnDetailLine
+        { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 });
+        vm.ReturnScanQuery = "111";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.Lines[0].ReturnQty);
+        Assert.Equal(string.Empty, vm.ReturnScanQuery);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ScanReturnBarcode_NoMatch_SetsAnErrorAndLeavesQuantitiesAlone()
+    {
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
+        vm.ReturnScanQuery = "does-not-exist";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.NotNull(vm.ErrorMessage);
+        Assert.Equal(0, vm.Lines[0].ReturnQty);
+        Assert.Equal(0, vm.Lines[1].ReturnQty);
+    }
+
+    [Fact]
+    public void ScanReturnBarcode_DoesNotBlockOnTheHighlightFlash_SoAFastSecondScanIsNotDropped()
+    {
+        // Pins the fix itself, not just its downstream symptom. Both the buggy and
+        // the fixed command eventually leave CanExecute true again — awaiting
+        // ExecuteAsync to completion and THEN checking CanExecute (an earlier
+        // version of this test did that) passes either way, and only a wall-clock
+        // assertion — flaky in CI — would actually tell the two apart.
+        //
+        // Instead: fire the scan through the plain ICommand.Execute, exactly how
+        // OnReturnScanKeyDown fires it, and check CanExecute the instant that call
+        // returns, with no await anywhere in this test. That only reads true here
+        // because the command body itself has no blocking await before its own
+        // return: the fixed body hands back an already-completed Task, and
+        // awaiting an already-completed task never actually suspends the awaiting
+        // method — so AsyncRelayCommand's whole ExecuteAsync, including flipping
+        // IsRunning back off, runs to completion synchronously before Execute
+        // returns control here. Against the old body — an async method that
+        // genuinely awaited Task.Delay(700) before returning — that inner await
+        // does suspend for real, so Execute would return with the command still
+        // "running" and CanExecute would read false here. That was the bug: a
+        // second scan arriving at scanner speed found the command refusing to run,
+        // and its digits sat in the now-cleared box with nothing to fire them.
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
+        vm.Lines[0] = new ReturnLineVm(new ReturnDetailLine
+        { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 });
+        vm.ReturnScanQuery = "111";
+
+        vm.ScanReturnBarcodeCommand.Execute(null);
+
+        Assert.True(vm.ScanReturnBarcodeCommand.CanExecute(null));
+        Assert.Equal(1, vm.Lines[0].ReturnQty);
+
+        // The second scan, arriving right behind the first, must not be dropped.
+        vm.ReturnScanQuery = "111";
+        vm.ScanReturnBarcodeCommand.Execute(null);
+
+        Assert.Equal(2, vm.Lines[0].ReturnQty);
+    }
+
+    [Fact]
     public async Task Submit_NeitherFlagConfigured_BothPostActionsHappen_RegardlessOfLocalSettings()
     {
         var svc = new FakeReturnService();
@@ -143,6 +223,13 @@ public class ReturnsViewModelTest
         Assert.Equal("doc1", svc.LastExpenseId);
         Assert.Equal(1, printer.Drawer);
         Assert.Equal(1, printer.Receipt);
+
+        // Each SelectedSale field must land in ITS OWN printer slot — not a
+        // neighboring one. WarehouseName and Creator are deliberately distinct
+        // strings above so a transposition between them would fail here.
+        Assert.Equal("Central Store", printer.LastWarehouseName);
+        Assert.Equal("Ivanov I.", printer.LastSellerName);
+        Assert.Equal(vm.SelectedSale!.FormattedSelectedDate, printer.LastSaleDate);
     }
 
     [Fact]

@@ -25,4 +25,28 @@ public class EscPosReturnTest
         Assert.Contains("#9", text);
         Assert.Contains("200", text);
     }
+
+    [Fact]
+    public void ReturnReceiptBuffer_IncludesWarehouseSellerAndDate_WhenGiven()
+    {
+        var lines = new List<ReturnReceiptLine> { new("Salad", 2, 200m) };
+        var bytes = EscPosPrinterService.BuildReturnReceipt(
+            lines, 200m, "9", warehouseName: "Central Store", sellerName: "Ivanov I.", saleDate: "06.06.2026 17:32");
+        var text = Encoding.UTF8.GetString(bytes);
+
+        Assert.Contains("Central Store", text);
+        Assert.Contains("Ivanov I.", text);
+        Assert.Contains("06.06.2026 17:32", text);
+    }
+
+    [Fact]
+    public void ReturnReceiptBuffer_OmitsTheNewLines_WhenNotGiven()
+    {
+        var lines = new List<ReturnReceiptLine> { new("Salad", 2, 200m) };
+        var bytes = EscPosPrinterService.BuildReturnReceipt(lines, 200m, "9");
+        var text = Encoding.UTF8.GetString(bytes);
+
+        Assert.DoesNotContain("Whse:", text);
+        Assert.DoesNotContain("Seller:", text);
+    }
 }
