@@ -919,4 +919,43 @@ public class ExchangeViewModelTest
         var issued = Assert.Single(rig.Printer.LastIssuedLines!);
         Assert.Equal(50m, issued.LineRefund);
     }
+
+    // ---------------------------------------------------------------------------------
+    // Scanning a physical item instead of hunting for its line among the returned ones.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ScanReturnBarcode_MatchingLine_IncrementsItsReturnQty()
+    {
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[]
+        {
+            new ReturnLineVm(new ReturnDetailLine
+            { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }),
+        });
+        vm.ReturnScanQuery = "111";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.ReturnedLines[0].ReturnQty);
+        Assert.Equal(string.Empty, vm.ReturnScanQuery);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ScanReturnBarcode_NoMatch_SetsAnError()
+    {
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[]
+        {
+            new ReturnLineVm(new ReturnDetailLine
+            { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }),
+        });
+        vm.ReturnScanQuery = "does-not-exist";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.NotNull(vm.ErrorMessage);
+        Assert.Equal(0, vm.ReturnedLines[0].ReturnQty);
+    }
 }

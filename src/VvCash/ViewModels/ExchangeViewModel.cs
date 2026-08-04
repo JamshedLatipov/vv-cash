@@ -121,6 +121,10 @@ public partial class ExchangeViewModel : ViewModelBase
     [ObservableProperty] private string? _successMessage;
     [ObservableProperty] private string _issuedSearchQuery = string.Empty;
 
+    /// <summary>What the cashier scanned or typed into the returned-side barcode
+    /// box, once a receipt's lines are already on screen.</summary>
+    [ObservableProperty] private string _returnScanQuery = string.Empty;
+
     /// <summary>The return and the till payout have no offline queue behind them, so
     /// with no connection there is nothing for the submit button to offer.</summary>
     [ObservableProperty]
@@ -467,6 +471,30 @@ public partial class ExchangeViewModel : ViewModelBase
         }
 
         IssuedSearchQuery = string.Empty;
+    }
+
+    /// <summary>Scans the item being brought back instead of hunting for its line
+    /// among the returned ones: a match bumps ReturnQty by one, same as pressing
+    /// the line's own + button, and briefly highlights the card.</summary>
+    [RelayCommand]
+    private async Task ScanReturnBarcode()
+    {
+        var code = ReturnScanQuery.Trim();
+        ReturnScanQuery = string.Empty;
+        if (string.IsNullOrWhiteSpace(code)) return;
+        ErrorMessage = null;
+
+        var line = ReturnedLines.FirstOrDefault(l => l.IsReturnable && l.Barcode == code);
+        if (line == null)
+        {
+            ErrorMessage = I18nService.Instance["BarcodeNotFoundInReceipt"];
+            return;
+        }
+
+        line.ReturnQty += 1;
+        line.IsRecentlyScanned = true;
+        await Task.Delay(700);
+        line.IsRecentlyScanned = false;
     }
 
     [RelayCommand]

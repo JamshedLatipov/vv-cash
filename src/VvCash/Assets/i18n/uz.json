@@ -225,5 +225,7 @@
   "UpdateBlockedByCart": "Avval joriy chekni yakunlang",
   "UpdateDownloadFailed": "Yangilanishni yuklab bo'lmadi. Keyinroq urinib ko'ring.",
   "UpdateLaunchFailed": "O'rnatishni boshlab bo'lmadi. Faylni qo'lda ishga tushiring:",
-  "PhoneRequired": "Telefon raqamini kiriting"
+  "PhoneRequired": "Telefon raqamini kiriting",
+  "ScanReturnItem": "Mahsulotni skanerlang",
+  "BarcodeNotFoundInReceipt": "Ushbu chekda bu shtrix-kodli mahsulot topilmadi"
 }

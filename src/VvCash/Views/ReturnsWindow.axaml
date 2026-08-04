@@ -15,6 +15,13 @@
         ExtendClientAreaChromeHints="NoChrome"
         ExtendClientAreaTitleBarHeightHint="-1">
 
+  <Window.Styles>
+    <Style Selector="Border.scanned">
+      <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
+  </Window.Styles>
+
   <Border Background="White" CornerRadius="12" ClipToBounds="True" BoxShadow="0 20 25 -5 #40000000">
     <Grid RowDefinitions="Auto,*,Auto">
 
@@ -87,12 +94,21 @@
 
         <!-- Right: returnable lines -->
         <Border Grid.Column="1" BorderBrush="{StaticResource Slate100Brush}" BorderThickness="1,0,0,0" Padding="24,16">
-          <Grid>
+          <Grid RowDefinitions="Auto,*">
+            <TextBox Grid.Row="0" x:Name="ReturnScanBox" Text="{Binding ReturnScanQuery}" Classes="IconTextBox"
+                     Watermark="{Binding [ScanReturnItem], Source={x:Static services:I18nService.Instance}}"
+                     FontSize="14" Margin="0,0,0,12" IsEnabled="{Binding HasSelectedSale}"
+                     KeyDown="OnReturnScanKeyDown">
+              <TextBox.InnerLeftContent>
+                <material:MaterialIcon Kind="BarcodeScan" Width="18" Height="18" Foreground="{StaticResource Slate400Brush}" Margin="10,0,8,0"/>
+              </TextBox.InnerLeftContent>
+            </TextBox>
+            <Grid Grid.Row="1">
             <TextBlock Text="{Binding [SelectSaleToReturn], Source={x:Static services:I18nService.Instance}}" IsVisible="{Binding !HasSelectedSale}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="16" Foreground="{StaticResource Slate400Brush}"/>
             <ItemsControl ItemsSource="{Binding Lines}" IsVisible="{Binding HasSelectedSale}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate DataType="vm:ReturnLineVm">
-                  <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4" IsEnabled="{Binding IsReturnable}">
+                  <Border Classes.scanned="{Binding IsRecentlyScanned}" Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4" IsEnabled="{Binding IsReturnable}">
                     <Grid ColumnDefinitions="*,Auto,Auto">
                       <StackPanel Grid.Column="0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>
@@ -113,6 +129,7 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            </Grid>
           </Grid>
         </Border>
       </Grid>

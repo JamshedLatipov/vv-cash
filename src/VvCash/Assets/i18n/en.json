@@ -225,5 +225,7 @@
   "UpdateBlockedByCart": "Finish the current receipt first",
   "UpdateDownloadFailed": "Could not download the update. Try again later.",
   "UpdateLaunchFailed": "Could not start the installer. Run this file by hand:",
-  "PhoneRequired": "Enter a phone number"
+  "PhoneRequired": "Enter a phone number",
+  "ScanReturnItem": "Scan item",
+  "BarcodeNotFoundInReceipt": "No item with this barcode in this receipt"
 }

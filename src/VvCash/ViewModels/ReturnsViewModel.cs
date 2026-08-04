@@ -50,6 +50,11 @@ public partial class ReturnsViewModel : ViewModelBase
     /// costs a round trip and never empties the list mid-keystroke.</summary>
     [ObservableProperty] private string _documentNumberQuery = string.Empty;
 
+    /// <summary>What the cashier scanned or typed into the barcode box, once a
+    /// receipt's lines are already on screen — a faster way to bump a line's
+    /// quantity than hunting for it in a long list.</summary>
+    [ObservableProperty] private string _returnScanQuery = string.Empty;
+
     public bool HasSelectedSale => SelectedSale != null;
     public bool HasMorePages => CurrentPage < PageCount;
     public decimal TotalRefund => Lines.Sum(l => l.LineRefund);
@@ -120,6 +125,31 @@ public partial class ReturnsViewModel : ViewModelBase
         if (string.IsNullOrEmpty(DocumentNumberQuery)) return;
         DocumentNumberQuery = string.Empty;
         await SearchSales();
+    }
+
+    /// <summary>Scans the physical item instead of hunting for its line in the
+    /// list: a match bumps ReturnQty by one, same as pressing the line's own +
+    /// button, and briefly highlights the card so the cashier can see which row
+    /// the scan landed on.</summary>
+    [RelayCommand]
+    private async Task ScanReturnBarcode()
+    {
+        var code = ReturnScanQuery.Trim();
+        ReturnScanQuery = string.Empty;
+        if (string.IsNullOrWhiteSpace(code)) return;
+        ErrorMessage = null;
+
+        var line = Lines.FirstOrDefault(l => l.IsReturnable && l.Barcode == code);
+        if (line == null)
+        {
+            ErrorMessage = I18nService.Instance["BarcodeNotFoundInReceipt"];
+            return;
+        }
+
+        line.ReturnQty += 1;
+        line.IsRecentlyScanned = true;
+        await Task.Delay(700);
+        line.IsRecentlyScanned = false;
     }
 
     partial void OnSelectedSaleChanged(ExpenseListItem? value)

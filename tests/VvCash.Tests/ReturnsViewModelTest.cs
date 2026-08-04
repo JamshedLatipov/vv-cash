@@ -139,6 +139,34 @@ public class ReturnsViewModelTest
     }
 
     [Fact]
+    public async Task ScanReturnBarcode_MatchingLine_IncrementsItsReturnQty()
+    {
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
+        vm.Lines[0] = new ReturnLineVm(new ReturnDetailLine
+        { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 });
+        vm.ReturnScanQuery = "111";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.Lines[0].ReturnQty);
+        Assert.Equal(string.Empty, vm.ReturnScanQuery);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ScanReturnBarcode_NoMatch_SetsAnErrorAndLeavesQuantitiesAlone()
+    {
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
+        vm.ReturnScanQuery = "does-not-exist";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.NotNull(vm.ErrorMessage);
+        Assert.Equal(0, vm.Lines[0].ReturnQty);
+        Assert.Equal(0, vm.Lines[1].ReturnQty);
+    }
+
+    [Fact]
     public async Task Submit_NeitherFlagConfigured_BothPostActionsHappen_RegardlessOfLocalSettings()
     {
         var svc = new FakeReturnService();
