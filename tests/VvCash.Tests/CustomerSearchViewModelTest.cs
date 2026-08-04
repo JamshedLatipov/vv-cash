@@ -52,7 +52,7 @@ public class CustomerSearchViewModelTest
     }
 
     private static CounterpartyResponse Customer(string id, string name)
-        => new() { Id = id, FullName = name };
+        => new() { Id = id, FullNameRaw = name };
 
     [Fact]
     public void FreshWindow_ShowsNoEmptyState()

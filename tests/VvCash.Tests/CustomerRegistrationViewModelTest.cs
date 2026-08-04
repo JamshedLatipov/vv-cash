@@ -25,7 +25,7 @@ public class CustomerRegistrationViewModelTest
 
         /// <summary>Что вернёт создание. null — провал: именно так сервис
         /// сообщает об отказе сервера или отсутствии связи.</summary>
-        public CounterpartyResponse? CreateResult = new() { Id = "c-1", FullName = "Новый Клиент" };
+        public CounterpartyResponse? CreateResult = new() { Id = "c-1", FullNameRaw = "Новый Клиент" };
 
         public Task<CounterpartyResponse?> CreateCounterpartyAsync(CounterpartyCreateRequest request)
         {
