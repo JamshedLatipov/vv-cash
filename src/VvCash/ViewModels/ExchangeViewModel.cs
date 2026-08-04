@@ -475,23 +475,39 @@ public partial class ExchangeViewModel : ViewModelBase
 
     /// <summary>Scans the item being brought back instead of hunting for its line
     /// among the returned ones: a match bumps ReturnQty by one, same as pressing
-    /// the line's own + button, and briefly highlights the card.</summary>
+    /// the line's own + button, and briefly highlights the card.
+    ///
+    /// Deliberately not async/awaiting the highlight: [RelayCommand] generates an
+    /// AsyncRelayCommand that reports CanExecute false for as long as its Task is
+    /// running, so awaiting the 700ms flash in-line here would block a second scan
+    /// that arrives within that window — at scanner speed, an entirely normal case.
+    /// The blocked scan's digits would then sit in the now-empty ReturnScanQuery and
+    /// never fire Execute, only to concatenate with a third scan into a garbage
+    /// string that matches nothing. Firing the flash off as its own task keeps this
+    /// command's own Task done (and CanExecute true again) as soon as the quantity
+    /// is bumped, so consecutive fast scans each get their own turn.</summary>
     [RelayCommand]
-    private async Task ScanReturnBarcode()
+    private Task ScanReturnBarcode()
     {
         var code = ReturnScanQuery.Trim();
         ReturnScanQuery = string.Empty;
-        if (string.IsNullOrWhiteSpace(code)) return;
+        if (string.IsNullOrWhiteSpace(code)) return Task.CompletedTask;
         ErrorMessage = null;
 
         var line = ReturnedLines.FirstOrDefault(l => l.IsReturnable && l.Barcode == code);
         if (line == null)
         {
             ErrorMessage = I18nService.Instance["BarcodeNotFoundInReceipt"];
-            return;
+            return Task.CompletedTask;
         }
 
         line.ReturnQty += 1;
+        _ = FlashScannedAsync(line);
+        return Task.CompletedTask;
+    }
+
+    private static async Task FlashScannedAsync(ReturnLineVm line)
+    {
         line.IsRecentlyScanned = true;
         await Task.Delay(700);
         line.IsRecentlyScanned = false;

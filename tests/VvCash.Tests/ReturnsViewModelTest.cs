@@ -167,6 +167,29 @@ public class ReturnsViewModelTest
     }
 
     [Fact]
+    public async Task ScanReturnBarcode_DoesNotBlockOnTheHighlightFlash_SoAFastSecondScanIsNotDropped()
+    {
+        // The command used to await the 700ms highlight in-line, which left
+        // AsyncRelayCommand's own CanExecute false for that whole window — a second
+        // scan arriving at ordinary scanner speed would be silently ignored by
+        // OnReturnScanKeyDown's CanExecute(null) check. The command's Task must
+        // complete (and CanExecute must go back to true) as soon as the quantity is
+        // bumped, not after the cosmetic flash finishes.
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings());
+        vm.Lines[0] = new ReturnLineVm(new ReturnDetailLine
+        { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 });
+        vm.ReturnScanQuery = "111";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+        Assert.True(vm.ScanReturnBarcodeCommand.CanExecute(null));
+
+        vm.ReturnScanQuery = "111";
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, vm.Lines[0].ReturnQty);
+    }
+
+    [Fact]
     public async Task Submit_NeitherFlagConfigured_BothPostActionsHappen_RegardlessOfLocalSettings()
     {
         var svc = new FakeReturnService();

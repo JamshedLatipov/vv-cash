@@ -958,4 +958,29 @@ public class ExchangeViewModelTest
         Assert.NotNull(vm.ErrorMessage);
         Assert.Equal(0, vm.ReturnedLines[0].ReturnQty);
     }
+
+    [Fact]
+    public async Task ScanReturnBarcode_DoesNotBlockOnTheHighlightFlash_SoAFastSecondScanIsNotDropped()
+    {
+        // Same fix as ReturnsViewModel's own scan command: the highlight flash used
+        // to be awaited in-line, which left AsyncRelayCommand's CanExecute false for
+        // the whole 700ms window and silently dropped a second scan arriving at
+        // ordinary scanner speed. The command's Task must complete (and CanExecute
+        // must go back to true) as soon as the quantity is bumped.
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[]
+        {
+            new ReturnLineVm(new ReturnDetailLine
+            { Product = new ReturnProduct { Id = "pA", Barcode = "111" }, Quantity = 3, QuantityReturned = 0, AfterDiscount = 150 }),
+        });
+        vm.ReturnScanQuery = "111";
+
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+        Assert.True(vm.ScanReturnBarcodeCommand.CanExecute(null));
+
+        vm.ReturnScanQuery = "111";
+        await vm.ScanReturnBarcodeCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, vm.ReturnedLines[0].ReturnQty);
+    }
 }
