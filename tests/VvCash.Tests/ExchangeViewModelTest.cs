@@ -142,6 +142,12 @@ public class ExchangeViewModelTest
         public decimal? LastDifference;
         public string? LastDocumentNumber;
         public List<ReturnReceiptLine>? LastIssuedLines;
+
+        /// <summary>What the last PrintExchangeReceiptAsync call actually received in each
+        /// slot — WarehouseName/Creator/FormattedSelectedDate are all same-typed
+        /// (string?), so a transposition at the call site would compile clean and
+        /// pass every other assertion here without this.</summary>
+        public string? LastWarehouseName; public string? LastSellerName; public string? LastSaleDate;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged { add { } remove { } }
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
@@ -154,6 +160,7 @@ public class ExchangeViewModelTest
             LastDifference = difference;
             LastDocumentNumber = documentNumber;
             LastIssuedLines = issued.ToList();
+            LastWarehouseName = warehouseName; LastSellerName = sellerName; LastSaleDate = saleDate;
             return Task.FromResult(true);
         }
     }
@@ -206,7 +213,11 @@ public class ExchangeViewModelTest
             cashId: cashId,
             isOnline: true);
 
-        rig.Vm.SelectedSale = new ExpenseListItem { Id = "doc1", DocumentNumber = "9" };
+        rig.Vm.SelectedSale = new ExpenseListItem
+        {
+            Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z",
+            WarehouseName = "Central Store", Creator = "Ivanov I."
+        };
         rig.Vm.SetReturnedLines(new[] { MakeReturnedLine(returnedPrice) });
         rig.Vm.AddIssuedLine(MakeIssuedLine(issuedPrice));
         return rig;
@@ -247,6 +258,13 @@ public class ExchangeViewModelTest
         Assert.Equal(100m, sale.Payment.ToPay);
         Assert.Equal(100m, sale.Payment.PaidInCash);
         Assert.Equal(0m, sale.Payment.Remained);
+
+        // Each SelectedSale field must land in ITS OWN printer slot — not a
+        // neighboring one. WarehouseName and Creator are deliberately distinct
+        // strings in BuildForSubmit so a transposition between them would fail here.
+        Assert.Equal("Central Store", rig.Printer.LastWarehouseName);
+        Assert.Equal("Ivanov I.", rig.Printer.LastSellerName);
+        Assert.Equal(rig.Vm.SelectedSale!.FormattedSelectedDate, rig.Printer.LastSaleDate);
     }
 
     [Fact]
