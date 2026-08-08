@@ -281,7 +281,7 @@ if (-not $Publish) {
 if (-not (Test-Path $publishCfg)) {
     $template = @"
 {
-  "sshTarget": "user@proffi.io",
+  "sshTarget": "root@proffi.io",
   "remoteDir": "/var/www/html/downloads",
   "sshPort": null
 }
