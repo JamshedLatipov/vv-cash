@@ -12,7 +12,16 @@ public interface IPrinterService
     /// <param name="discountName">Label of the discount source (promotion name,
     /// promo code, card) printed under the discount line so the customer can see
     /// why the total dropped. Null or empty prints no such line.</param>
-    Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null);
+    /// <param name="documentNumber">The sale's number from the server. Empty for a
+    /// sale that was queued offline and has no number yet; prints no such line.</param>
+    /// <param name="warehouseName">The store this was rung up at. Null or empty
+    /// prints no such line.</param>
+    /// <param name="sellerName">Who rang it up. Null or empty — including a register
+    /// with seller switching off — prints no such line.</param>
+    /// <param name="saleDate">Already formatted for display, same as the return
+    /// receipt's. Null or empty prints no such line.</param>
+    Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
+        string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null);
     Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total);
     System.Threading.Tasks.Task<bool> OpenCashDrawerAsync();
     /// <param name="warehouseName">The warehouse/store the original sale was rung

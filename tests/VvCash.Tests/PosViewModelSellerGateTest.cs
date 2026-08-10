@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -209,9 +209,19 @@ public class PosViewModelSellerGateTest
 
     private class FakeProductService : IProductService
     {
+        public int SearchCallCount { get; private set; }
+        public string? LastQuery { get; private set; }
+
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult(Enumerable.Empty<Product>());
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category) => Task.FromResult(Enumerable.Empty<Product>());
-        public Task<IEnumerable<Product>> SearchProductsAsync(string query) => Task.FromResult(Enumerable.Empty<Product>());
+
+        public Task<IEnumerable<Product>> SearchProductsAsync(string query)
+        {
+            SearchCallCount++;
+            LastQuery = query;
+            return Task.FromResult(Enumerable.Empty<Product>());
+        }
+
         public Task<Product?> GetProductByBarcodeAsync(string barcode) => Task.FromResult<Product?>(null);
         public Task<IEnumerable<string>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<string>());
     }
@@ -226,7 +236,8 @@ public class PosViewModelSellerGateTest
     {
         public PrinterStatus Status => PrinterStatus.Ready;
         public event EventHandler<PrinterStatus>? StatusChanged;
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
+            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
@@ -281,6 +292,7 @@ public class PosViewModelSellerGateTest
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult(Enumerable.Empty<Product>());
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId) => Task.FromResult(Enumerable.Empty<Product>());
         public Task<Product?> GetProductByBarcodeAsync(string barcode) => Task.FromResult<Product?>(null);
+        public Task<IEnumerable<Product>> SearchProductsAsync(string query) => Task.FromResult(Enumerable.Empty<Product>());
         public Task SaveCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
@@ -296,6 +308,7 @@ public class PosViewModelSellerGateTest
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult(Enumerable.Empty<KeyValuePair<string, string>>());
         public Task DeleteUnsyncedDocumentAsync(string hash) => Task.CompletedTask;
+        public Task MarkDocumentRejectedAsync(string hash, string reason) => Task.CompletedTask;
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(0);
         public Task ClearCategoriesAsync() => Task.CompletedTask;
         public Task ClearProductsAsync() => Task.CompletedTask;
@@ -355,10 +368,14 @@ public class PosViewModelSellerGateTest
     {
         public DocumentRequest? LastRequest { get; private set; }
 
-        /// <summary>What CreateExpenseDocumentAsync reports back — defaults to success
-        /// (matching prior behaviour). The end-of-receipt tests flip it to false to
-        /// exercise the failed-payment branch, where the seller must survive so a retry
-        /// doesn't demand a fresh PIN.</summary>
+        /// <summary>Whether the document is accepted — defaults to success. The
+        /// end-of-receipt tests flip it to false to exercise the failed-payment branch,
+        /// where the seller must survive so a retry doesn't demand a fresh PIN.
+        ///
+        /// Governs both overloads. It used to govern only the bool one, which left the
+        /// detailed path always reporting success — so once Pay switched to it (to show
+        /// the server's own rejection reason), the failure tests were silently exercising
+        /// the success branch.</summary>
         public bool CreateResult { get; set; } = true;
 
         public Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
@@ -370,7 +387,9 @@ public class PosViewModelSellerGateTest
         public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
         {
             LastRequest = request;
-            return Task.FromResult(ExpenseDocumentOutcome.Sent("1"));
+            return Task.FromResult(CreateResult
+                ? ExpenseDocumentOutcome.Sent("1")
+                : ExpenseDocumentOutcome.Refused("товар не найден"));
         }
 
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
@@ -553,6 +572,7 @@ public class PosViewModelSellerGateTest
         public FakeCashFeatureService Features { get; } = new();
         public FakeSyncService SyncService { get; } = new();
         public FakeQuoteService QuoteService { get; } = new();
+        public FakeProductService ProductService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -561,7 +581,7 @@ public class PosViewModelSellerGateTest
         deps = new Deps();
         configure?.Invoke(deps);
         return new PosViewModel(
-            new FakeProductService(),
+            deps.ProductService,
             new FakeCategoryService(),
             deps.CartService,
             new FakePrinterService(),
@@ -1423,10 +1443,48 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void ApplyManualDiscount_AmountMode_NeverGated_RegardlessOfCap()
+    public void ApplyManualDiscount_AmountModeUnderTheCap_AppliesDirectly()
     {
-        // Amount-mode discounts aren't compared against a percent cap — out of scope for
-        // NeedsDiscountApproval, same as before this task.
+        // 500 off a 1000 cart is 50%, and this seller may go to 60%.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 60m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 1000m));
+        var raisedCount = 0;
+        vm.DiscountApprovalRequested += (s, percent) => raisedCount++;
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(500m, deps.CartService.ManualDiscountAmount);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountModeOverTheCapInPercentTerms_RaisesApproval()
+    {
+        // The hole this closes: the cap is a percent, so an amount-mode discount used to
+        // skip the check entirely. A seller allowed 5% could switch the modal to amount
+        // mode and take half the receipt off, with nobody asked.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 5m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 1000m));
+        decimal? raisedPercent = null;
+        vm.DiscountApprovalRequested += (s, percent) => raisedPercent = percent;
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(50m, raisedPercent);
+        Assert.Equal(0m, deps.CartService.ManualDiscountAmount); // nothing applied yet
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountModeOnAnEmptyCart_IsRefused()
+    {
+        // No subtotal to take a percent of, so nothing can establish whether this is
+        // within the seller's cap. Refuse rather than guess.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 5m));
         var raisedCount = 0;
@@ -1437,7 +1495,145 @@ public class PosViewModelSellerGateTest
         vm.ApplyManualDiscountCommand.Execute(null);
 
         Assert.Equal(0, raisedCount);
-        Assert.Equal(500m, deps.CartService.ManualDiscountAmount);
+        Assert.Equal(0m, deps.CartService.ManualDiscountAmount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Order number. It counts receipts, so it may only move when one begins.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void OrderNumber_AdvancesOnceWhenAReceiptBegins()
+    {
+        using var vm = CreateViewModel(out var deps);
+        var before = vm.OrderNumber;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        Assert.Equal(before + 1, vm.OrderNumber);
+    }
+
+    [Fact]
+    public void OrderNumber_DoesNotAdvanceWhenTheOnlyLineChangesQuantity()
+    {
+        // The old condition was "the cart now has exactly one line", which is true again
+        // after every +/- tap on a single-line receipt — so the number climbed while the
+        // cashier adjusted a quantity, and again when a second line was removed.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        var afterFirstItem = vm.OrderNumber;
+
+        vm.IncreaseQuantityCommand.Execute(deps.CartService.Items[0]);
+        vm.IncreaseQuantityCommand.Execute(deps.CartService.Items[0]);
+
+        Assert.Equal(afterFirstItem, vm.OrderNumber);
+    }
+
+    [Fact]
+    public void OrderNumber_DoesNotAdvanceWhenASecondLineIsRemoved()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+        var afterTwoItems = vm.OrderNumber;
+
+        vm.RemoveFromCartCommand.Execute(deps.CartService.Items[1]);
+
+        Assert.Equal(afterTwoItems, vm.OrderNumber);
+    }
+
+    [Fact]
+    public void OrderNumber_AdvancesAgainForTheNextReceipt()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        var first = vm.OrderNumber;
+
+        vm.ClearCartCommand.Execute(null);
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+
+        Assert.Equal(first + 1, vm.OrderNumber);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Search debounce. Every keystroke used to fire its own catalog query.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchQuery_TypedQuickly_QueriesTheCatalogOnceForTheFinalText()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        vm.SearchQuery = "пл";
+        vm.SearchQuery = "пли";
+        vm.SearchQuery = "плит";
+
+        await Task.Delay(700);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(1, deps.ProductService.SearchCallCount);
+        Assert.Equal("плит", deps.ProductService.LastQuery);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Bounds. A manual discount is free text off a numeric pad, and CartService clamps
+    // the total to the subtotal — so an over-100% entry did not look wrong anywhere, it
+    // just produced a receipt for nothing.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ApplyManualDiscount_PercentAboveOneHundred_IsRefused()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1")); // no cap configured
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0m, deps.CartService.ManualDiscountPercent);
+        Assert.True(vm.IsAlertModalVisible);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_PercentOfExactlyOneHundred_IsAccepted()
+    {
+        // The whole receipt off is a real thing a manager does; 100 is the boundary,
+        // not the refusal.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.DiscountInputValue = "100";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(100m, deps.CartService.ManualDiscountPercent);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_NegativePercent_IsRefused()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.DiscountInputValue = "-5";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0m, deps.CartService.ManualDiscountPercent);
+        Assert.True(vm.IsAlertModalVisible);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountLargerThanTheCart_IsRefused()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "5000";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0m, deps.CartService.ManualDiscountAmount);
+        Assert.True(vm.IsAlertModalVisible);
     }
 
     // ---------------------------------------------------------------------------------

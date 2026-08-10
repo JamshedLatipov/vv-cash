@@ -1,4 +1,4 @@
-{
+﻿{
   "LuxeThreadsPOS": "Proffi POS",
   "WelcomebackPleaseent": "Xush kelibsiz! Davom etish uchun ma'lumotlaringizni kiriting.",
   "SignIn": "Tizimga kirish",
@@ -208,6 +208,7 @@
   "ExchangeIssuedLabel": "Berish:",
   "ExchangeCustomerPaysLabel": "Qo'shimcha to'lov:",
   "ExchangeRefundDueLabel": "Qaytariladigan summa:",
+  "ExchangePayByCard": "Farqni karta bilan to'lash",
   "ExchangeOfflineWarning": "Almashtirish uchun serverga ulanish kerak",
   "ExchangePayoutCategoryWarning": "Kassadan pul berish uchun xarajat moddasi tanlanmagan — almashtirish mavjud emas",
   "ExchangePayoutCategory": "Kassadan pul berish xarajat moddasi (almashtirish)",

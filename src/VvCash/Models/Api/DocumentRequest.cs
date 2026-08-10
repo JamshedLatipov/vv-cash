@@ -114,20 +114,33 @@ public class DocumentProduct
 ///
 /// <see cref="Queued"/> is not a failure — SyncOfflineDocumentsAsync replays it — but
 /// it is not "the server has it" either, and a screen that reports one as the other
-/// tells the cashier a document exists that nobody can find yet.</summary>
+/// tells the cashier a document exists that nobody can find yet.
+///
+/// <see cref="Refused"/> is the third state, and the one that used to be missing: the
+/// server understood the document and will not take it. Queueing that (which is what
+/// happened before) reported a sale as complete and left it retrying for the life of
+/// the register.</summary>
 public class ExpenseDocumentOutcome
 {
     public bool Posted { get; init; }
     public bool Queued { get; init; }
+    public bool Rejected { get; init; }
 
     /// <summary>The sale's number, from the server. Empty for a queued document, which
     /// has no number until it syncs.</summary>
     public string DocumentNumber { get; init; } = string.Empty;
 
+    /// <summary>Why the server refused it, in its own words. Empty unless
+    /// <see cref="Rejected"/>.</summary>
+    public string RejectionReason { get; init; } = string.Empty;
+
     public static ExpenseDocumentOutcome Sent(string documentNumber)
         => new() { Posted = true, DocumentNumber = documentNumber };
 
     public static ExpenseDocumentOutcome Enqueued() => new() { Queued = true };
+
+    public static ExpenseDocumentOutcome Refused(string reason)
+        => new() { Rejected = true, RejectionReason = reason };
 }
 
 public enum SoldSourcesEnum

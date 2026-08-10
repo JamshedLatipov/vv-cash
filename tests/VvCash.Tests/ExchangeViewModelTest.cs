@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -151,7 +151,8 @@ public class ExchangeViewModelTest
         public string? LastWarehouseName; public string? LastSellerName; public string? LastSaleDate;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged { add { } remove { } }
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null,
+            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
@@ -554,6 +555,70 @@ public class ExchangeViewModelTest
         Assert.Equal(160m, vm.IssuedTotal);               // what the cashier is shown
         Assert.Equal(vm.IssuedTotal, req.Payment.ToPay);  // and what is declared
         Assert.Equal(req.Payment.ToPay, ServerCalculatedTotal(req));
+    }
+
+    // -------------------------------------------------------------------------------
+    // How the replacement sale is tendered. Step 2 hands the whole returned total out
+    // of the till and step 3 takes the replacement's full price back, so the drawer
+    // nets to the difference — but only if the sale says which way that money moved.
+    // -------------------------------------------------------------------------------
+
+    [Fact]
+    public void BuildSaleRequest_DefaultsToCash()
+    {
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
+        vm.AddIssuedLine(MakeIssuedLine(120m));
+
+        var req = vm.BuildSaleRequest();
+
+        Assert.Equal(120m, req.Payment.PaidInCash);
+        Assert.Equal(0m, req.Payment.PaidByCreditCard);
+        Assert.Equal(0m, req.Payment.Remained);
+    }
+
+    [Fact]
+    public void BuildSaleRequest_PaidByCard_BooksTheReplacementAgainstTheCardSlot()
+    {
+        // The whole replacement sale was hardcoded to paid_in_cash. A customer who
+        // settles the difference on a terminal left the books saying the drawer took
+        // money it never saw, and the shift did not reconcile against the terminal.
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
+        vm.AddIssuedLine(MakeIssuedLine(120m));
+
+        vm.PayByCard = true;
+        var req = vm.BuildSaleRequest();
+
+        Assert.Equal(0m, req.Payment.PaidInCash);
+        Assert.Equal(120m, req.Payment.PaidByCreditCard);
+        Assert.Equal(120m, req.Payment.ToPay);
+        Assert.Equal(0m, req.Payment.Remained);
+    }
+
+    [Fact]
+    public void PayByCard_IsOnlyOfferedWhenTheCustomerOwesSomething()
+    {
+        // Nothing to put on a card when the till is the one paying out: the refund leg
+        // is the cash payout of step 2, and the replacement is worth less than what came
+        // back.
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[] { MakeReturnedLine(200m) });
+        vm.AddIssuedLine(MakeIssuedLine(120m));
+
+        Assert.True(vm.TillPays);
+        Assert.False(vm.CanPayByCard);
+    }
+
+    [Fact]
+    public void PayByCard_IsOfferedWhenTheCustomerOwesTheDifference()
+    {
+        var vm = new ExchangeViewModel();
+        vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
+        vm.AddIssuedLine(MakeIssuedLine(120m));
+
+        Assert.True(vm.CustomerPays);
+        Assert.True(vm.CanPayByCard);
     }
 
     [Fact]

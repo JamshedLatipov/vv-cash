@@ -138,6 +138,40 @@ public class MixedPaymentViewModelTest
     }
 
     [Fact]
+    public void ATenderTheDocumentCannotCarry_CannotSettleTheReceipt()
+    {
+        // The sale document has exactly two money slots — paid_in_cash and
+        // paid_by_credit_card — and the completion callback carries exactly those
+        // two. A third tender that this screen counted toward IsFullyPaid but had
+        // nowhere to hand back booked the receipt as unpaid: the money was in the
+        // drawer and the document said the customer still owed all of it.
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { });
+
+        vm.SelectMethodCommand.Execute("Gift");
+        vm.SetQuickAmountCommand.Execute(100m);
+
+        Assert.False(vm.IsFullyPaid);
+        Assert.False(vm.ConfirmPaymentCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void ConfirmPayment_HandsBackEveryTenderItCountedAsPaid()
+    {
+        // The invariant the bug above broke: whatever PaidAmount counts toward
+        // settling the receipt must be exactly what reaches the document.
+        var completions = new List<(decimal cash, decimal card)>();
+        var vm = new MixedPaymentViewModel(100m, (_, cash, card) => completions.Add((cash, card)));
+
+        vm.CashAmount = 60m;
+        vm.SelectMethodCommand.Execute("Card");
+        vm.CardAmount = 40m;
+
+        vm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Equal(vm.PaidAmount, completions[0].cash + completions[0].card);
+    }
+
+    [Fact]
     public void SellOnCredit_CalledTwiceInARow_OnlyCompletesOnce()
     {
         var completions = 0;

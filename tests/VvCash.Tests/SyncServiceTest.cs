@@ -85,6 +85,7 @@ public class SyncServiceTest
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult<IEnumerable<Product>>(SavedProducts);
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId) => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
         public Task<Product?> GetProductByBarcodeAsync(string barcode) => Task.FromResult<Product?>(null);
+        public Task<IEnumerable<Product>> SearchProductsAsync(string query) => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
         public Task SaveCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult<IEnumerable<Category>>(Array.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
@@ -99,6 +100,7 @@ public class SyncServiceTest
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult<IEnumerable<KeyValuePair<string, string>>>(Array.Empty<KeyValuePair<string, string>>());
         public Task DeleteUnsyncedDocumentAsync(string hash) => Task.CompletedTask;
+        public Task MarkDocumentRejectedAsync(string hash, string reason) => Task.CompletedTask;
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(LastSyncVersion);
         public Task ClearCategoriesAsync() => Task.CompletedTask;
         public Task ClearProductsAsync() => Task.CompletedTask;
@@ -150,6 +152,41 @@ public class SyncServiceTest
         var product = Assert.Single(storage.SavedProducts);
         Assert.Equal("p1", product.Id);
         Assert.Equal(99.5m, product.Price);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_VersionsOutOfOrder_StillFetchesEveryOne()
+    {
+        // The version walk compares each entry against a lastVersion that moves as it
+        // goes, so it only ever works on an ascending list. Handed [3,1,2] it processed
+        // 3, wrote lastVersion=3, and then skipped 1 and 2 as "already done" — and,
+        // because that 3 was persisted, skipped them on every later sync too. The
+        // products in those versions never reached the register at all.
+        var fetched = new List<int>();
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[3,1,2],"status":0}""");
+
+            var match = System.Text.RegularExpressions.Regex.Match(url, @"product/update/(\d+)/");
+            if (match.Success)
+            {
+                var version = int.Parse(match.Groups[1].Value);
+                fetched.Add(version);
+                return (HttpStatusCode.OK,
+                    $$"""{"message":"success","body":[{"id":"p{{version}}","name":"Товар","article":"A","barcode":"{{version}}","sell_price":10}],"status":0}""");
+            }
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+        var svc = Build(handler, storage);
+
+        await svc.SyncProductsAsync();
+
+        Assert.Equal(new[] { 1, 2, 3 }, fetched);
+        Assert.Equal(3, storage.LastSyncVersion);
+        Assert.Equal(3, storage.SavedProducts.Count);
     }
 
     [Fact]

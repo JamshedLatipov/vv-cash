@@ -232,20 +232,50 @@ public partial class App : Application
         // Force IPv4 on all HttpClients to avoid macOS SocketException
         // ('Can't assign requested address' caused by SocketsHttpHandler preferring IPv6)
         services.ConfigureHttpClientDefaults(b =>
+        {
             b.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
             {
                 ConnectCallback = async (ctx, ct) =>
                 {
                     var addresses = await Dns.GetHostAddressesAsync(
                         ctx.DnsEndPoint.Host, AddressFamily.InterNetwork, ct);
+
+                    // A host that resolves to no IPv4 address at all is a configuration
+                    // problem, not an index to walk off the end of. Say so: indexing
+                    // addresses[0] threw IndexOutOfRangeException from inside the
+                    // connect callback, which surfaces as an unrelated-looking
+                    // HttpRequestException several frames away.
+                    if (addresses.Length == 0)
+                        throw new SocketException((int)SocketError.HostNotFound);
+
                     var socket = new Socket(SocketType.Stream, ProtocolType.Tcp)
                     {
                         NoDelay = true
                     };
-                    await socket.ConnectAsync(addresses[0], ctx.DnsEndPoint.Port, ct);
-                    return new NetworkStream(socket, ownsSocket: true);
+                    try
+                    {
+                        // Every address, not just the first: a host behind several A
+                        // records fails over instead of failing. The socket is disposed
+                        // on the way out — this callback runs on the online-check loop
+                        // every ten seconds, so a leak here is a leak per failed check.
+                        await socket.ConnectAsync(addresses, ctx.DnsEndPoint.Port, ct);
+                        return new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
                 }
-            }));
+            });
+
+            // HttpClient's 100-second default is far too long for a till. The
+            // online-check loop awaits its ping every ten seconds, so a server that
+            // accepts connections and then stalls would freeze that loop — and with it
+            // the online/offline indicator the cashier reads — for a minute and a half
+            // at a time. UpdateService opts back out below.
+            b.ConfigureHttpClient(c => c.Timeout = TimeSpan.FromSeconds(30));
+        });
 
         services.AddHttpClient("DefaultClient").AddHttpMessageHandler<AuthHeaderHandler>();
         services.AddTransient(sp => sp.GetRequiredService<IHttpClientFactory>().CreateClient("DefaultClient"));
@@ -268,7 +298,12 @@ public partial class App : Application
         // to a host that is not our API.
         services.AddSingleton<IAppVersionProvider, AssemblyAppVersionProvider>();
         services.AddSingleton<IInstallerLauncher, ProcessInstallerLauncher>();
-        services.AddHttpClient<IUpdateService, UpdateService>();
+        // No 30-second cap here: this client downloads an installer, which legitimately
+        // takes longer than that on a shop's connection. UpdateService bounds its own
+        // calls — CheckAsync with a 10-second linked token, DownloadAsync with the
+        // caller's, which the cashier's Cancel button drives.
+        services.AddHttpClient<IUpdateService, UpdateService>()
+            .ConfigureHttpClient(c => c.Timeout = System.Threading.Timeout.InfiniteTimeSpan);
 
         // POS Services
         services.AddHttpClient<IProductService, ProductService>().AddHttpMessageHandler<AuthHeaderHandler>();

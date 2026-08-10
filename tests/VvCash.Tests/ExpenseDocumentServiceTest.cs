@@ -47,12 +47,15 @@ public class ExpenseDocumentServiceTest
     {
         private readonly List<KeyValuePair<string, string>> _docs;
         public List<string> DeletedKeys { get; } = new();
+        public List<string> SavedKeys { get; } = new();
+        public List<(string Hash, string Reason)> RejectedKeys { get; } = new();
 
         public FakeStorage(IEnumerable<KeyValuePair<string, string>> docs) => _docs = docs.ToList();
 
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync()
             => Task.FromResult<IEnumerable<KeyValuePair<string, string>>>(
-                _docs.Where(d => !DeletedKeys.Contains(d.Key)).ToList());
+                _docs.Where(d => !DeletedKeys.Contains(d.Key)
+                                 && RejectedKeys.All(r => r.Hash != d.Key)).ToList());
 
         public Task DeleteUnsyncedDocumentAsync(string hash)
         {
@@ -60,12 +63,24 @@ public class ExpenseDocumentServiceTest
             return Task.CompletedTask;
         }
 
-        public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
+        public Task MarkDocumentRejectedAsync(string hash, string reason)
+        {
+            RejectedKeys.Add((hash, reason));
+            return Task.CompletedTask;
+        }
+
+        public Task SaveUnsyncedDocumentAsync(string hash, string payload)
+        {
+            SavedKeys.Add(hash);
+            _docs.Add(new KeyValuePair<string, string>(hash, payload));
+            return Task.CompletedTask;
+        }
 
         public Task SaveProductsAsync(IEnumerable<Product> products) => Task.CompletedTask;
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId) => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
         public Task<Product?> GetProductByBarcodeAsync(string barcode) => Task.FromResult<Product?>(null);
+        public Task<IEnumerable<Product>> SearchProductsAsync(string query) => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
         public Task SaveCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult<IEnumerable<Category>>(Array.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
@@ -93,6 +108,105 @@ public class ExpenseDocumentServiceTest
 
     private static string Payload(string hash) =>
         JsonSerializer.Serialize(new DocumentRequest { DocumentHash = hash, ShiftId = "shift-1" });
+
+    private static DocumentRequest Request(string hash) =>
+        new() { DocumentHash = hash, ShiftId = "shift-1" };
+
+    [Fact]
+    public async Task Create_ServerRejectsOnTheMerits_IsNotQueuedAndIsReportedAsFailed()
+    {
+        // HTTP 200 with a non-zero envelope status is the server saying "I understood
+        // this and I will not take it" (a product that no longer exists, a closed shift).
+        // Queueing that told the cashier the sale went through and left the document
+        // retrying forever, since the replay path only ever deletes on status 0.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"message":"invalid request","status":1}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.False(ok);
+        Assert.Empty(storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Create_ServerAnswers400_IsNotQueuedAndIsReportedAsFailed()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.BadRequest, """{"message":"bad request","status":1}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.False(ok);
+        Assert.Empty(storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Create_NetworkUnreachable_IsQueuedAndCheckoutContinues()
+    {
+        // The case the offline queue exists for. Nothing was learned about the document
+        // itself, so it must survive to be replayed.
+        var handler = new StubHttpMessageHandler(_ => throw new HttpRequestException("no route to host"));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.True(ok);
+        Assert.Equal(new[] { "doc1" }, storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Create_ServerAnswers500_IsQueuedBecauseTheServerMayRecover()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.InternalServerError, """{"message":"boom","status":1}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.True(ok);
+        Assert.Equal(new[] { "doc1" }, storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Sync_ServerRejectsAQueuedDocumentOnTheMerits_ItLeavesTheRotationAndTheRestStillGoOut()
+    {
+        var seenHashes = new List<string>();
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var body = req.Content!.ReadAsStringAsync().Result;
+            using var doc = JsonDocument.Parse(body);
+            var hash = doc.RootElement.GetProperty("document_hash").GetString()!;
+            seenHashes.Add(hash);
+
+            return hash == "doc1"
+                ? (HttpStatusCode.OK, """{"message":"invalid request","status":1}""")
+                : (HttpStatusCode.OK, """{"message":"success","status":0}""");
+        });
+        var storage = new FakeStorage(new[]
+        {
+            new KeyValuePair<string, string>("doc1", Payload("doc1")),
+            new KeyValuePair<string, string>("doc2", Payload("doc2")),
+        });
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        await svc.SyncOfflineDocumentsAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        // A rejection is not a reason to stop the loop the way a 401 is — it says
+        // nothing about the documents behind it.
+        Assert.Equal(new[] { "doc1", "doc2" }, seenHashes);
+        Assert.Equal("doc1", Assert.Single(storage.RejectedKeys).Hash);
+        // Kept, not deleted: it is still the only record of what the register booked.
+        Assert.Equal(new[] { "doc2" }, storage.DeletedKeys);
+        // And it is genuinely out of the rotation now.
+        Assert.Empty(await storage.GetUnsyncedDocumentsAsync());
+    }
 
     [Fact]
     public async Task SyncOfflineDocumentsAsync_401OnFirstDocument_StopsLoop_LeavesBothDocumentsQueued_RaisesSessionRevoked()

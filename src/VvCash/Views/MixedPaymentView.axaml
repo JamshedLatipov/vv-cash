@@ -140,7 +140,12 @@
             <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="0,0,20,0">
                 <Grid RowDefinitions="Auto, Auto, *">
                     <!-- method tiles -->
-                    <Grid Grid.Row="0" ColumnDefinitions="*, *, *" Margin="0,0,0,16">
+                    <!-- Two tiles, not three: the sale document has exactly two money
+                         slots (paid_in_cash, paid_by_credit_card). A gift-card tile used
+                         to sit here and settle the receipt on screen while the document
+                         went out saying the customer had paid nothing — see
+                         MixedPaymentViewModel.PaidAmount. -->
+                    <Grid Grid.Row="0" ColumnDefinitions="*, *" Margin="0,0,0,16">
                         <Button Grid.Column="0" Classes="MethodTile" Margin="0,0,5,0"
                                 Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Cash'}"
                                 Command="{Binding SelectMethodCommand}" CommandParameter="Cash">
@@ -149,20 +154,12 @@
                                 <TextBlock Text="{Binding [Наличные], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center"/>
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="1" Classes="MethodTile" Margin="5,0"
+                        <Button Grid.Column="1" Classes="MethodTile" Margin="5,0,0,0"
                                 Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Card'}"
                                 Command="{Binding SelectMethodCommand}" CommandParameter="Card">
                             <StackPanel Spacing="6" HorizontalAlignment="Center">
                                 <material:MaterialIcon Kind="CreditCardOutline" Width="24" Height="24" HorizontalAlignment="Center"/>
                                 <TextBlock Text="{Binding [Банковскаякарта], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-                        <Button Grid.Column="2" Classes="MethodTile" Margin="5,0,0,0"
-                                Classes.Active="{Binding SelectedMethod, Converter={StaticResource StringEqualityToBoolConverter}, ConverterParameter='Gift'}"
-                                Command="{Binding SelectMethodCommand}" CommandParameter="Gift">
-                            <StackPanel Spacing="6" HorizontalAlignment="Center">
-                                <material:MaterialIcon Kind="WalletGiftcard" Width="24" Height="24" HorizontalAlignment="Center"/>
-                                <TextBlock Text="{Binding [GiftCard], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center"/>
                             </StackPanel>
                         </Button>
                     </Grid>
@@ -258,13 +255,6 @@
                                 <material:MaterialIcon Grid.Column="0" Kind="CreditCardOutline" Width="18" Height="18" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 <TextBlock Grid.Column="1" Text="{Binding [Банковскаякарта], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" VerticalAlignment="Center"/>
                                 <TextBlock Grid.Column="2" Text="{Binding CardAmount, StringFormat='{}{0:F2}'}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
-                            </Grid>
-                        </Button>
-                        <Button Classes="Transparent" HorizontalAlignment="Stretch" Command="{Binding SelectMethodCommand}" CommandParameter="Gift">
-                            <Grid ColumnDefinitions="Auto, *, Auto">
-                                <material:MaterialIcon Grid.Column="0" Kind="WalletGiftcard" Width="18" Height="18" Foreground="{StaticResource Slate400Brush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                                <TextBlock Grid.Column="1" Text="{Binding [GiftCard], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" VerticalAlignment="Center"/>
-                                <TextBlock Grid.Column="2" Text="{Binding GiftAmount, StringFormat='{}{0:F2}'}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}" VerticalAlignment="Center"/>
                             </Grid>
                         </Button>
                     </StackPanel>

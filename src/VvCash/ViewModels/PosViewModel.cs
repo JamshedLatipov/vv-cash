@@ -80,6 +80,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ICashFeatureService _features;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
+    private CancellationTokenSource? _searchCts;
+
+    /// <summary>Whether a receipt is currently open, i.e. whether the cart last had
+    /// anything in it. Only read by <see cref="OnCartChanged"/>, to tell "a receipt just
+    /// began" apart from "a receipt that was already open changed".</summary>
+    private bool _receiptOpen;
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
 
@@ -940,22 +946,63 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             HasSubcategories = catsList.Count > 0;
         }
 
-        _ = LoadProductsAsync(SelectedCategory?.Id);
+        // Category filtering above is in-memory and stays immediate. The catalog query
+        // is debounced: it hits SQLite, and firing one per keystroke meant a five-letter
+        // product name cost five queries, four of whose results were replaced before the
+        // cashier could read them. Same 300ms and same supersede-by-CTS shape as the
+        // quote debounce.
+        _ = SearchDebouncedAsync();
+    }
+
+    private async Task SearchDebouncedAsync()
+    {
+        var previous = _searchCts;
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        previous?.Cancel();
+        previous?.Dispose();
+        try
+        {
+            await Task.Delay(300, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return; // a later keystroke owns the search now
+        }
+
+        try
+        {
+            await LoadProductsAsync(SelectedCategory?.Id);
+        }
+        catch (Exception ex)
+        {
+            // Detached task, same as RequoteSafeAsync: a failed search must not vanish
+            // silently nor take the register down.
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Search failed: {ex}");
+        }
     }
 
     private void OnCartChanged(object? sender, EventArgs e)
     {
         CartItems = new ObservableCollection<CartItem>(_cartService.Items);
         RefreshPromoChip();
-        if (CartItems.Count == 1)
+
+        // Gated on the empty -> non-empty transition, not on "the cart now holds exactly
+        // one line". That older condition is true again after every +/- tap on a
+        // single-line receipt, and again the moment a two-line receipt drops back to one
+        // — so the number that is supposed to count receipts climbed while the cashier
+        // adjusted a quantity.
+        var hasItems = CartItems.Count > 0;
+        if (hasItems && !_receiptOpen)
         {
             OrderNumber++;
             OrderDateTime = DateTime.Now.ToString("dd MMM, yyyy • HH:mm");
         }
-        else if (!CartItems.Any())
+        else if (!hasItems)
         {
             OrderDateTime = string.Empty;
         }
+        _receiptOpen = hasItems;
         Subtotal = _cartService.Subtotal;
         OnPropertyChanged(nameof(CustomerDiscountAmount));
 
@@ -997,9 +1044,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     private async Task RequoteDebouncedAsync()
     {
-        _quoteCts?.Cancel();
-        var cts = new System.Threading.CancellationTokenSource();
-        _quoteCts = cts;
+        // Cancel, then dispose: a CancellationTokenSource holds the timer registration
+        // its Task.Delay created, and one is superseded per cart change — several per
+        // second while a receipt is being rung up.
+        ReplaceQuoteCts(out var cts);
         try { await Task.Delay(300, cts.Token); }
         catch (TaskCanceledException) { return; }
         await RequoteAsync(cts);
@@ -1013,9 +1061,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            _quoteCts?.Cancel();
-            var cts = new System.Threading.CancellationTokenSource();
-            _quoteCts = cts;
+            ReplaceQuoteCts(out var cts);
             await RequoteAsync(cts);
         }
         catch (Exception ex)
@@ -1073,6 +1119,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             StatusMessage = "Промокод применён";
         }
+    }
+
+    /// <summary>Cancels and disposes whatever quote request was in flight, and installs a
+    /// fresh source as the current one. The dispose is the point: the superseded source
+    /// still holds the timer registration behind its Task.Delay, and one is superseded per
+    /// cart change — several a second while a receipt is being rung up.</summary>
+    private void ReplaceQuoteCts(out System.Threading.CancellationTokenSource cts)
+    {
+        var previous = _quoteCts;
+        cts = new System.Threading.CancellationTokenSource();
+        _quoteCts = cts;
+        previous?.Cancel();
+        previous?.Dispose();
     }
 
     // True only while cts is still the active request (not superseded by a newer
@@ -1160,16 +1219,29 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = isOnline);
     }
 
-    private async void OnProductsSynced(object? sender, EventArgs e)
-    {
-        // The sync that just finished also refreshed the promotion cache in SQLite.
-        await _promotionProvider.RefreshAsync();
+    // Not async void. This is raised from the background sync loop, so an exception out
+    // of it — a SQLite read that fails, a catalog load that throws — has no caller to
+    // land in and takes the process down with it. Fire the work off as a task with its
+    // own catch instead, the same shape RequoteSafeAsync uses.
+    private void OnProductsSynced(object? sender, EventArgs e) => _ = OnProductsSyncedAsync();
 
-        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+    private async Task OnProductsSyncedAsync()
+    {
+        try
         {
-            await LoadCategoriesAsync();
-            await LoadProductsAsync(SelectedCategory?.Id);
-        });
+            // The sync that just finished also refreshed the promotion cache in SQLite.
+            await _promotionProvider.RefreshAsync();
+
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                await LoadCategoriesAsync();
+                await LoadProductsAsync(SelectedCategory?.Id);
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Post-sync refresh failed: {ex}");
+        }
     }
 
     public void Dispose()
@@ -1195,6 +1267,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _quoteCts?.Cancel();
         _quoteCts?.Dispose();
         _quoteCts = null;
+
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
     }
 
     [RelayCommand]
@@ -1439,13 +1515,34 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// discounts allowed" — right after the seller-PIN migration every seller has no cap
     /// (see the max_discount column's own remarks in the design spec), so treating 0 as a
     /// limit would demand a supervisor PIN for every manual discount from day one. Only
-    /// gates when a cap is actually set. <paramref name="percent"/>-only: amount-mode
-    /// discounts (see <see cref="IsDiscountAmountMode"/>) aren't compared against a
-    /// percent cap and are out of scope here, same as before this task.</summary>
+    /// gates when a cap is actually set.
+    ///
+    /// Takes a percent because the cap is one. An amount-mode discount is converted by
+    /// <see cref="DiscountAsPercent"/> before it gets here rather than being waved
+    /// through: the cap existed to bound how much of a receipt one seller can give away,
+    /// and "500 off" gives away exactly as much as "50%" does on a 1000 receipt. Leaving
+    /// amount mode out of the check turned the mode toggle into a way around it.</summary>
     private bool NeedsDiscountApproval(decimal percent)
     {
         var cap = _sellerSession.Current?.MaxDiscount ?? 0m;
         return cap > 0m && percent > cap;
+    }
+
+    /// <summary>What the entered discount comes to as a percent of the current receipt,
+    /// or null when that cannot be established — an amount typed against an empty cart
+    /// has no subtotal to be a percent of.</summary>
+    private decimal? DiscountAsPercent(decimal value)
+    {
+        if (IsDiscountPercentMode) return value;
+        var subtotal = _cartService.Subtotal;
+        return subtotal > 0m ? value / subtotal * 100m : null;
+    }
+
+    private void RefuseDiscount(string reason)
+    {
+        CloseDiscountModal();
+        AlertMessage = reason;
+        IsAlertModalVisible = true;
     }
 
     [RelayCommand]
@@ -1457,13 +1554,44 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Bounds first, before the cap check has anything to reason about. The pad
+        // accepts any number of digits and CartService clamps the resulting discount to
+        // the subtotal, so "500" in percent mode looked like nothing was wrong — it just
+        // produced a receipt for zero. A discount that takes more than the receipt is
+        // worth is an entry error every time, not a decision to escalate.
+        if (value <= 0m)
+        {
+            RefuseDiscount("Скидка должна быть больше нуля.");
+            return;
+        }
+
+        var percent = DiscountAsPercent(value);
+        if (percent == null)
+        {
+            RefuseDiscount("Скидка суммой недоступна: в чеке нет товаров.");
+            return;
+        }
+        if (percent > 100m)
+        {
+            RefuseDiscount(IsDiscountPercentMode
+                ? "Скидка не может превышать 100%."
+                : "Скидка больше суммы чека.");
+            return;
+        }
+
         // Same seller-switch-off exception as CloseShift/OpenReturns: with no separate
         // sellers there is nobody else's approval to escalate to, and the overlay that
         // would collect it is hidden along with the flag.
-        if (IsSellerSwitchEnabled && IsDiscountPercentMode && NeedsDiscountApproval(value))
+        //
+        // The escalation carries the percent even when the cashier typed an amount: it
+        // is what the approver's own cap is compared against, and what
+        // ApplyApprovedDiscount applies. On the receipt in front of them the two are the
+        // same money; should the cart change afterwards, a percent is the safer of the
+        // two to have approved.
+        if (IsSellerSwitchEnabled && NeedsDiscountApproval(percent.Value))
         {
             CloseDiscountModal();
-            DiscountApprovalRequested?.Invoke(this, value);
+            DiscountApprovalRequested?.Invoke(this, percent.Value);
             return;
         }
 
@@ -1989,15 +2117,28 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     };
 
                     StatusMessage = "Creating expense document...";
-                    var success = await _expenseDocumentService.CreateExpenseDocumentAsync(request);
+                    // Detailed, not the bool overload: a document the server refused on
+                    // its merits will be refused identically on every retry, so "please
+                    // try again" is the one instruction that cannot help. The server's
+                    // own reason is what tells the cashier whether to fix the receipt or
+                    // fetch a manager.
+                    var outcome = await _expenseDocumentService.CreateExpenseDocumentDetailedAsync(request);
 
-                    if (success)
+                    if (outcome.Posted || outcome.Queued)
                     {
+                        // The document number is empty for a sale that was queued rather
+                        // than posted — it has no number until it syncs — and the seller
+                        // is absent on a register with switching off. The receipt prints
+                        // neither line in those cases rather than an empty label.
                         await _printerService.PrintReceiptAsync(
                             _cartService.Items,
                             Subtotal, TotalDiscount, TotalAmount,
                             _cartService.AppliedCoupons,
-                            _cartService.AppliedDiscountName);
+                            _cartService.AppliedDiscountName,
+                            documentNumber: outcome.DocumentNumber,
+                            warehouseName: null,
+                            sellerName: _sellerSession.Current?.FullName,
+                            saleDate: DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;
@@ -2020,7 +2161,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     {
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
-                            AlertMessage = "Failed to create expense document on the server. Please try again.";
+                            AlertMessage = string.IsNullOrWhiteSpace(outcome.RejectionReason)
+                                ? "Не удалось создать документ продажи. Повторите попытку."
+                                : $"Сервер отклонил продажу: {outcome.RejectionReason}. "
+                                  + "Повтор не поможет — исправьте чек или обратитесь к администратору.";
                             IsAlertModalVisible = true;
                             StatusMessage = "Payment failed.";
                         });

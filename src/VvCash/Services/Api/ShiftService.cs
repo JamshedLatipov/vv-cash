@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Text.Json;
@@ -102,8 +102,6 @@ public class ShiftService : IShiftService
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             var responseContent = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"[ShiftService] Response content: {responseContent}");
-            Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
 
             // A response actually arrived, so this is the server saying the token is dead —
             // not the network being unreachable (that path never gets here; it throws and
@@ -161,8 +159,6 @@ public class ShiftService : IShiftService
             Console.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             Debug.WriteLine($"[ShiftService] Response status: {response.StatusCode}");
             var responseContent = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"[ShiftService] Response content: {responseContent}");
-            Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
 
             if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.BadRequest)
             {
@@ -199,8 +195,6 @@ public class ShiftService : IShiftService
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"[ShiftService] Response content: {responseContent}");
-                Debug.WriteLine($"[ShiftService] Response content: {responseContent}");
                 using var jsonDoc = JsonDocument.Parse(responseContent);
                 var root = jsonDoc.RootElement;
                 if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)

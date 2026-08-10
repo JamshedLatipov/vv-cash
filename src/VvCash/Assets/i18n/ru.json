@@ -1,4 +1,4 @@
-{
+﻿{
   "LuxeThreadsPOS": "Proffi POS",
   "WelcomebackPleaseent": "С возвращением! Пожалуйста, введите ваши учетные данные.",
   "SignIn": "Войти",
@@ -187,6 +187,7 @@
   "ExchangeIssuedLabel": "Выдача:",
   "ExchangeCustomerPaysLabel": "К доплате:",
   "ExchangeRefundDueLabel": "К выдаче:",
+  "ExchangePayByCard": "Доплата картой",
   "ExchangeOfflineWarning": "Обмен требует связи с сервером",
   "ExchangePayoutCategoryWarning": "Не выбрана статья расхода для выдачи из кассы — обмен недоступен",
   "ExchangePayoutCategory": "Статья расхода для выдачи из кассы (обмен)",

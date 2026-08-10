@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using VvCash.Models;
@@ -10,7 +10,8 @@ public class MockPrinterService : IPrinterService
     public PrinterStatus Status => PrinterStatus.Ready;
     public event EventHandler<PrinterStatus>? StatusChanged;
 
-    public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null)
+    public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
+        string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         Console.WriteLine("=== RECEIPT ===");
         foreach (var item in items)

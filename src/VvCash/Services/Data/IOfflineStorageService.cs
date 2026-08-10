@@ -11,6 +11,12 @@ public interface IOfflineStorageService
     Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId);
     Task<Product?> GetProductByBarcodeAsync(string barcode);
 
+    /// <summary>Products whose name, article or barcode contain <paramref name="query"/>,
+    /// matched case-insensitively. In the database rather than over an in-memory copy of
+    /// the catalog: this runs on every keystroke in the POS search box, and loading and
+    /// materialising every product per character is what it used to cost.</summary>
+    Task<IEnumerable<Product>> SearchProductsAsync(string query);
+
     Task SaveCategoriesAsync(IEnumerable<Category> categories);
     Task<IEnumerable<Category>> GetCategoriesAsync();
 
@@ -35,6 +41,15 @@ public interface IOfflineStorageService
     Task SaveUnsyncedDocumentAsync(string hash, string payload);
     Task<IEnumerable<System.Collections.Generic.KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync();
     Task DeleteUnsyncedDocumentAsync(string hash);
+
+    /// <summary>Takes a queued document out of the retry rotation without discarding it,
+    /// for the one case where retrying is pointless: the server answered, on its merits,
+    /// that it will not accept this document. Retrying that forever is what made the
+    /// unsynced badge a permanent fixture on some registers — the count never dropped,
+    /// and a genuinely queued sale behind it was indistinguishable from the stuck one.
+    /// The row stays in the database with its reason so the back office can still read
+    /// what the register tried to book; it just stops being resent.</summary>
+    Task MarkDocumentRejectedAsync(string hash, string reason);
     Task<int> GetLastSyncVersionAsync();
 
     Task ClearCategoriesAsync();

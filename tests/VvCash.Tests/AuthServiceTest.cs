@@ -55,6 +55,40 @@ public class AuthServiceTest
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task LoginAsync_SuccessEnvelopeWithNoToken_IsNotTreatedAsSignedIn()
+    {
+        // status 0 with no access_token is a malformed success. Reporting it as a login
+        // let the register through to the POS screen with an empty AuthToken, so
+        // AuthHeaderHandler sent no Authorization header at all and every later call
+        // came back 401 — presenting as "the server keeps revoking my session" rather
+        // than as the failed login it was.
+        var handler = new StubHttpMessageHandler(_ =>
+            (System.Net.HttpStatusCode.OK, """{"message":"ok","status":0}"""));
+        var settings = new FakeSettings();
+        var service = new AuthService(new HttpClient(handler), settings);
+
+        var ok = await service.LoginAsync("cashier@example.test", "hunter2", rememberMe: true);
+
+        Assert.False(ok);
+        Assert.Equal(string.Empty, settings.AuthToken);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task LoginAsync_SuccessEnvelopeWithToken_SignsIn()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (System.Net.HttpStatusCode.OK, """{"message":"ok","status":0,"access_token":"tok-1"}"""));
+        var settings = new FakeSettings();
+        var service = new AuthService(new HttpClient(handler), settings);
+
+        var ok = await service.LoginAsync("cashier@example.test", "hunter2", rememberMe: false);
+
+        Assert.True(ok);
+        Assert.Equal("tok-1", settings.AuthToken);
+        Assert.Null(settings.AuthTokenExpiresAt); // rememberMe false
+    }
+
+    [Fact]
     public void ClearSession_WhenAlreadyClear_IsStillSafeToCall()
     {
         var settings = new FakeSettings();

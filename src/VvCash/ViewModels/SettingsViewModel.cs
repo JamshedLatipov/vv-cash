@@ -87,6 +87,16 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _backendUrl = string.Empty;
 
+    /// <summary>Why the last Save was refused, or empty when it went through. Shown on
+    /// the settings screen itself: a Save that silently does nothing is worse than one
+    /// that refuses out loud, because the register then runs on whatever was configured
+    /// before while the screen shows what the operator thinks they just set.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasError))]
+    private string _errorMessage = string.Empty;
+
+    public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
+
     [ObservableProperty]
     private string _cashRegisterToken = string.Empty;
 
@@ -257,9 +267,33 @@ public partial class SettingsViewModel : ViewModelBase
         NavigationRequest?.Invoke(_previousViewModel);
     }
 
+    /// <summary>Whether an address is somewhere this register may send its tokens.
+    ///
+    /// Every call carries the bearer token and the cash token, so plain http would put
+    /// both on the wire in the clear. Loopback is the exception — the traffic never
+    /// leaves the machine, and running the backend locally is how this gets debugged
+    /// on site.
+    ///
+    /// A bare host ("example.test") is refused rather than silently prefixed: the
+    /// register would build request URLs that go nowhere, and that surfaces hours later
+    /// as "nothing syncs" rather than here, where it can still be fixed in one keystroke.</summary>
+    private static bool IsAcceptableBackendUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme == Uri.UriSchemeHttps) return true;
+        return uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback;
+    }
+
     [RelayCommand]
     private void Save()
     {
+        if (!IsAcceptableBackendUrl(BackendUrl))
+        {
+            ErrorMessage = "Адрес сервера должен начинаться с https:// (http:// допустим только для localhost).";
+            return;
+        }
+        ErrorMessage = string.Empty;
+
         _settingsService.BackendUrl = BackendUrl;
         _settingsService.CashRegisterToken = CashRegisterToken;
         if (int.TryParse(SyncIntervalText, out int interval) && interval > 0)

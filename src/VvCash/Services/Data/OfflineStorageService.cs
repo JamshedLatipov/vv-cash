@@ -43,9 +43,15 @@ public class OfflineStorageService : IOfflineStorageService
                 Value TEXT
             );
 
+            -- RejectedAt/RejectedReason are NULL for a document still waiting its turn.
+            -- A non-null RejectedAt means the server answered, on the merits, that it
+            -- will not take this document: it leaves the retry rotation but stays on
+            -- disk, because it is still the only record of what the register booked.
             CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
                 Hash TEXT PRIMARY KEY,
-                Payload TEXT
+                Payload TEXT,
+                RejectedAt TEXT,
+                RejectedReason TEXT
             );
 
             CREATE TABLE IF NOT EXISTS Categories (
@@ -72,7 +78,12 @@ public class OfflineStorageService : IOfflineStorageService
                 UnitShortName TEXT,
                 UnitFactor REAL,
                 IsDivisible INTEGER,
-                SellInSecondaryUnit INTEGER
+                SellInSecondaryUnit INTEGER,
+                -- Name, Sku and Barcode joined and lowercased, for the POS search box.
+                -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
+                -- only: an all-caps Cyrillic query would never match its own product, and
+                -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
+                SearchText TEXT
             );
 
             -- Auto-applied promotions, stored as the raw server payload: the rules
@@ -117,29 +128,29 @@ public class OfflineStorageService : IOfflineStorageService
         command.CommandText = "INSERT OR IGNORE INTO Settings (Key, Value) VALUES ('LastSyncVersion', '0');";
         await command.ExecuteNonQueryAsync();
 
-        // Migration: add ImageUrl to Categories if upgrading from older DB
-        try
-        {
-            command.CommandText = "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;";
-            await command.ExecuteNonQueryAsync();
-        }
-        catch { /* column already exists */ }
+        // Migrations for a database created before a column existed. Every one of these
+        // is expected to fail on a register that already has the column, and expected to
+        // succeed exactly once on one that does not.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;");
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ParentId TEXT;");
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN Tags TEXT;");
 
-        // Migration: add ParentId to Categories if upgrading from older DB
-        try
+        // Migration: the rejected-document columns. A register upgrading with documents
+        // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
+        // which is exactly what they are.
+        foreach (var alter in new[]
         {
-            command.CommandText = "ALTER TABLE Categories ADD COLUMN ParentId TEXT;";
-            await command.ExecuteNonQueryAsync();
-        }
-        catch { /* column already exists */ }
-
-        // Migration: add Tags to Products if upgrading from older DB
-        try
+            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedAt TEXT;",
+            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedReason TEXT;",
+        })
         {
-            command.CommandText = "ALTER TABLE Products ADD COLUMN Tags TEXT;";
-            await command.ExecuteNonQueryAsync();
+            try
+            {
+                command.CommandText = alter;
+                await command.ExecuteNonQueryAsync();
+            }
+            catch { /* column already exists */ }
         }
-        catch { /* column already exists */ }
 
         // Migration: add the secondary-unit columns to Products if upgrading
         // from an older DB. One ALTER per column, because a register may be
@@ -152,18 +163,92 @@ public class OfflineStorageService : IOfflineStorageService
             "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
             "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
             "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
+            "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
         })
         {
-            try
-            {
-                command.CommandText = alter;
-                await command.ExecuteNonQueryAsync();
-            }
-            catch { /* column already exists */ }
+            await AddColumnIfMissingAsync(command, alter);
         }
+
+        await BackfillSearchTextAsync(connection);
 
         _isInitialized = true;
     }
+
+    /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it is.
+    ///
+    /// Only that. A bare catch-all here — which is what every one of these migrations
+    /// used to have — swallowed a locked database, a read-only file and a corrupt schema
+    /// just as quietly, and the register carried on to fail later on a read, somewhere
+    /// with no connection to the actual problem.</summary>
+    private static async Task AddColumnIfMissingAsync(SqliteCommand command, string alter)
+    {
+        try
+        {
+            command.CommandText = alter;
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException ex) when (
+            ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+            // Already migrated. The expected outcome on every register but a fresh one.
+        }
+        catch (Exception ex)
+        {
+            // Anything else is a real problem with the database itself. Logged loudly
+            // rather than thrown: a till that refuses to open helps nobody, and the
+            // operation that actually needs the column will fail with its own, more
+            // specific error.
+            Console.WriteLine($"[OfflineStorageService] Migration failed ({alter}): {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Fills SearchText for rows written before the column existed. Adding the
+    /// column alone would leave a register that upgraded mid-day with a search box that
+    /// finds nothing until the next full catalog sync — which is up to SyncIntervalMinutes
+    /// away and needs a connection the register may not have. Runs once: after this, every
+    /// row has a value and the WHERE below matches nothing.</summary>
+    private static async Task BackfillSearchTextAsync(SqliteConnection connection)
+    {
+        var pending = new List<(string Id, string Text)>();
+
+        using (var read = connection.CreateCommand())
+        {
+            read.CommandText = "SELECT Id, Name, Sku, Barcode FROM Products WHERE SearchText IS NULL";
+            using var reader = await read.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                pending.Add((
+                    reader.GetString(0),
+                    SearchTextOf(
+                        reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                        reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                        reader.IsDBNull(3) ? string.Empty : reader.GetString(3))));
+            }
+        }
+
+        if (pending.Count == 0) return;
+
+        using var transaction = connection.BeginTransaction();
+        using var write = connection.CreateCommand();
+        write.Transaction = transaction;
+        write.CommandText = "UPDATE Products SET SearchText = $SearchText WHERE Id = $Id";
+        var textParam = write.Parameters.Add("$SearchText", SqliteType.Text);
+        var idParam = write.Parameters.Add("$Id", SqliteType.Text);
+
+        foreach (var (id, text) in pending)
+        {
+            idParam.Value = id;
+            textParam.Value = text;
+            await write.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    /// <summary>The one place the match column's contents are defined, so writes and the
+    /// query below can never disagree about what is being compared.</summary>
+    private static string SearchTextOf(string? name, string? sku, string? barcode)
+        => $"{name} {sku} {barcode}".ToLowerInvariant();
 
     public async Task SaveProductsAsync(IEnumerable<Product> products)
     {
@@ -176,10 +261,11 @@ public class OfflineStorageService : IOfflineStorageService
 
         command.CommandText = @"
             INSERT INTO Products (Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags,
-                                  UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit)
+                                  UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit, SearchText)
             VALUES ($Id, $Name, $Sku, $Category, $Price, $OriginalPrice, $DiscountPercent, $ImagePath, $Barcode, $Tags,
-                    $UnitId, $UnitCode, $UnitShortName, $UnitFactor, $IsDivisible, $SellInSecondaryUnit)
+                    $UnitId, $UnitCode, $UnitShortName, $UnitFactor, $IsDivisible, $SellInSecondaryUnit, $SearchText)
             ON CONFLICT(Id) DO UPDATE SET
+                SearchText=excluded.SearchText,
                 Name=excluded.Name,
                 Sku=excluded.Sku,
                 Category=excluded.Category,
@@ -213,9 +299,11 @@ public class OfflineStorageService : IOfflineStorageService
         var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Real);
         var isDivisibleParam = command.Parameters.Add("$IsDivisible", SqliteType.Integer);
         var sellInUnitParam = command.Parameters.Add("$SellInSecondaryUnit", SqliteType.Integer);
+        var searchTextParam = command.Parameters.Add("$SearchText", SqliteType.Text);
 
         foreach (var p in products)
         {
+            searchTextParam.Value = SearchTextOf(p.Name, p.Sku, p.Barcode);
             idParam.Value = p.Id ?? string.Empty;
             nameParam.Value = p.Name ?? string.Empty;
             skuParam.Value = p.Sku ?? string.Empty;
@@ -318,6 +406,32 @@ public class OfflineStorageService : IOfflineStorageService
 
         return products;
     }
+
+    public async Task<IEnumerable<Product>> SearchProductsAsync(string query)
+    {
+        var products = new List<Product>();
+        if (string.IsNullOrWhiteSpace(query)) return products;
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        // ESCAPE, because '%' and '_' are LIKE syntax and a cashier typing either means
+        // the character — "50%" is a product name here, not "match everything".
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE SearchText LIKE $Query ESCAPE '\\'";
+        command.Parameters.AddWithValue("$Query", $"%{EscapeLike(query.Trim().ToLowerInvariant())}%");
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            products.Add(ReadProduct(reader));
+        }
+
+        return products;
+    }
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     public async Task<Product?> GetProductByBarcodeAsync(string barcode)
     {
@@ -576,7 +690,10 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Hash, Payload FROM UnsyncedDocuments";
+        // Rejected rows are deliberately excluded: they are what the register tried to
+        // book, kept for the back office, not work still to be done. Counting them would
+        // leave the unsynced badge permanently lit over a queue nothing can drain.
+        command.CommandText = "SELECT Hash, Payload FROM UnsyncedDocuments WHERE RejectedAt IS NULL";
 
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -587,6 +704,24 @@ public class OfflineStorageService : IOfflineStorageService
         }
 
         return docs;
+    }
+
+    public async Task MarkDocumentRejectedAsync(string hash, string reason)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE UnsyncedDocuments
+            SET RejectedAt = $RejectedAt, RejectedReason = $Reason
+            WHERE Hash = $Hash;
+        ";
+        command.Parameters.AddWithValue("$Hash", hash);
+        command.Parameters.AddWithValue("$RejectedAt", DateTime.UtcNow.ToString("o"));
+        command.Parameters.AddWithValue("$Reason", reason ?? string.Empty);
+
+        await command.ExecuteNonQueryAsync();
     }
 
     public async Task DeleteUnsyncedDocumentAsync(string hash)

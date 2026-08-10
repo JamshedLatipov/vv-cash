@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
@@ -77,7 +78,6 @@ public class SyncService : ISyncService
         catch (Exception ex)
         {
             Console.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
-            Console.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
         }
     }
 
@@ -96,7 +96,6 @@ public class SyncService : ISyncService
             var versionsResponse = await _httpClient.GetAsync(versionsUrl);
             var versionsContent = await versionsResponse.Content.ReadAsStringAsync();
             Console.WriteLine($"[SyncService] GET {versionsUrl} -> {(int)versionsResponse.StatusCode} {versionsResponse.StatusCode}");
-            Console.WriteLine($"[SyncService] versions body: {versionsContent}");
 
             if (versionsResponse.IsSuccessStatusCode)
             {
@@ -107,11 +106,22 @@ public class SyncService : ISyncService
                 {
                     if (root.TryGetProperty("body", out var bodyElement) && bodyElement.ValueKind == JsonValueKind.Array)
                     {
-                        foreach (var versionElem in bodyElement.EnumerateArray())
+                        // Sorted, and not taken in the order the endpoint happened to
+                        // list them. The walk below compares each version against a
+                        // lastVersion that moves as it goes and persists it, so one
+                        // out-of-order entry was permanent data loss: handed [3,1,2] it
+                        // processed 3, wrote lastVersion=3, then skipped 1 and 2 as
+                        // "already done" — on that sync and on every sync afterwards.
+                        // The products in those versions never reached the register.
+                        var versions = bodyElement.EnumerateArray()
+                            .Where(v => v.ValueKind == JsonValueKind.Number)
+                            .Select(v => v.GetInt32())
+                            .OrderBy(v => v)
+                            .ToList();
+
+                        foreach (var version in versions)
                         {
-                            if (versionElem.ValueKind == JsonValueKind.Number)
                             {
-                                int version = versionElem.GetInt32();
                                 if (version > lastVersion)
                                 {
                                     var updatedProducts = new List<Product>();
@@ -120,7 +130,6 @@ public class SyncService : ISyncService
                                     var updateResponse = await _httpClient.GetAsync(updateUrl);
                                     var updateContent = await updateResponse.Content.ReadAsStringAsync();
                                     Console.WriteLine($"[SyncService] GET {updateUrl} -> {(int)updateResponse.StatusCode} {updateResponse.StatusCode}");
-                                    Console.WriteLine($"[SyncService] update/{version} body: {updateContent}");
 
                                     if (updateResponse.IsSuccessStatusCode)
                                     {
@@ -146,7 +155,6 @@ public class SyncService : ISyncService
                                                 {
                                                     try
                                                     {
-                                                        Console.WriteLine($"[SyncService] RAW item: {item.GetRawText()}");
                                                         string productId = Guid.NewGuid().ToString();
                                                         string productName = string.Empty;
                                                         string productSku = string.Empty;
@@ -241,7 +249,6 @@ public class SyncService : ISyncService
                                                             (sellInUnitElem.ValueKind == JsonValueKind.True || sellInUnitElem.ValueKind == JsonValueKind.False))
                                                             sellInSecondaryUnit = sellInUnitElem.GetBoolean();
 
-                                                        Console.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
                                                         updatedProducts.Add(new Product
                                                         {
                                                             Id = productId,
