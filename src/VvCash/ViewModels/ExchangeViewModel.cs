@@ -87,12 +87,21 @@ public partial class ExchangeViewModel : ViewModelBase
     /// different exchange never reuses it.</summary>
     private string? _documentHash;
 
-    /// <summary>True once step 1 has actually booked a return for the current basket
-    /// state. A retry after a failed payout must not book a second one: there is no
+    /// <summary>True once step 1 has actually booked a return for the current returned
+    /// basket. A retry after a failed payout must not book a second one: there is no
     /// endpoint to cancel a return, so a duplicate would credit the stock twice with
-    /// nothing to undo it. Cleared alongside <see cref="_documentHash"/>, by the same
-    /// funnel, for the same reason — a changed basket is a different exchange.</summary>
+    /// nothing to undo it. Cleared only when the RETURNED basket changes — see
+    /// <see cref="RaiseTotalsChanged"/> for why an issued-side edit must not clear it.</summary>
     private bool _returnBooked;
+
+    /// <summary>True once step 2 has actually handed the money out of the till for the
+    /// current returned basket. Exists for the same reason <see cref="_returnBooked"/>
+    /// does, and is if anything more important: a cash expense has no idempotency key and
+    /// no cancel endpoint either, so a retry after a failed step 3 used to post a second
+    /// payout — the books then said twice the returned total left the drawer, for one
+    /// return. Cleared with <see cref="_returnBooked"/>, since both legs are built from
+    /// the same basket.</summary>
+    private bool _payoutBooked;
 
     /// <summary>Resolved once per screen, because on a store with a large customer book
     /// the lookup behind it is not a small reply. See
@@ -428,7 +437,7 @@ public partial class ExchangeViewModel : ViewModelBase
         foreach (var l in ReturnedLines) l.RefundChanged -= OnBasketChanged;
         ReturnedLines = new ObservableCollection<ReturnLineVm>(lines);
         foreach (var l in ReturnedLines) l.RefundChanged += OnBasketChanged;
-        RaiseTotalsChanged();
+        RaiseTotalsChanged(returnedBasketChanged: true);
     }
 
     /// <summary>Adds one line to the issued-goods basket (a product the cashier
@@ -559,7 +568,10 @@ public partial class ExchangeViewModel : ViewModelBase
             OnIssuedBasketChanged();
     }
 
-    private void OnBasketChanged() => RaiseTotalsChanged();
+    /// <summary>A change to the RETURNED basket. That basket is the sole input to
+    /// <see cref="BuildReturnRequest"/> and to the payout amount, so changing it makes
+    /// both legs genuinely different documents and clears their retry guards.</summary>
+    private void OnBasketChanged() => RaiseTotalsChanged(returnedBasketChanged: true);
 
     /// <summary>What a change to the issued basket goes through, as opposed to the
     /// returned one: the totals move exactly as before, and on top of that the server is
@@ -567,21 +579,35 @@ public partial class ExchangeViewModel : ViewModelBase
     /// what is in the basket.</summary>
     private void OnIssuedBasketChanged()
     {
-        RaiseTotalsChanged();
+        RaiseTotalsChanged(returnedBasketChanged: false);
         TriggerIssuedRequote();
     }
 
-    private void RaiseTotalsChanged()
+    /// <param name="returnedBasketChanged">Whether legs 1 and 2 have to be reconsidered.
+    ///
+    /// This used to be unconditional, and that was a duplicate-return waiting to happen.
+    /// Legs 1 and 2 are built entirely from the RETURNED basket; the issued basket has no
+    /// part in either. So a cashier who hits a failed payout and then swaps the
+    /// replacement for a cheaper size — an edit to the issued side — was clearing the
+    /// guard on a return that had already been booked, and the next submit re-posted it.
+    /// A return has no cancel endpoint: the same goods are credited to stock twice and the
+    /// till pays out twice, or the server refuses the over-return and the cashier is
+    /// pinned behind "ни один документ не создан" while the books sit half-written.</param>
+    private void RaiseTotalsChanged(bool returnedBasketChanged)
     {
-        // The single funnel every basket edit goes through, so also where a
-        // changed basket stops being a retry of the previous exchange.
+        // A changed basket of either kind means a different replacement sale, so the
+        // idempotency key for leg 3 always goes.
         //
         // HasBookedDocument is deliberately NOT reset here, unlike everything else in
         // this block: it tracks whether this screen ever wrote to the server, which a
         // basket edit cannot undo — see its own doc comment. Resetting it would tell
         // PosViewModel nothing happened and leave the previous seller confirmed.
         _documentHash = null;
-        _returnBooked = false;
+        if (returnedBasketChanged)
+        {
+            _returnBooked = false;
+            _payoutBooked = false;
+        }
         NotifyTotalsChanged();
     }
 
@@ -744,15 +770,23 @@ public partial class ExchangeViewModel : ViewModelBase
             // with no quote there was no discount to declare, which is precisely why an
             // exchange charged the full catalog price for goods a running promotion had
             // sold at half of it.
-            // Whole replacement price into one slot or the other — never split, since
-            // the cashier states one method for the difference and the rest of this
-            // total is the returned money going straight back out through step 2's
-            // payout. PayByCard only reaches here when CanPayByCard allowed it.
+            // Split the way the money actually moved, because the drawer and the terminal
+            // are counted separately at the end of the shift.
+            //
+            // Step 2 hands ReturnedTotal out of the drawer in cash — unconditionally, it
+            // knows nothing about this flag — and the customer hands that same cash
+            // straight back for the replacement. Only the difference goes on the terminal.
+            // Booking the whole replacement to the card slot would leave the drawer count
+            // over by ReturnedTotal and the terminal short by it: a bigger error than the
+            // all-cash version this option was added to fix.
+            //
+            // CanPayByCard guarantees IssuedTotal > ReturnedTotal here, so the card share
+            // is positive and the two still sum to ToPay.
             Payment = new Payment
             {
                 ToPay = IssuedTotal,
-                PaidInCash = PayByCard && CanPayByCard ? 0m : IssuedTotal,
-                PaidByCreditCard = PayByCard && CanPayByCard ? IssuedTotal : 0m,
+                PaidInCash = PayByCard && CanPayByCard ? ReturnedTotal : IssuedTotal,
+                PaidByCreditCard = PayByCard && CanPayByCard ? IssuedTotal - ReturnedTotal : 0m,
                 DiscountType = "cash",
                 Discount = IssuedDiscount,
                 Remained = 0m,
@@ -859,7 +893,13 @@ public partial class ExchangeViewModel : ViewModelBase
             // discounted line, say), and the server binds the amount as gt=0 — posting
             // a zero would be a 400 with the return already booked, over money that
             // never had to move.
-            if (ReturnedTotal > 0m)
+            //
+            // Guarded by _payoutBooked for the same reason step 1 is guarded: this is real
+            // money leaving the drawer, a cash expense carries no idempotency key, and
+            // there is no endpoint that cancels one. Without the guard a retry after a
+            // failed step 3 posted a second payout, and the books said twice the returned
+            // total left the till for a single return.
+            if (ReturnedTotal > 0m && !_payoutBooked)
             {
                 var payout = await _cashOperationService.CreateCashExpenseAsync(
                     BuildPayoutRequest(counterpartyId!, categoryId!));
@@ -868,6 +908,7 @@ public partial class ExchangeViewModel : ViewModelBase
                     ErrorMessage = PayoutFailed(payout.Message);
                     return;
                 }
+                _payoutBooked = true;
             }
 
             // ---- 3. the replacement sale ---------------------------------------
