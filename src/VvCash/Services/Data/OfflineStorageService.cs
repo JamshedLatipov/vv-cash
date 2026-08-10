@@ -128,29 +128,12 @@ public class OfflineStorageService : IOfflineStorageService
         command.CommandText = "INSERT OR IGNORE INTO Settings (Key, Value) VALUES ('LastSyncVersion', '0');";
         await command.ExecuteNonQueryAsync();
 
-        // Migration: add ImageUrl to Categories if upgrading from older DB
-        try
-        {
-            command.CommandText = "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;";
-            await command.ExecuteNonQueryAsync();
-        }
-        catch { /* column already exists */ }
-
-        // Migration: add ParentId to Categories if upgrading from older DB
-        try
-        {
-            command.CommandText = "ALTER TABLE Categories ADD COLUMN ParentId TEXT;";
-            await command.ExecuteNonQueryAsync();
-        }
-        catch { /* column already exists */ }
-
-        // Migration: add Tags to Products if upgrading from older DB
-        try
-        {
-            command.CommandText = "ALTER TABLE Products ADD COLUMN Tags TEXT;";
-            await command.ExecuteNonQueryAsync();
-        }
-        catch { /* column already exists */ }
+        // Migrations for a database created before a column existed. Every one of these
+        // is expected to fail on a register that already has the column, and expected to
+        // succeed exactly once on one that does not.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;");
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ParentId TEXT;");
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN Tags TEXT;");
 
         // Migration: the rejected-document columns. A register upgrading with documents
         // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
@@ -183,17 +166,40 @@ public class OfflineStorageService : IOfflineStorageService
             "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
         })
         {
-            try
-            {
-                command.CommandText = alter;
-                await command.ExecuteNonQueryAsync();
-            }
-            catch { /* column already exists */ }
+            await AddColumnIfMissingAsync(command, alter);
         }
 
         await BackfillSearchTextAsync(connection);
 
         _isInitialized = true;
+    }
+
+    /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it is.
+    ///
+    /// Only that. A bare catch-all here — which is what every one of these migrations
+    /// used to have — swallowed a locked database, a read-only file and a corrupt schema
+    /// just as quietly, and the register carried on to fail later on a read, somewhere
+    /// with no connection to the actual problem.</summary>
+    private static async Task AddColumnIfMissingAsync(SqliteCommand command, string alter)
+    {
+        try
+        {
+            command.CommandText = alter;
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException ex) when (
+            ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+            // Already migrated. The expected outcome on every register but a fresh one.
+        }
+        catch (Exception ex)
+        {
+            // Anything else is a real problem with the database itself. Logged loudly
+            // rather than thrown: a till that refuses to open helps nobody, and the
+            // operation that actually needs the column will fail with its own, more
+            // specific error.
+            Console.WriteLine($"[OfflineStorageService] Migration failed ({alter}): {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     /// <summary>Fills SearchText for rows written before the column existed. Adding the

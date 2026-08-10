@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
@@ -40,7 +41,9 @@ public class EscPosPrinterService : IPrinterService
     /// so the layout can be asserted on, exactly as BuildReturnReceipt is.</summary>
     public static byte[] BuildSaleReceipt(
         IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
-        string? discountName = null)
+        string? discountName = null,
+        string? documentNumber = null, string? warehouseName = null,
+        string? sellerName = null, string? saleDate = null)
     {
         using var ms = new MemoryStream();
         Write(ms, CmdInit);
@@ -48,12 +51,24 @@ public class EscPosPrinterService : IPrinterService
         Write(ms, CmdDoubleSizeOn);
         WriteLine(ms, "VV CASH POS");
         Write(ms, CmdDoubleSizeOff);
+        // The same four facts the return and exchange receipts carry, and for the same
+        // reason: without them a sale receipt brought back to the till cannot be matched
+        // to its document. Each is omitted when absent rather than printed empty — an
+        // offline sale has no document number yet, and a register with seller switching
+        // off has no seller to name.
+        if (!string.IsNullOrWhiteSpace(documentNumber)) WriteLine(ms, $"Doc #{documentNumber}");
+        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate!);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}");
+        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}");
         WriteLine(ms, "----------------------------");
         Write(ms, CmdAlignLeft);
         foreach (var item in items)
         {
             var line = $"{item.Product.Name} x{item.QuantityDisplay}";
-            var price = $"${item.LineTotal:F2}";
+            // No currency symbol. It was hardcoded to "$" on every line and total of
+            // every sale, in stores that do not take dollars — and the return and
+            // exchange receipts next to it have always printed the bare amount.
+            var price = Money(item.LineTotal);
             WriteLine(ms, PadLine(line, price, 32));
 
             // A unit line prints both figures: the customer asked for square
@@ -63,16 +78,16 @@ public class EscPosPrinterService : IPrinterService
                 WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
         }
         WriteLine(ms, "----------------------------");
-        WriteLine(ms, PadLine("Subtotal:", $"${subtotal:F2}", 32));
+        WriteLine(ms, PadLine("Subtotal:", Money(subtotal), 32));
         if (discount > 0)
         {
-            WriteLine(ms, PadLine("Discount:", $"-${discount:F2}", 32));
+            WriteLine(ms, PadLine("Discount:", $"-{Money(discount)}", 32));
             if (!string.IsNullOrWhiteSpace(discountName))
                 WriteLine(ms, Truncate(discountName!, 32));
         }
 
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
+        WriteLine(ms, PadLine("TOTAL:", Money(total), 32));
         Write(ms, CmdBoldOff);
         WriteLine(ms, "----------------------------");
         Write(ms, CmdAlignCenter);
@@ -83,11 +98,13 @@ public class EscPosPrinterService : IPrinterService
         return ms.ToArray();
     }
 
-    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null)
+    public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
+        string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         try
         {
-            await SendAsync(BuildSaleReceipt(items, subtotal, discount, total, discountName));
+            await SendAsync(BuildSaleReceipt(items, subtotal, discount, total, discountName,
+                documentNumber, warehouseName, sellerName, saleDate));
             return true;
         }
         catch (Exception ex)
@@ -114,7 +131,7 @@ public class EscPosPrinterService : IPrinterService
                 if (item.Product.HasSecondaryUnit)
                     WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
             }
-            WriteLine(ms, PadLine("TOTAL:", $"${total:F2}", 32));
+            WriteLine(ms, PadLine("TOTAL:", Money(total), 32));
             Write(ms, CmdLineFeed);
             Write(ms, CmdCut);
             await SendAsync(ms.ToArray());
@@ -133,6 +150,13 @@ public class EscPosPrinterService : IPrinterService
         var bytes = Encoding.UTF8.GetBytes(text + "\n");
         ms.Write(bytes, 0, bytes.Length);
     }
+    /// <summary>Amounts on a receipt, formatted the same way on every register.
+    /// Interpolating with ":F2" took the decimal separator from the operating
+    /// system's locale, so the same sale printed 20.00 on one till and 20,00 on the
+    /// next — and CartItem.QuantityDisplay, right beside it on the line, has always
+    /// used the invariant form.</summary>
+    private static string Money(decimal value) => value.ToString("F2", CultureInfo.InvariantCulture);
+
     private static string PadLine(string left, string right, int width)
     {
         var spaces = width - left.Length - right.Length;
@@ -213,10 +237,10 @@ public class EscPosPrinterService : IPrinterService
         WriteLine(ms, "----------------------------");
         Write(ms, CmdAlignLeft);
         foreach (var l in lines)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", $"{l.LineRefund:F2}", 32));
+            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32));
         WriteLine(ms, "----------------------------");
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("REFUND:", $"{totalRefund:F2}", 32));
+        WriteLine(ms, PadLine("REFUND:", Money(totalRefund), 32));
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
@@ -281,18 +305,18 @@ public class EscPosPrinterService : IPrinterService
 
         WriteLine(ms, "RETURNED:");
         foreach (var l in returned)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", $"{l.LineRefund:F2}", 32));
+            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32));
 
         WriteLine(ms, "ISSUED:");
         foreach (var l in issued)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", $"{l.LineRefund:F2}", 32));
+            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32));
 
         WriteLine(ms, "----------------------------");
         Write(ms, CmdBoldOn);
         // An even swap owes nothing in either direction; without its own label it
         // printed "REFUND: 0.00" and invited the customer to ask for the money.
         var label = difference > 0 ? "AMOUNT DUE:" : difference < 0 ? "REFUND:" : "NO DIFFERENCE:";
-        WriteLine(ms, PadLine(label, $"{Math.Abs(difference):F2}", 32));
+        WriteLine(ms, PadLine(label, Money(Math.Abs(difference)), 32));
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);

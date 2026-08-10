@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -236,7 +236,8 @@ public class PosViewModelSellerGateTest
     {
         public PrinterStatus Status => PrinterStatus.Ready;
         public event EventHandler<PrinterStatus>? StatusChanged;
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
+            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);

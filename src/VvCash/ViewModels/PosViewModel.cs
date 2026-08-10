@@ -2126,11 +2126,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
                     if (outcome.Posted || outcome.Queued)
                     {
+                        // The document number is empty for a sale that was queued rather
+                        // than posted — it has no number until it syncs — and the seller
+                        // is absent on a register with switching off. The receipt prints
+                        // neither line in those cases rather than an empty label.
                         await _printerService.PrintReceiptAsync(
                             _cartService.Items,
                             Subtotal, TotalDiscount, TotalAmount,
                             _cartService.AppliedCoupons,
-                            _cartService.AppliedDiscountName);
+                            _cartService.AppliedDiscountName,
+                            documentNumber: outcome.DocumentNumber,
+                            warehouseName: null,
+                            sellerName: _sellerSession.Current?.FullName,
+                            saleDate: DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;

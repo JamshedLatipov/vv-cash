@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -151,7 +151,8 @@ public class ExchangeViewModelTest
         public string? LastWarehouseName; public string? LastSellerName; public string? LastSaleDate;
         public PrinterStatus Status => PrinterStatus.Ready;
         public event System.EventHandler<PrinterStatus>? StatusChanged { add { } remove { } }
-        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null) => Task.FromResult(true);
+        public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> i, decimal s, decimal d, decimal t, IEnumerable<Coupon> c, string? discountName = null,
+            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> i, decimal t) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() { Drawer++; return Task.FromResult(true); }
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> l, decimal t, string d, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
