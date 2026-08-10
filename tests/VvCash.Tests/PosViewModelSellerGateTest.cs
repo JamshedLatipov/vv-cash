@@ -1424,10 +1424,48 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void ApplyManualDiscount_AmountMode_NeverGated_RegardlessOfCap()
+    public void ApplyManualDiscount_AmountModeUnderTheCap_AppliesDirectly()
     {
-        // Amount-mode discounts aren't compared against a percent cap — out of scope for
-        // NeedsDiscountApproval, same as before this task.
+        // 500 off a 1000 cart is 50%, and this seller may go to 60%.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 60m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 1000m));
+        var raisedCount = 0;
+        vm.DiscountApprovalRequested += (s, percent) => raisedCount++;
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0, raisedCount);
+        Assert.Equal(500m, deps.CartService.ManualDiscountAmount);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountModeOverTheCapInPercentTerms_RaisesApproval()
+    {
+        // The hole this closes: the cap is a percent, so an amount-mode discount used to
+        // skip the check entirely. A seller allowed 5% could switch the modal to amount
+        // mode and take half the receipt off, with nobody asked.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 5m));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 1000m));
+        decimal? raisedPercent = null;
+        vm.DiscountApprovalRequested += (s, percent) => raisedPercent = percent;
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(50m, raisedPercent);
+        Assert.Equal(0m, deps.CartService.ManualDiscountAmount); // nothing applied yet
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountModeOnAnEmptyCart_IsRefused()
+    {
+        // No subtotal to take a percent of, so nothing can establish whether this is
+        // within the seller's cap. Refuse rather than guess.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("s1", maxDiscount: 5m));
         var raisedCount = 0;
@@ -1438,7 +1476,68 @@ public class PosViewModelSellerGateTest
         vm.ApplyManualDiscountCommand.Execute(null);
 
         Assert.Equal(0, raisedCount);
-        Assert.Equal(500m, deps.CartService.ManualDiscountAmount);
+        Assert.Equal(0m, deps.CartService.ManualDiscountAmount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Bounds. A manual discount is free text off a numeric pad, and CartService clamps
+    // the total to the subtotal — so an over-100% entry did not look wrong anywhere, it
+    // just produced a receipt for nothing.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ApplyManualDiscount_PercentAboveOneHundred_IsRefused()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1")); // no cap configured
+        vm.DiscountInputValue = "500";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0m, deps.CartService.ManualDiscountPercent);
+        Assert.True(vm.IsAlertModalVisible);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_PercentOfExactlyOneHundred_IsAccepted()
+    {
+        // The whole receipt off is a real thing a manager does; 100 is the boundary,
+        // not the refusal.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.DiscountInputValue = "100";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(100m, deps.CartService.ManualDiscountPercent);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_NegativePercent_IsRefused()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.DiscountInputValue = "-5";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0m, deps.CartService.ManualDiscountPercent);
+        Assert.True(vm.IsAlertModalVisible);
+    }
+
+    [Fact]
+    public void ApplyManualDiscount_AmountLargerThanTheCart_IsRefused()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.IsDiscountPercentMode = false;
+        vm.DiscountInputValue = "5000";
+
+        vm.ApplyManualDiscountCommand.Execute(null);
+
+        Assert.Equal(0m, deps.CartService.ManualDiscountAmount);
+        Assert.True(vm.IsAlertModalVisible);
     }
 
     // ---------------------------------------------------------------------------------

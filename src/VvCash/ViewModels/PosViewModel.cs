@@ -1439,13 +1439,34 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// discounts allowed" — right after the seller-PIN migration every seller has no cap
     /// (see the max_discount column's own remarks in the design spec), so treating 0 as a
     /// limit would demand a supervisor PIN for every manual discount from day one. Only
-    /// gates when a cap is actually set. <paramref name="percent"/>-only: amount-mode
-    /// discounts (see <see cref="IsDiscountAmountMode"/>) aren't compared against a
-    /// percent cap and are out of scope here, same as before this task.</summary>
+    /// gates when a cap is actually set.
+    ///
+    /// Takes a percent because the cap is one. An amount-mode discount is converted by
+    /// <see cref="DiscountAsPercent"/> before it gets here rather than being waved
+    /// through: the cap existed to bound how much of a receipt one seller can give away,
+    /// and "500 off" gives away exactly as much as "50%" does on a 1000 receipt. Leaving
+    /// amount mode out of the check turned the mode toggle into a way around it.</summary>
     private bool NeedsDiscountApproval(decimal percent)
     {
         var cap = _sellerSession.Current?.MaxDiscount ?? 0m;
         return cap > 0m && percent > cap;
+    }
+
+    /// <summary>What the entered discount comes to as a percent of the current receipt,
+    /// or null when that cannot be established — an amount typed against an empty cart
+    /// has no subtotal to be a percent of.</summary>
+    private decimal? DiscountAsPercent(decimal value)
+    {
+        if (IsDiscountPercentMode) return value;
+        var subtotal = _cartService.Subtotal;
+        return subtotal > 0m ? value / subtotal * 100m : null;
+    }
+
+    private void RefuseDiscount(string reason)
+    {
+        CloseDiscountModal();
+        AlertMessage = reason;
+        IsAlertModalVisible = true;
     }
 
     [RelayCommand]
@@ -1457,13 +1478,44 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Bounds first, before the cap check has anything to reason about. The pad
+        // accepts any number of digits and CartService clamps the resulting discount to
+        // the subtotal, so "500" in percent mode looked like nothing was wrong — it just
+        // produced a receipt for zero. A discount that takes more than the receipt is
+        // worth is an entry error every time, not a decision to escalate.
+        if (value <= 0m)
+        {
+            RefuseDiscount("Скидка должна быть больше нуля.");
+            return;
+        }
+
+        var percent = DiscountAsPercent(value);
+        if (percent == null)
+        {
+            RefuseDiscount("Скидка суммой недоступна: в чеке нет товаров.");
+            return;
+        }
+        if (percent > 100m)
+        {
+            RefuseDiscount(IsDiscountPercentMode
+                ? "Скидка не может превышать 100%."
+                : "Скидка больше суммы чека.");
+            return;
+        }
+
         // Same seller-switch-off exception as CloseShift/OpenReturns: with no separate
         // sellers there is nobody else's approval to escalate to, and the overlay that
         // would collect it is hidden along with the flag.
-        if (IsSellerSwitchEnabled && IsDiscountPercentMode && NeedsDiscountApproval(value))
+        //
+        // The escalation carries the percent even when the cashier typed an amount: it
+        // is what the approver's own cap is compared against, and what
+        // ApplyApprovedDiscount applies. On the receipt in front of them the two are the
+        // same money; should the cart change afterwards, a percent is the safer of the
+        // two to have approved.
+        if (IsSellerSwitchEnabled && NeedsDiscountApproval(percent.Value))
         {
             CloseDiscountModal();
-            DiscountApprovalRequested?.Invoke(this, value);
+            DiscountApprovalRequested?.Invoke(this, percent.Value);
             return;
         }
 
