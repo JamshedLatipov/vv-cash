@@ -22,6 +22,15 @@ public class SettingsDefaultsTest
         Assert.Equal(string.Empty, new SettingsData().ExchangePayoutCategoryId);
     }
 
+    [Fact]
+    public void ReturnPayoutCategory_DefaultsToUnset()
+    {
+        // Same reasoning as the exchange one above, and the same consequence: an
+        // upgraded register refuses returns until an administrator picks a category,
+        // rather than quietly filing refunds under whatever came first.
+        Assert.Equal(string.Empty, new SettingsData().ReturnPayoutCategoryId);
+    }
+
     /// <summary>Пусто, а не "RU": дефолт живёт в PhoneFormats.Resolve, и второй
     /// его экземпляр здесь разъехался бы с первым при первой же правке.</summary>
     [Fact]

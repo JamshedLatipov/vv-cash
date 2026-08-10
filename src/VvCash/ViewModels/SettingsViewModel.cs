@@ -127,6 +127,13 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private PaymentCategory? _selectedPaymentCategory;
 
+    /// <summary>The same list, picked separately for the returns screen's payout —
+    /// see ISettingsService.ReturnPayoutCategoryId for why the two are not one
+    /// setting. Both dropdowns read <see cref="PaymentCategories"/>; a ComboBox does
+    /// not mutate its ItemsSource, so one collection serves both.</summary>
+    [ObservableProperty]
+    private PaymentCategory? _selectedReturnPaymentCategory;
+
     /// <summary>What the register will actually do, which is the server's answer.
     /// The local fields behind the old checkboxes are kept and still saved, but no
     /// longer consulted — see ReturnsViewModel.
@@ -198,6 +205,8 @@ public partial class SettingsViewModel : ViewModelBase
         foreach (var c in categories) PaymentCategories.Add(c);
         SelectedPaymentCategory = PaymentCategories
             .FirstOrDefault(c => c.Id == _settingsService.ExchangePayoutCategoryId);
+        SelectedReturnPaymentCategory = PaymentCategories
+            .FirstOrDefault(c => c.Id == _settingsService.ReturnPayoutCategoryId);
     }
 
     [RelayCommand]
@@ -278,6 +287,8 @@ public partial class SettingsViewModel : ViewModelBase
         // disable exchanges on a register that was configured correctly.
         if (SelectedPaymentCategory != null)
             _settingsService.ExchangePayoutCategoryId = SelectedPaymentCategory.Id;
+        if (SelectedReturnPaymentCategory != null)
+            _settingsService.ReturnPayoutCategoryId = SelectedReturnPaymentCategory.Id;
 
         _settingsService.Printers = Printers.Select(p => new PrinterConfig
         {

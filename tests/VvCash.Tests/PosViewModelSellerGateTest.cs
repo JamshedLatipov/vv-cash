@@ -345,6 +345,7 @@ public class PosViewModelSellerGateTest
         public bool ReturnOpenCashDrawer { get; set; }
         public bool ReturnPrintReceipt { get; set; }
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+        public string ReturnPayoutCategoryId { get; set; } = string.Empty;
         public string PhoneFormatId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged;
         public void Save() { }
@@ -821,6 +822,98 @@ public class PosViewModelSellerGateTest
 
         Assert.NotNull(deps.ExpenseDocumentService.LastRequest);
         Assert.Equal("seller-42", deps.ExpenseDocumentService.LastRequest!.SellerId);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Pay() carries the customer
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Pay_WithSelectedCustomer_StampsCounterpartyOntoRequest()
+    {
+        // SelectedCustomer already drives the discount shown on this receipt
+        // (SelectedCustomerDiscount) — the sale itself must be attributed to the
+        // same customer, not just discounted on their behalf.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-1", FirstName = "Anna", LastName = "Lee" });
+        vm.SelectedCustomer = new CounterpartyResponse { Id = "cust-1", FirstName = "Bob" };
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.NotNull(deps.ExpenseDocumentService.LastRequest);
+        Assert.Equal("cust-1", deps.ExpenseDocumentService.LastRequest!.Counterparty);
+    }
+
+    [Fact]
+    public void Pay_NoSelectedCustomer_OmitsCounterpartyFromRequest()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-1", FirstName = "Anna", LastName = "Lee" });
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.NotNull(deps.ExpenseDocumentService.LastRequest);
+        Assert.Null(deps.ExpenseDocumentService.LastRequest!.Counterparty);
+    }
+
+    [Fact]
+    public void Pay_WithSelectedCustomer_PaymentScreenAllowsSellingOnCredit()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-1", FirstName = "Anna", LastName = "Lee" });
+        vm.SelectedCustomer = new CounterpartyResponse { Id = "cust-1", FirstName = "Bob" };
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        Assert.True(mixedPaymentVm!.HasCustomer);
+    }
+
+    [Fact]
+    public void Pay_NoSelectedCustomer_PaymentScreenRefusesSellingOnCredit()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(new SellerInfo { Id = "seller-1", FirstName = "Anna", LastName = "Lee" });
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated =>
+        {
+            if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m;
+        };
+
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+
+        Assert.False(mixedPaymentVm!.HasCustomer);
     }
 
     [Fact]

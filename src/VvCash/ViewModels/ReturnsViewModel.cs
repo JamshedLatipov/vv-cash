@@ -22,6 +22,20 @@ public partial class ReturnsViewModel : ViewModelBase
     private readonly IPrinterService _printerService;
     private readonly ISettingsService _settingsService;
     private readonly ICashFeatureService _features;
+    private readonly ICashOperationService _cashOperationService;
+    private readonly ICounterpartyService _counterpartyService;
+    private readonly string? _cashId;
+
+    /// <summary>Resolved once per screen — see ICounterpartyService.GetSystemCounterpartyIdAsync
+    /// for why the lookup behind it is not cheap on a store with a large customer book.</summary>
+    private string? _payoutCounterpartyId;
+
+    /// <summary>True once <see cref="SubmitReturn"/> has booked the return for the lines
+    /// as they currently stand. A retry after a failed payout must not book a second one:
+    /// there is no endpoint that cancels a return, so a duplicate credits the stock twice
+    /// with nothing to undo it. Cleared whenever the lines change — a different basket is
+    /// a different return — exactly as ExchangeViewModel clears its own.</summary>
+    private bool _returnBooked;
 
     [ObservableProperty] private ObservableCollection<ExpenseListItem> _sales = new();
     [ObservableProperty] private ObservableCollection<ReturnLineVm> _lines = new();
@@ -74,15 +88,26 @@ public partial class ReturnsViewModel : ViewModelBase
     /// nothing on every ordinary network hiccup.</summary>
     public bool HasBookedDocument { get; private set; }
 
+    /// <summary>False while nobody has told the register which payment category the till
+    /// payout belongs under. Surfaced on the screen as its own warning so the cashier
+    /// reads it before picking a receipt, not after — same treatment the exchange screen
+    /// gives <see cref="ExchangeViewModel.IsPayoutCategoryConfigured"/>.</summary>
+    public bool IsPayoutCategoryConfigured
+        => !string.IsNullOrWhiteSpace(_settingsService.ReturnPayoutCategoryId);
+
     public ReturnsViewModel(Window? window, IReturnService returnService,
         IPrinterService printerService, ISettingsService settingsService,
-        ICashFeatureService features)
+        ICashFeatureService features, ICashOperationService cashOperationService,
+        ICounterpartyService counterpartyService, string? cashId)
     {
         _window = window;
         _returnService = returnService;
         _printerService = printerService;
         _settingsService = settingsService;
         _features = features;
+        _cashOperationService = cashOperationService;
+        _counterpartyService = counterpartyService;
+        _cashId = cashId;
         if (window != null)
             _ = LoadSalesAsync();
     }
@@ -217,12 +242,16 @@ public partial class ReturnsViewModel : ViewModelBase
         foreach (var l in Lines) l.RefundChanged -= OnLineRefundChanged;
         Lines = new ObservableCollection<ReturnLineVm>(items);
         foreach (var l in Lines) l.RefundChanged += OnLineRefundChanged;
+        _returnBooked = false;
         OnPropertyChanged(nameof(TotalRefund));
         OnPropertyChanged(nameof(CanSubmit));
     }
 
     private void OnLineRefundChanged()
     {
+        // Whatever was booked was booked for the old quantities, and the retry guard
+        // must not suppress the return of a basket nobody has sent yet.
+        _returnBooked = false;
         OnPropertyChanged(nameof(TotalRefund));
         OnPropertyChanged(nameof(CanSubmit));
     }
@@ -243,6 +272,11 @@ public partial class ReturnsViewModel : ViewModelBase
         };
     }
 
+    /// <summary>Books the return and then hands the refunded money out of the till, in
+    /// that order and no other — the same two legs, against the same endpoints, that
+    /// steps 1 and 2 of an exchange run (see ExchangeViewModel). The drawer has always
+    /// opened on a return; until the payout leg existed, nothing in the books said the
+    /// money had left it.</summary>
     [RelayCommand]
     private async Task SubmitReturn()
     {
@@ -252,18 +286,61 @@ public partial class ReturnsViewModel : ViewModelBase
         SuccessMessage = null;
         try
         {
-            var request = BuildRequest();
-            var ok = await _returnService.CreateReturnAsync(SelectedSale.Id, request);
-            if (!ok)
+            // Everything checkable without writing anything is checked before the first
+            // call. Discovering an unset category after the return is booked would leave
+            // a document that cannot be cancelled and no payout to go with it.
+            var categoryId = _settingsService.ReturnPayoutCategoryId;
+            if (string.IsNullOrWhiteSpace(categoryId))
             {
-                ErrorMessage = I18nService.Instance["ReturnFailed"];
+                ErrorMessage = PayoutCategoryNotConfigured;
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(_cashId))
+            {
+                ErrorMessage = CashNotKnown;
+                return;
+            }
+            var counterpartyId = await ResolvePayoutCounterpartyAsync();
+            if (string.IsNullOrWhiteSpace(counterpartyId))
+            {
+                ErrorMessage = CounterpartyNotResolved;
                 return;
             }
 
-            // Set before the drawer/receipt side effects, not after: those are
-            // best-effort (they swallow their own exceptions) and the document is already
-            // on the server by this point regardless of how printing goes.
-            HasBookedDocument = true;
+            // Snapshotted before anything is sent: the reload at the end rebuilds the
+            // lines, and the payout must be for the money this press was about.
+            var refund = TotalRefund;
+
+            if (!_returnBooked)
+            {
+                var request = BuildRequest();
+                var ok = await _returnService.CreateReturnAsync(SelectedSale.Id, request);
+                if (!ok)
+                {
+                    ErrorMessage = I18nService.Instance["ReturnFailed"];
+                    return;
+                }
+
+                // Set before the drawer/receipt side effects, not after: those are
+                // best-effort (they swallow their own exceptions) and the document is already
+                // on the server by this point regardless of how printing goes.
+                _returnBooked = true;
+                HasBookedDocument = true;
+            }
+
+            // Nothing to hand over when the returned lines were worth nothing, and the
+            // server binds the amount as gt=0 — posting a zero would be a 400 with the
+            // return already booked, over money that never had to move.
+            if (refund > 0m)
+            {
+                var payout = await _cashOperationService.CreateCashExpenseAsync(
+                    BuildPayoutRequest(counterpartyId!, categoryId, refund));
+                if (!payout.Success)
+                {
+                    ErrorMessage = PayoutFailed(payout.Message);
+                    return;
+                }
+            }
 
             await RunPostReturnActionsAsync(SelectedSale.DocumentNumber ?? string.Empty);
             SuccessMessage = I18nService.Instance["ReturnSuccess"];
@@ -278,6 +355,49 @@ public partial class ReturnsViewModel : ViewModelBase
             IsSubmitting = false;
         }
     }
+
+    /// <summary>The till payout body. Public for the same reason ExchangeViewModel's is:
+    /// what lands in each slot is what the back office reads the operation by.</summary>
+    public CashExpenseRequest BuildPayoutRequest(string counterpartyId, string paymentCategoryId, decimal amount) => new()
+    {
+        OperationType = "expense",
+        Cash = _cashId ?? string.Empty,
+        Counterparty = counterpartyId,
+        Note = $"Возврат по чеку {SelectedSale?.DocumentNumber}".TrimEnd(),
+        Details = new System.Collections.Generic.List<CashExpenseDetail>
+        {
+            new() { PaymentCategory = paymentCategoryId, Amount = amount },
+        },
+    };
+
+    private async Task<string?> ResolvePayoutCounterpartyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_payoutCounterpartyId)) return _payoutCounterpartyId;
+        try
+        {
+            _payoutCounterpartyId = await _counterpartyService.GetSystemCounterpartyIdAsync();
+        }
+        catch (Exception)
+        {
+            _payoutCounterpartyId = null;
+        }
+        return _payoutCounterpartyId;
+    }
+
+    // What the cashier reads, written out rather than routed through I18nService for the
+    // same reason ExchangeViewModel's are: each one says exactly which leg went through
+    // and which did not, and that is what tells the cashier — and the back office after
+    // them — what state the books are in.
+    public const string PayoutCategoryNotConfigured =
+        "Возврат не настроен: не выбрана статья расхода для выдачи из кассы. Задайте её в настройках. Ни один документ не создан.";
+    public const string CashNotKnown =
+        "Возврат невозможен: касса не определена. Переоткройте смену. Ни один документ не создан.";
+    public const string CounterpartyNotResolved =
+        "Возврат невозможен: не удалось определить контрагента для выдачи из кассы. Ни один документ не создан.";
+
+    public static string PayoutFailed(string? reason)
+        => $"Возврат проведён, выдача из кассы не прошла{(string.IsNullOrWhiteSpace(reason) ? string.Empty : $": {reason.Trim()}")}. "
+           + "Разберите расхождение в бэк-офисе.";
 
     private async Task RunPostReturnActionsAsync(string documentNumber)
     {

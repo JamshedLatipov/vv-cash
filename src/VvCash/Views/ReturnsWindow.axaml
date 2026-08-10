@@ -140,6 +140,7 @@
           <StackPanel Grid.Column="0" VerticalAlignment="Center">
             <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
             <TextBlock Text="{Binding SuccessMessage}" Foreground="{StaticResource PrimaryBrush}" IsVisible="{Binding SuccessMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+            <TextBlock Text="{Binding [ReturnPayoutCategoryWarning], Source={x:Static services:I18nService.Instance}}" Foreground="{StaticResource Red500Brush}" IsVisible="{Binding !IsPayoutCategoryConfigured}"/>
             <StackPanel Orientation="Horizontal" Spacing="8">
               <TextBlock Text="{Binding [RefundTotal], Source={x:Static services:I18nService.Instance}}" FontSize="14" Foreground="{StaticResource Slate600Brush}" VerticalAlignment="Center"/>
               <TextBlock Text="{Binding TotalRefund, StringFormat='{}{0:N2}'}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate900Brush}"/>

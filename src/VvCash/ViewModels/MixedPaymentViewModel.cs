@@ -72,11 +72,25 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// keeps the behaviour this screen has always had.</summary>
     private readonly bool _allowMixed;
 
-    public MixedPaymentViewModel(decimal totalAmount, Action<bool, decimal, decimal> onCompletion, bool allowMixed = true)
+    /// <summary>Whether a customer was selected before Pay opened this screen.
+    /// Gates <see cref="SellOnCreditCommand"/> — crediting a sale to a customer's
+    /// account needs someone to charge it against.</summary>
+    public bool HasCustomer { get; }
+
+    /// <summary>Set the instant either confirmation command hands off to
+    /// <see cref="_onCompletion"/>, and never cleared again: this view model is
+    /// discarded once the host navigates away (success or failure), so there is
+    /// nothing to resume. Exists purely to stop a second tap — of either button —
+    /// from booking a second document for the same receipt while the first
+    /// completion (document creation, printing) is still running.</summary>
+    private bool _isSubmitting;
+
+    public MixedPaymentViewModel(decimal totalAmount, Action<bool, decimal, decimal> onCompletion, bool allowMixed = true, bool hasCustomer = false)
     {
         TotalAmount = totalAmount;
         _onCompletion = onCompletion;
         _allowMixed = allowMixed;
+        HasCustomer = hasCustomer;
         RecomputeQuickAmounts();
     }
 
@@ -134,12 +148,33 @@ public partial class MixedPaymentViewModel : ViewModelBase
         _onCompletion(false, 0, 0);
     }
 
-    private bool CanConfirmPayment() => IsFullyPaid;
+    private bool CanConfirmPayment() => IsFullyPaid && !_isSubmitting;
 
     [RelayCommand(CanExecute = nameof(CanConfirmPayment))]
     private void ConfirmPayment()
     {
-        if (!IsFullyPaid) return;
+        if (!IsFullyPaid || _isSubmitting) return;
+        Submit();
+    }
+
+    private bool CanSellOnCredit() => HasCustomer && !_isSubmitting;
+
+    /// <summary>Books the sale with whatever has been tendered so far and lets
+    /// the rest ride as the selected customer's debt — PosViewModel derives the
+    /// debt amount the same way it derives change, from TotalAmount minus what
+    /// this hands back.</summary>
+    [RelayCommand(CanExecute = nameof(CanSellOnCredit))]
+    private void SellOnCredit()
+    {
+        if (!HasCustomer || _isSubmitting) return;
+        Submit();
+    }
+
+    private void Submit()
+    {
+        _isSubmitting = true;
+        ConfirmPaymentCommand.NotifyCanExecuteChanged();
+        SellOnCreditCommand.NotifyCanExecuteChanged();
         _onCompletion(true, CashAmount, CardAmount);
     }
 

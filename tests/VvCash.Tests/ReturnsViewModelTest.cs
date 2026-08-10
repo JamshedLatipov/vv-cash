@@ -84,6 +84,11 @@ public class ReturnsViewModelTest
         public bool ReturnOpenCashDrawer { get; set; } = true;
         public bool ReturnPrintReceipt { get; set; } = true;
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+
+        /// <summary>Configured by default: every test that is not about the gate itself
+        /// is about a register an administrator has already set up, and an unset category
+        /// refuses the return before the first call.</summary>
+        public string ReturnPayoutCategoryId { get; set; } = "ret-cat";
         public string PhoneFormatId { get; set; } = string.Empty;
         public event System.EventHandler? SettingsChanged;
         public void Save() => SettingsChanged?.Invoke(this, System.EventArgs.Empty);
@@ -98,10 +103,42 @@ public class ReturnsViewModelTest
         public Task RefreshAsync() => Task.CompletedTask;
     }
 
-    private static ReturnsViewModel Build(FakeReturnService svc, CountingPrinter printer, FakeSettings settings,
-        ICashFeatureService? features = null)
+    /// <summary>Records the till payouts the screen asks for, and can be told to refuse
+    /// one — the interesting case, since by then the return is already booked.</summary>
+    private sealed class FakeCashOperations : ICashOperationService
     {
-        var vm = new ReturnsViewModel(null, svc, printer, settings, features ?? new FakeCashFeatureService());
+        public readonly List<CashExpenseRequest> Requests = new();
+        public CashOpOutcome Result = CashOpOutcome.Ok();
+
+        public Task<CashOpOutcome> CreateCashExpenseAsync(CashExpenseRequest request)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Result);
+        }
+    }
+
+    private sealed class FakeCounterparties : ICounterpartyService
+    {
+        public string? SystemId = "sys-1";
+        public int Lookups;
+
+        public Task<CounterpartyResponse?> CreateCounterpartyAsync(CounterpartyCreateRequest request)
+            => Task.FromResult<CounterpartyResponse?>(null);
+        public Task<List<CounterpartyResponse>?> SearchCounterpartiesAsync(string query)
+            => Task.FromResult<List<CounterpartyResponse>?>(null);
+        public Task<string?> GetSystemCounterpartyIdAsync()
+        {
+            Lookups++;
+            return Task.FromResult(SystemId);
+        }
+    }
+
+    private static ReturnsViewModel Build(FakeReturnService svc, CountingPrinter printer, FakeSettings settings,
+        ICashFeatureService? features = null, FakeCashOperations? cashOps = null,
+        FakeCounterparties? counterparties = null, string? cashId = "cash-1")
+    {
+        var vm = new ReturnsViewModel(null, svc, printer, settings, features ?? new FakeCashFeatureService(),
+            cashOps ?? new FakeCashOperations(), counterparties ?? new FakeCounterparties(), cashId);
         vm.SelectedSale = new ExpenseListItem
         {
             Id = "doc1", DocumentNumber = "9", SelectedDate = "2026-06-06T17:32:55.052Z",
@@ -308,6 +345,155 @@ public class ReturnsViewModelTest
         await vm.SubmitReturnCommand.ExecuteAsync(null);
 
         Assert.False(vm.HasBookedDocument);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // The till payout leg. A return has always opened the drawer; until this existed,
+    // nothing in the books said the money had left it.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SubmitReturn_PaysTheRefundOutOfTheTill_UnderTheConfiguredCategory()
+    {
+        var cashOps = new FakeCashOperations();
+        var vm = Build(new FakeReturnService(), new CountingPrinter(),
+            new FakeSettings { ReturnPayoutCategoryId = "cat-7" }, cashOps: cashOps);
+        vm.Lines[0].ReturnQty = 2;  // 100
+        vm.Lines[1].ReturnQty = 1;  // 10
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        var req = Assert.Single(cashOps.Requests);
+        Assert.Equal("expense", req.OperationType);
+        Assert.Equal("cash-1", req.Cash);
+        Assert.Equal("sys-1", req.Counterparty);
+        var detail = Assert.Single(req.Details);
+        Assert.Equal("cat-7", detail.PaymentCategory);
+        Assert.Equal(110m, detail.Amount);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_CategoryUnset_RefusesBeforeAnyCallIsMade()
+    {
+        // The gate has to fire before the return: there is no endpoint that cancels one,
+        // so discovering the missing category at the payout would leave a booked return
+        // with no money movement behind it and nothing to undo it with.
+        var svc = new FakeReturnService();
+        var cashOps = new FakeCashOperations();
+        var vm = Build(svc, new CountingPrinter(),
+            new FakeSettings { ReturnPayoutCategoryId = string.Empty }, cashOps: cashOps);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Equal(ReturnsViewModel.PayoutCategoryNotConfigured, vm.ErrorMessage);
+        Assert.False(vm.IsPayoutCategoryConfigured);
+        Assert.Null(svc.LastRequest);
+        Assert.Empty(cashOps.Requests);
+        Assert.False(vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_CashUnknown_RefusesBeforeAnyCallIsMade()
+    {
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings(), cashId: null);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Equal(ReturnsViewModel.CashNotKnown, vm.ErrorMessage);
+        Assert.Null(svc.LastRequest);
+        Assert.False(vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_NoSystemCounterparty_RefusesBeforeAnyCallIsMade()
+    {
+        var svc = new FakeReturnService();
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings(),
+            counterparties: new FakeCounterparties { SystemId = null });
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Equal(ReturnsViewModel.CounterpartyNotResolved, vm.ErrorMessage);
+        Assert.Null(svc.LastRequest);
+        Assert.False(vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_PayoutRejected_SaysTheReturnWentThroughAndTheMoneyDidNot()
+    {
+        // The one leg that cannot be retried away has already happened, so the message
+        // has to name exactly that rather than read as a plain failure.
+        var printer = new CountingPrinter();
+        var cashOps = new FakeCashOperations { Result = CashOpOutcome.Failed("cash is closed") };
+        var vm = Build(new FakeReturnService(), printer, new FakeSettings(), cashOps: cashOps);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Equal(ReturnsViewModel.PayoutFailed("cash is closed"), vm.ErrorMessage);
+        Assert.True(vm.HasBookedDocument);
+        Assert.Null(vm.SuccessMessage);
+        // No receipt for an operation that did not finish — the slip would say money
+        // changed hands when the books say it did not.
+        Assert.Equal(0, printer.Receipt);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_RetryAfterAFailedPayout_DoesNotBookASecondReturn()
+    {
+        // A return cannot be cancelled, so the retry must resume at the payout rather
+        // than credit the stock twice.
+        var svc = new FakeReturnService();
+        var cashOps = new FakeCashOperations { Result = CashOpOutcome.Failed("cash is closed") };
+        var vm = Build(svc, new CountingPrinter(), new FakeSettings(), cashOps: cashOps);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+        svc.LastRequest = null;
+        cashOps.Result = CashOpOutcome.Ok();
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Null(svc.LastRequest);              // no second return
+        Assert.Equal(2, cashOps.Requests.Count);   // the payout is what was retried
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_ReturnRejected_NeverReachesThePayout()
+    {
+        var cashOps = new FakeCashOperations();
+        var vm = Build(new FakeReturnService { CreateResult = false }, new CountingPrinter(),
+            new FakeSettings(), cashOps: cashOps);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Empty(cashOps.Requests);
+        Assert.False(vm.HasBookedDocument);
+    }
+
+    [Fact]
+    public async Task SubmitReturn_ResolvesTheSystemCounterpartyOncePerScreen()
+    {
+        // On a store with a large customer book the lookup behind this is not a small
+        // reply, and a retry is exactly when the cashier is already waiting.
+        var counterparties = new FakeCounterparties();
+        var cashOps = new FakeCashOperations { Result = CashOpOutcome.Failed("cash is closed") };
+        var vm = Build(new FakeReturnService(), new CountingPrinter(), new FakeSettings(),
+            cashOps: cashOps, counterparties: counterparties);
+        vm.Lines[0].ReturnQty = 1;
+
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+        cashOps.Result = CashOpOutcome.Ok();
+        await vm.SubmitReturnCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, counterparties.Lookups);
     }
 
     // ---------------------------------------------------------------------------------
