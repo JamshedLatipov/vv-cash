@@ -154,6 +154,41 @@ public class SyncServiceTest
     }
 
     [Fact]
+    public async Task SyncProductsAsync_VersionsOutOfOrder_StillFetchesEveryOne()
+    {
+        // The version walk compares each entry against a lastVersion that moves as it
+        // goes, so it only ever works on an ascending list. Handed [3,1,2] it processed
+        // 3, wrote lastVersion=3, and then skipped 1 and 2 as "already done" — and,
+        // because that 3 was persisted, skipped them on every later sync too. The
+        // products in those versions never reached the register at all.
+        var fetched = new List<int>();
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[3,1,2],"status":0}""");
+
+            var match = System.Text.RegularExpressions.Regex.Match(url, @"product/update/(\d+)/");
+            if (match.Success)
+            {
+                var version = int.Parse(match.Groups[1].Value);
+                fetched.Add(version);
+                return (HttpStatusCode.OK,
+                    $$"""{"message":"success","body":[{"id":"p{{version}}","name":"Товар","article":"A","barcode":"{{version}}","sell_price":10}],"status":0}""");
+            }
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+        var svc = Build(handler, storage);
+
+        await svc.SyncProductsAsync();
+
+        Assert.Equal(new[] { 1, 2, 3 }, fetched);
+        Assert.Equal(3, storage.LastSyncVersion);
+        Assert.Equal(3, storage.SavedProducts.Count);
+    }
+
+    [Fact]
     public async Task SyncProductsAsync_HttpErrorMidway_StopsWithoutAdvancing()
     {
         // A real failure (HTTP 500) must still stop the loop and keep the

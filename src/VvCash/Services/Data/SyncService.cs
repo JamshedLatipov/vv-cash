@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
@@ -77,7 +78,6 @@ public class SyncService : ISyncService
         catch (Exception ex)
         {
             Console.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
-            Console.WriteLine($"[SyncService] Reinitialization error: {ex.Message}");
         }
     }
 
@@ -106,11 +106,22 @@ public class SyncService : ISyncService
                 {
                     if (root.TryGetProperty("body", out var bodyElement) && bodyElement.ValueKind == JsonValueKind.Array)
                     {
-                        foreach (var versionElem in bodyElement.EnumerateArray())
+                        // Sorted, and not taken in the order the endpoint happened to
+                        // list them. The walk below compares each version against a
+                        // lastVersion that moves as it goes and persists it, so one
+                        // out-of-order entry was permanent data loss: handed [3,1,2] it
+                        // processed 3, wrote lastVersion=3, then skipped 1 and 2 as
+                        // "already done" — on that sync and on every sync afterwards.
+                        // The products in those versions never reached the register.
+                        var versions = bodyElement.EnumerateArray()
+                            .Where(v => v.ValueKind == JsonValueKind.Number)
+                            .Select(v => v.GetInt32())
+                            .OrderBy(v => v)
+                            .ToList();
+
+                        foreach (var version in versions)
                         {
-                            if (versionElem.ValueKind == JsonValueKind.Number)
                             {
-                                int version = versionElem.GetInt32();
                                 if (version > lastVersion)
                                 {
                                     var updatedProducts = new List<Product>();
