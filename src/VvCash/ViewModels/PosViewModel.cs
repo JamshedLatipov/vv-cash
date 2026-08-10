@@ -1989,9 +1989,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     };
 
                     StatusMessage = "Creating expense document...";
-                    var success = await _expenseDocumentService.CreateExpenseDocumentAsync(request);
+                    // Detailed, not the bool overload: a document the server refused on
+                    // its merits will be refused identically on every retry, so "please
+                    // try again" is the one instruction that cannot help. The server's
+                    // own reason is what tells the cashier whether to fix the receipt or
+                    // fetch a manager.
+                    var outcome = await _expenseDocumentService.CreateExpenseDocumentDetailedAsync(request);
 
-                    if (success)
+                    if (outcome.Posted || outcome.Queued)
                     {
                         await _printerService.PrintReceiptAsync(
                             _cartService.Items,
@@ -2020,7 +2025,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     {
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
-                            AlertMessage = "Failed to create expense document on the server. Please try again.";
+                            AlertMessage = string.IsNullOrWhiteSpace(outcome.RejectionReason)
+                                ? "Не удалось создать документ продажи. Повторите попытку."
+                                : $"Сервер отклонил продажу: {outcome.RejectionReason}. "
+                                  + "Повтор не поможет — исправьте чек или обратитесь к администратору.";
                             IsAlertModalVisible = true;
                             StatusMessage = "Payment failed.";
                         });

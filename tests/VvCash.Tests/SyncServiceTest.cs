@@ -99,6 +99,7 @@ public class SyncServiceTest
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult<IEnumerable<KeyValuePair<string, string>>>(Array.Empty<KeyValuePair<string, string>>());
         public Task DeleteUnsyncedDocumentAsync(string hash) => Task.CompletedTask;
+        public Task MarkDocumentRejectedAsync(string hash, string reason) => Task.CompletedTask;
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(LastSyncVersion);
         public Task ClearCategoriesAsync() => Task.CompletedTask;
         public Task ClearProductsAsync() => Task.CompletedTask;

@@ -110,8 +110,16 @@ public class ExpenseDocumentService : IExpenseDocumentService
                 }
             }
 
-            // If we get here, the API returned a non-success status or the status property wasn't 0
-            Console.WriteLine("[ExpenseDocumentService] Saving document offline due to API failure status.");
+            // The server answered. Whether queueing is the right response depends
+            // entirely on WHAT it answered — see IsWorthRetrying.
+            if (IsFinalRefusal(response.StatusCode, responseContent))
+            {
+                Console.WriteLine(
+                    $"[ExpenseDocumentService] Server rejected the document ({(int)response.StatusCode}); not queueing.");
+                return ExpenseDocumentOutcome.Refused(ReadErrorMessage(responseContent));
+            }
+
+            Console.WriteLine("[ExpenseDocumentService] Saving document offline due to a retryable API failure.");
             await SaveOfflineAsync(request);
             return ExpenseDocumentOutcome.Enqueued(); // Still a success so the user can continue checkout locally
         }
@@ -122,6 +130,70 @@ public class ExpenseDocumentService : IExpenseDocumentService
             await SaveOfflineAsync(request);
             return ExpenseDocumentOutcome.Enqueued(); // Queued so checkout can proceed offline
         }
+    }
+
+    /// <summary>Whether the server refused this document on its merits, i.e. whether
+    /// replaying it later is pointless.
+    ///
+    /// Two shapes mean the same thing here. A 4xx is the obvious one. The other is this
+    /// API's own convention: HTTP 200 carrying a non-zero envelope status — a product
+    /// that no longer exists, a shift already closed, a body the serializer rejected.
+    /// Both are the server having understood the request and said no, and replaying
+    /// either produces the identical answer every time. That is precisely what used to
+    /// happen, forever, because the replay loop only ever removes a document on status 0.
+    ///
+    /// Excluded are the 4xx codes that describe the moment rather than the document:
+    /// 401 (the session is dead, but signing in again revives it — the replay loop has
+    /// its own handling for that one), 408 and 429 (the server is asking to be asked
+    /// again). 5xx likewise: the server broke, the document did not.
+    ///
+    /// A 2xx whose envelope this cannot read at all is deliberately NOT a refusal.
+    /// Nothing was established about the document, and between losing a sale and
+    /// retrying one the server may already hold, the retry is the recoverable mistake —
+    /// document_hash is what makes the server treat the replay as the same sale.</summary>
+    private static bool IsFinalRefusal(HttpStatusCode status, string responseContent)
+    {
+        if (status is HttpStatusCode.Unauthorized
+            or HttpStatusCode.RequestTimeout
+            or HttpStatusCode.TooManyRequests) return false;
+
+        if ((int)status >= 400 && (int)status < 500) return true;
+        if ((int)status >= 500) return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(responseContent);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("status", out var envelope)
+                   && envelope.ValueKind == JsonValueKind.Number
+                   && envelope.GetInt32() != 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The server's own explanation, for the rejected-document record. Falls
+    /// back to the raw body: an unrecognised envelope is still worth keeping verbatim,
+    /// since it is all the back office will have to go on.</summary>
+    private static string ReadErrorMessage(string responseContent)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(responseContent);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("message", out var message)
+                && message.ValueKind == JsonValueKind.String)
+            {
+                return message.GetString() ?? string.Empty;
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON at all (an HTML error page, a proxy banner). Keep it as-is.
+        }
+        return responseContent;
     }
 
     /// <summary>Digs the sale's number out of the success envelope
@@ -176,9 +248,10 @@ public class ExpenseDocumentService : IExpenseDocumentService
                             break;
                         }
 
+                        var responseContent = await response.Content.ReadAsStringAsync();
+
                         if (response.IsSuccessStatusCode)
                         {
-                            var responseContent = await response.Content.ReadAsStringAsync();
                             using var jsonDoc = JsonDocument.Parse(responseContent);
                             var root = jsonDoc.RootElement;
                             if (root.TryGetProperty("status", out var statusElement) && statusElement.GetInt32() == 0)
@@ -186,7 +259,22 @@ public class ExpenseDocumentService : IExpenseDocumentService
                                 await _offlineStorageService.DeleteUnsyncedDocumentAsync(doc.Key);
                                 anySuccess = true;
                                 Console.WriteLine($"[ExpenseDocumentService] Successfully synced document {doc.Key}");
+                                continue;
                             }
+                        }
+
+                        // Not a 401 (handled above) and not a success: if replaying it
+                        // cannot ever work, take it out of the rotation rather than
+                        // carrying it to the end of time. Unlike the 401 branch this
+                        // does NOT stop the loop — a document the server refuses says
+                        // nothing about the ones queued behind it.
+                        if (IsFinalRefusal(response.StatusCode, responseContent))
+                        {
+                            var reason = ReadErrorMessage(responseContent);
+                            Console.WriteLine(
+                                $"[ExpenseDocumentService] Server rejected queued document {doc.Key} ({(int)response.StatusCode}): {reason}. Taking it out of the retry rotation.");
+                            await _offlineStorageService.MarkDocumentRejectedAsync(doc.Key, reason);
+                            anySuccess = true; // the queue did shrink; the badge must follow
                         }
                     }
                 }

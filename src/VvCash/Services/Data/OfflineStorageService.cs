@@ -43,9 +43,15 @@ public class OfflineStorageService : IOfflineStorageService
                 Value TEXT
             );
 
+            -- RejectedAt/RejectedReason are NULL for a document still waiting its turn.
+            -- A non-null RejectedAt means the server answered, on the merits, that it
+            -- will not take this document: it leaves the retry rotation but stays on
+            -- disk, because it is still the only record of what the register booked.
             CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
                 Hash TEXT PRIMARY KEY,
-                Payload TEXT
+                Payload TEXT,
+                RejectedAt TEXT,
+                RejectedReason TEXT
             );
 
             CREATE TABLE IF NOT EXISTS Categories (
@@ -140,6 +146,23 @@ public class OfflineStorageService : IOfflineStorageService
             await command.ExecuteNonQueryAsync();
         }
         catch { /* column already exists */ }
+
+        // Migration: the rejected-document columns. A register upgrading with documents
+        // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
+        // which is exactly what they are.
+        foreach (var alter in new[]
+        {
+            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedAt TEXT;",
+            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedReason TEXT;",
+        })
+        {
+            try
+            {
+                command.CommandText = alter;
+                await command.ExecuteNonQueryAsync();
+            }
+            catch { /* column already exists */ }
+        }
 
         // Migration: add the secondary-unit columns to Products if upgrading
         // from an older DB. One ALTER per column, because a register may be
@@ -576,7 +599,10 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Hash, Payload FROM UnsyncedDocuments";
+        // Rejected rows are deliberately excluded: they are what the register tried to
+        // book, kept for the back office, not work still to be done. Counting them would
+        // leave the unsynced badge permanently lit over a queue nothing can drain.
+        command.CommandText = "SELECT Hash, Payload FROM UnsyncedDocuments WHERE RejectedAt IS NULL";
 
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -587,6 +613,24 @@ public class OfflineStorageService : IOfflineStorageService
         }
 
         return docs;
+    }
+
+    public async Task MarkDocumentRejectedAsync(string hash, string reason)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE UnsyncedDocuments
+            SET RejectedAt = $RejectedAt, RejectedReason = $Reason
+            WHERE Hash = $Hash;
+        ";
+        command.Parameters.AddWithValue("$Hash", hash);
+        command.Parameters.AddWithValue("$RejectedAt", DateTime.UtcNow.ToString("o"));
+        command.Parameters.AddWithValue("$Reason", reason ?? string.Empty);
+
+        await command.ExecuteNonQueryAsync();
     }
 
     public async Task DeleteUnsyncedDocumentAsync(string hash)
