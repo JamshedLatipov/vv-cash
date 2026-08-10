@@ -188,6 +188,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     // Shift-close confirmation (when parked sales exist)
     [ObservableProperty] private bool _isShiftCloseConfirmVisible = false;
 
+    // Exit menu: close the shift and leave / hand over to the next cashier / shut down
+    [ObservableProperty] private bool _isExitMenuVisible = false;
+
+    /// <summary>Set while a shift close started from the exit menu is in flight, so
+    /// DoCloseShiftAsync knows to shut the app down once it succeeds. Owned by
+    /// <see cref="BeginCloseShiftAsync"/> — see there for why it can't leak between requests.</summary>
+    private bool _exitAfterShiftClose = false;
+
     [ObservableProperty] private string _couponCode = string.Empty;
     [ObservableProperty] private ObservableCollection<Coupon> _appliedCoupons = new();
     [ObservableProperty] private decimal _subtotal;
@@ -449,9 +457,25 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>The header's own close-shift button. Always a plain close: whatever the exit
+    /// menu may have asked for earlier is reset by <see cref="BeginCloseShiftAsync"/>, so an
+    /// abandoned exit can never make this button close the app as a side effect.</summary>
     [RelayCommand]
-    private async Task CloseShift()
+    private Task CloseShift() => BeginCloseShiftAsync(exitAfterClose: false);
+
+    /// <summary>Shared entry point for every way of closing the shift, carrying what should
+    /// happen once it succeeds. The flag is written on every entry rather than only when set,
+    /// which is what keeps it from leaking across requests — see <see cref="CloseShift"/>.
+    ///
+    /// It deliberately survives the two ways this call can suspend mid-flight (the supervisor
+    /// approval overlay and the parked-sales confirm), because both resume *this* request:
+    /// <see cref="OnCloseShiftApproved"/> and <see cref="ConfirmCloseShift"/> continue with it
+    /// untouched, while <see cref="CancelCloseShift"/> — the one path that abandons the
+    /// request outright — clears it.</summary>
+    private async Task BeginCloseShiftAsync(bool exitAfterClose)
     {
+        _exitAfterShiftClose = exitAfterClose;
+
         if (string.IsNullOrEmpty(CurrentShiftId)) return;
 
         // Closing a shift requires CanCloseShift. Nobody having confirmed at all
@@ -511,6 +535,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private void CancelCloseShift()
     {
         IsShiftCloseConfirmVisible = false;
+
+        // The one path that abandons the request rather than resuming it, so the pending
+        // "and then exit" intent dies with it — see BeginCloseShiftAsync.
+        _exitAfterShiftClose = false;
     }
 
     private async Task DoCloseShiftAsync()
@@ -543,7 +571,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             // directly) would let the two drift apart.
             _sellerSession.Clear();
             _authService.ClearSession();
+
+            // Only when the close was started from the exit menu's "close the shift and
+            // leave" branch (see ExitWithShiftClose). A close from the header button leaves
+            // the register running on the start-shift modal exactly as before.
+            if (_exitAfterShiftClose) CloseApplication();
         }
+
+        // Cleared on both branches: on success the exit above already happened, and on
+        // failure the shift is still open, so a later close must not inherit this intent.
+        _exitAfterShiftClose = false;
     }
 
     [RelayCommand]
@@ -554,10 +591,66 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     private void CloseApplication()
     {
+        // Set before the Close() call, not after: MainWindow's own Closing hook reads this to
+        // tell a decided exit from the cashier hitting the window's X (or Alt+F4), and the
+        // hook runs synchronously inside Close().
+        IsExitConfirmed = true;
+
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow?.Close();
         }
+    }
+
+    /// <summary>True once one of the exit menu's branches has decided the app really is going
+    /// away, so <c>MainWindow.OnClosing</c> stops intercepting and lets the window close. Kept
+    /// as plain state rather than an event because that hook needs to answer synchronously
+    /// while it decides whether to cancel the close.</summary>
+    public bool IsExitConfirmed { get; private set; }
+
+    /// <summary>What the register's power button now does: ask what "exit" means to the
+    /// cashier — end the shift, hand the register to someone else, or shut the app down —
+    /// instead of closing the window outright and silently leaving the shift open.
+    ///
+    /// Also what MainWindow's Closing hook opens, so closing the window by its X asks the same
+    /// question. Note this is *not* what the start-shift modal's own "exit application" button
+    /// does: that one still runs <see cref="CloseApplicationCommand"/> directly, since it is
+    /// already a screen of explicit choices and no shift can be open behind it.</summary>
+    [RelayCommand]
+    private void OpenExitMenu() => IsExitMenuVisible = true;
+
+    [RelayCommand]
+    private void CancelExit() => IsExitMenuVisible = false;
+
+    /// <summary>"Close the shift and leave." Goes through the ordinary close path, so the
+    /// CanCloseShift gate and the parked-sales confirm both still apply — the app is closed by
+    /// DoCloseShiftAsync only once the close actually succeeds, and a refused approval or a
+    /// failed request leaves the register running with its shift intact.</summary>
+    [RelayCommand]
+    private async Task ExitWithShiftClose()
+    {
+        IsExitMenuVisible = false;
+        await BeginCloseShiftAsync(exitAfterClose: true);
+    }
+
+    /// <summary>"Hand the register over." Same sign-out as the shift modal's escape hatch: the
+    /// shift stays open, only the session ends, and the next cashier logs in on top of it.</summary>
+    [RelayCommand]
+    private void ExitToLogin()
+    {
+        IsExitMenuVisible = false;
+        PerformSignOut(string.Empty);
+    }
+
+    /// <summary>"Just close the program." Allowed with a shift still open — the menu says so in
+    /// as many words (ExitShiftStaysOpen) — because the shift lives on the server and whoever
+    /// opens the register next resumes it; refusing to close would only strand a cashier whose
+    /// shift genuinely has to outlive this session.</summary>
+    [RelayCommand]
+    private void ExitApplication()
+    {
+        IsExitMenuVisible = false;
+        CloseApplication();
     }
 
     /// <summary>The shift modal's manual escape hatch (see PosView.axaml's Start Shift Modal

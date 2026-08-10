@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,21 +14,41 @@ public sealed class UpdateService : IUpdateService
     /// <summary>Published next to the installer and uploaded by the same hand. Not a
     /// setting: every register talks to the cloud, and a per-register update URL would
     /// be one more thing to get wrong on site.</summary>
-    private const string ManifestUrl = "https://proffi.io/downloads/kassa-latest.json";
+    private const string X64ManifestUrl = "https://proffi.io/downloads/kassa-latest.json";
+
+    /// <summary>The 32-bit flavor, for the registers left on Windows 7.
+    ///
+    /// A separate file rather than another field in the shared manifest, because the two
+    /// ways of getting it wrong are not comparable. A field this build failed to find
+    /// reads as "no update available": the register quietly stays on an old build until
+    /// somebody notices. A field misread as the other flavor hands a 32-bit register a
+    /// 64-bit installer, which Inno refuses on arrival — or worse, installs binaries the
+    /// machine cannot execute over the ones it currently runs. Splitting the file makes
+    /// the wrong flavor unreachable rather than merely unlikely, and leaves the x64
+    /// manifest byte for byte the one the fleet already polls.</summary>
+    private const string X86ManifestUrl = "https://proffi.io/downloads/kassa-latest-x86.json";
 
     private const string ProductId = "vvcash";
 
-    /// <summary>Derived from <see cref="ManifestUrl"/> rather than hardcoded, so a move
-    /// of the manifest to a CDN only requires changing that one constant. The download
-    /// host must match this: against an attacker who can rewrite the whole manifest
-    /// this changes little, but it narrows the blast radius when write access to the
-    /// manifest is broader than publish access to the download directory (a CI job, a
-    /// CMS, a webhook that only that one file is exposed through).</summary>
-    private static readonly string ManifestHost = new Uri(ManifestUrl).Host;
+    /// <summary>Keyed off the running process rather than the operating system. A 32-bit
+    /// build on 64-bit Windows runs perfectly well under WOW64, and it still has to be
+    /// offered the 32-bit installer — the one that matches the files already on disk,
+    /// not the one the hardware could in principle have run.</summary>
+    public static string DefaultManifestUrl
+        => RuntimeInformation.ProcessArchitecture == Architecture.X86 ? X86ManifestUrl : X64ManifestUrl;
 
     private readonly HttpClient _httpClient;
     private readonly IAppVersionProvider _versionProvider;
     private readonly string _downloadDirectory;
+    private readonly string _manifestUrl;
+
+    /// <summary>Derived from the manifest URL rather than hardcoded, so a move of the
+    /// manifest to a CDN only requires changing that one constant. The download host
+    /// must match this: against an attacker who can rewrite the whole manifest this
+    /// changes little, but it narrows the blast radius when write access to the
+    /// manifest is broader than publish access to the download directory (a CI job, a
+    /// CMS, a webhook that only that one file is exposed through).</summary>
+    private readonly string _manifestHost;
 
     /// <summary>Serialises the whole body of <see cref="DownloadAsync"/>. Every call
     /// starts by wiping <see cref="_downloadDirectory"/>: without this, two overlapping
@@ -40,12 +61,15 @@ public sealed class UpdateService : IUpdateService
     public UpdateService(
         HttpClient httpClient,
         IAppVersionProvider versionProvider,
-        string? downloadDirectory = null)
+        string? downloadDirectory = null,
+        string? manifestUrl = null)
     {
         _httpClient = httpClient;
         _versionProvider = versionProvider;
         _downloadDirectory = downloadDirectory
             ?? Path.Combine(Path.GetTempPath(), "VvCash", "updates");
+        _manifestUrl = manifestUrl ?? DefaultManifestUrl;
+        _manifestHost = new Uri(_manifestUrl).Host;
     }
 
     public async Task<UpdateInfo?> CheckAsync(CancellationToken ct)
@@ -55,7 +79,7 @@ public sealed class UpdateService : IUpdateService
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
 
-            using var response = await _httpClient.GetAsync(ManifestUrl, timeout.Token);
+            using var response = await _httpClient.GetAsync(_manifestUrl, timeout.Token);
             if (!response.IsSuccessStatusCode) return null;
 
             // proffi.io serves a single-page app: a path it does not know answers 200
@@ -78,7 +102,7 @@ public sealed class UpdateService : IUpdateService
         }
     }
 
-    private static UpdateInfo? Parse(string json)
+    private UpdateInfo? Parse(string json)
     {
         try
         {
@@ -94,7 +118,7 @@ public sealed class UpdateService : IUpdateService
             if (!TryGetString(root, "url", out var url)) return null;
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
             if (uri.Scheme != Uri.UriSchemeHttps) return null;
-            if (!string.Equals(uri.Host, ManifestHost, StringComparison.OrdinalIgnoreCase)) return null;
+            if (!string.Equals(uri.Host, _manifestHost, StringComparison.OrdinalIgnoreCase)) return null;
 
             if (!TryGetString(root, "sha256", out var sha256)) return null;
             if (sha256.Length != 64 || !sha256.All(Uri.IsHexDigit)) return null;
