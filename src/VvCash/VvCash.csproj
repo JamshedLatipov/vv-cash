@@ -11,6 +11,13 @@
          and passes it to ISCC, and IAppVersionProvider reads it back off the built
          assembly at run time. Bump this line to cut a release. -->
     <Version>1.0.4</Version>
+    <!-- Audit transitive packages too, and fail the build rather than warn: the
+         e_sqlite3 advisory below sat in the log as a warning through several
+         releases because nothing was watching for NU19xx. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.2.3" />
@@ -26,6 +33,12 @@
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
     <!-- Security override: transitive Tmds.DBus.Protocol 0.20.0 (via Avalonia.FreeDesktop) has GHSA-xrw6-gwf8-vvr9. Pin to patched 0.21.3. Linux D-Bus path only; no Windows impact. -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+    <!-- Security override: transitive SQLitePCLRaw 2.1.11 (via Microsoft.Data.Sqlite 10.0.5)
+         carries GHSA-2m69-gcr7-jv3q in the native e_sqlite3 build. Pin the bundle to 2.1.12,
+         which brings lib/core/provider along with it. Stays on 2.1.x rather than 3.x:
+         Microsoft.Data.Sqlite.Core 10.0.5 resolves against that line, and this is the
+         register's own product database — not somewhere to take an untested major bump. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
