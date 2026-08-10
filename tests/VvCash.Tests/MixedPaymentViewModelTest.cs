@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using VvCash.ViewModels;
 using Xunit;
 
@@ -78,5 +79,74 @@ public class MixedPaymentViewModelTest
         Assert.Equal(621.88m, vm.CashAmount);
         Assert.True(vm.IsFullyPaid);
         Assert.True(vm.ConfirmPaymentCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void ConfirmPayment_CalledTwiceInARow_OnlyCompletesOnce()
+    {
+        // Nothing on this screen disables the confirm button while the first
+        // tap's completion callback is still running (it books a document and
+        // prints a receipt) — a second tap before that finishes must not book
+        // a second document for the same receipt.
+        var completions = 0;
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; });
+        vm.CashAmount = 100m;
+
+        vm.ConfirmPaymentCommand.Execute(null);
+        vm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Equal(1, completions);
+    }
+
+    [Fact]
+    public void ConfirmPayment_AfterConfirming_CommandCanNoLongerExecute()
+    {
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { });
+        vm.CashAmount = 100m;
+
+        vm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.False(vm.ConfirmPaymentCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void NoCustomerSelected_SellOnCreditIsNotAllowed()
+    {
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { }, hasCustomer: false);
+        vm.CashAmount = 40m;
+
+        Assert.False(vm.SellOnCreditCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void CustomerSelected_SellOnCreditConfirmsAPartialPayment()
+    {
+        // The remainder becomes the customer's debt — PosViewModel computes it
+        // from TotalAmount minus what SellOnCredit hands back here, same as a
+        // normal ConfirmPayment.
+        var completions = new List<(bool result, decimal cash, decimal card)>();
+        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => completions.Add((result, cash, card)), hasCustomer: true);
+        vm.CashAmount = 40m;
+
+        Assert.False(vm.IsFullyPaid);
+        Assert.True(vm.SellOnCreditCommand.CanExecute(null));
+
+        vm.SellOnCreditCommand.Execute(null);
+
+        Assert.Single(completions);
+        Assert.Equal((true, 40m, 0m), completions[0]);
+    }
+
+    [Fact]
+    public void SellOnCredit_CalledTwiceInARow_OnlyCompletesOnce()
+    {
+        var completions = 0;
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; }, hasCustomer: true);
+        vm.CashAmount = 40m;
+
+        vm.SellOnCreditCommand.Execute(null);
+        vm.SellOnCreditCommand.Execute(null);
+
+        Assert.Equal(1, completions);
     }
 }

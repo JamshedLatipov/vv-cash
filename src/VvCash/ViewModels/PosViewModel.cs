@@ -1947,6 +1947,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                     {
                         DocumentHash = Guid.NewGuid().ToString(),
                         SellerId = _sellerSession.Current?.Id,
+                        Counterparty = SelectedCustomer?.Id,
                         ApprovedBy = _approvedById,
                         ShiftId = CurrentShiftId,
                         QuoteId = _cartService.QuoteId,
@@ -2027,7 +2028,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
                 // Return to POS View
                 NavigationRequest(this);
-            }, IsMixedPaymentEnabled);
+            }, IsMixedPaymentEnabled, hasCustomer: SelectedCustomer != null);
 
             NavigationRequest(mixedPaymentVm);
         }

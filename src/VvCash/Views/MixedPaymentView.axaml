@@ -299,20 +299,31 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- confirm -->
-                    <Button Grid.Row="7" Classes="PrimaryButton" Height="60" CornerRadius="16" HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch" Padding="22,0"
-                            Command="{Binding ConfirmPaymentCommand}">
-                        <Grid ColumnDefinitions="Auto, *, Auto" VerticalAlignment="Center">
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
-                                <material:MaterialIcon Kind="CheckCircle" Width="24" Height="24" VerticalAlignment="Center"/>
-                                <TextBlock Text="{Binding [Подтвердитьоплату], Source={x:Static services:I18nService.Instance}}" FontSize="17" FontWeight="ExtraBold" VerticalAlignment="Center"/>
+                    <!-- confirm / sell on credit -->
+                    <StackPanel Grid.Row="7" Spacing="10">
+                        <Button Classes="SecondaryButton" Height="52" CornerRadius="16" HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center" Padding="22,0"
+                                IsVisible="{Binding HasCustomer}"
+                                Command="{Binding SellOnCreditCommand}">
+                            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                                <material:MaterialIcon Kind="AccountClock" Width="20" Height="20" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding [Продатьвдолг], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center"/>
                             </StackPanel>
-                            <Border Grid.Column="2" Classes="KeyHintDark" VerticalAlignment="Center">
-                                <TextBlock Text="Enter"/>
-                            </Border>
-                        </Grid>
-                    </Button>
+                        </Button>
+                        <Button Classes="PrimaryButton" Height="60" CornerRadius="16" HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch" Padding="22,0"
+                                Command="{Binding ConfirmPaymentCommand}">
+                            <Grid ColumnDefinitions="Auto, *, Auto" VerticalAlignment="Center">
+                                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
+                                    <material:MaterialIcon Kind="CheckCircle" Width="24" Height="24" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding [Подтвердитьоплату], Source={x:Static services:I18nService.Instance}}" FontSize="17" FontWeight="ExtraBold" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Border Grid.Column="2" Classes="KeyHintDark" VerticalAlignment="Center">
+                                    <TextBlock Text="Enter"/>
+                                </Border>
+                            </Grid>
+                        </Button>
+                    </StackPanel>
                 </Grid>
             </Border>
         </Grid>
