@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Net;
@@ -97,8 +97,6 @@ public class ExpenseDocumentService : IExpenseDocumentService
             Debug.WriteLine($"[ExpenseDocumentService] Response status: {response.StatusCode}");
 
             var responseContent = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"[ExpenseDocumentService] Response content: {responseContent}");
-            Debug.WriteLine($"[ExpenseDocumentService] Response content: {responseContent}");
 
             if (response.IsSuccessStatusCode)
             {
@@ -111,7 +109,7 @@ public class ExpenseDocumentService : IExpenseDocumentService
             }
 
             // The server answered. Whether queueing is the right response depends
-            // entirely on WHAT it answered — see IsWorthRetrying.
+            // entirely on WHAT it answered — see IsFinalRefusal.
             if (IsFinalRefusal(response.StatusCode, responseContent))
             {
                 Console.WriteLine(

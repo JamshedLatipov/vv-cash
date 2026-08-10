@@ -42,8 +42,13 @@ public class AuthService : IAuthService
             var request = new { email, password };
             var loginUrl = $"{baseUrl}authorization/login/";
 
+            // Neither the credentials going out nor the body coming back is logged: the
+            // request carries the cashier's password and the response carries the bearer
+            // token this register authenticates every later call with. A POS terminal's
+            // console output is not a private place — it is redirected to a file on some
+            // installs and read over the shoulder on all of them. The status code is
+            // enough to diagnose a failed login.
             Console.WriteLine($"[AuthService] Sending POST request to: {loginUrl}");
-            Console.WriteLine($"[AuthService] Request payload: Email='{email}', Password length={password.Length}");
             Debug.WriteLine($"[AuthService] Sending POST request to: {loginUrl}");
 
             var response = await _httpClient.PostAsJsonAsync(loginUrl, request);
@@ -52,8 +57,6 @@ public class AuthService : IAuthService
             Debug.WriteLine($"[AuthService] Received response. StatusCode: {response.StatusCode} ({(int)response.StatusCode})");
 
             var responseContent = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"[AuthService] Response Body: {responseContent}");
-            Debug.WriteLine($"[AuthService] Response Body: {responseContent}");
 
             if (response.IsSuccessStatusCode)
             {
@@ -63,32 +66,45 @@ public class AuthService : IAuthService
                 // Assuming status 200 means success according to swagger schema
                 if (root.TryGetProperty("status", out var statusElement))
                 {
-                    Console.WriteLine($"[AuthService] Found 'status' property in response: {statusElement.GetInt32()}");
+                    Console.WriteLine($"[AuthService] Envelope status: {statusElement.GetInt32()}");
                     if (statusElement.GetInt32() == 0)
                     {
+                        // The token is what makes this a login. A success envelope that
+                        // carries none is malformed, and reporting it as signed in put
+                        // the register on the POS screen with an empty AuthToken: every
+                        // later call went out with no Authorization header and came back
+                        // 401, which reads as "the server keeps revoking my session"
+                        // rather than as the failed login it actually is.
+                        var token = root.TryGetProperty("access_token", out var authTokenElement)
+                            ? authTokenElement.GetString()
+                            : null;
+
+                        if (string.IsNullOrWhiteSpace(token))
+                        {
+                            Console.WriteLine("[AuthService] Login rejected: success envelope carried no access_token.");
+                            return false;
+                        }
+
                         Console.WriteLine("[AuthService] Login successful.");
 
-                        if (root.TryGetProperty("access_token", out var authTokenElement))
-                        {
-                            _settingsService.AuthToken = authTokenElement.GetString() ?? string.Empty;
+                        _settingsService.AuthToken = token;
 
-                            // The token's real lifetime is the shift now, not a fixed
-                            // duration: PosViewModel wipes it on a successful shift close
-                            // (see DoCloseShiftAsync), so nothing here needs to expire it
-                            // mid-shift. AuthTokenExpiresAt exists purely to answer one
-                            // question the next time the app launches — should the register
-                            // skip the login screen and resume straight in? — which is
-                            // exactly what "remember me" means. rememberMe == false stamps
-                            // null so that check always fails and a fresh login is required;
-                            // rememberMe == true stamps MaxShiftHours out as a backstop
-                            // against a register whose shift never actually gets closed
-                            // (crash, power loss, forgotten till) staying auto-authenticated
-                            // forever — not an expiry a cashier should ever actually hit.
-                            _settingsService.AuthTokenExpiresAt = rememberMe
-                                ? DateTime.UtcNow.AddHours(Constants.AuthConstants.MaxShiftHours)
-                                : null;
-                            _settingsService.Save();
-                        }
+                        // The token's real lifetime is the shift now, not a fixed
+                        // duration: PosViewModel wipes it on a successful shift close
+                        // (see DoCloseShiftAsync), so nothing here needs to expire it
+                        // mid-shift. AuthTokenExpiresAt exists purely to answer one
+                        // question the next time the app launches — should the register
+                        // skip the login screen and resume straight in? — which is
+                        // exactly what "remember me" means. rememberMe == false stamps
+                        // null so that check always fails and a fresh login is required;
+                        // rememberMe == true stamps MaxShiftHours out as a backstop
+                        // against a register whose shift never actually gets closed
+                        // (crash, power loss, forgotten till) staying auto-authenticated
+                        // forever — not an expiry a cashier should ever actually hit.
+                        _settingsService.AuthTokenExpiresAt = rememberMe
+                            ? DateTime.UtcNow.AddHours(Constants.AuthConstants.MaxShiftHours)
+                            : null;
+                        _settingsService.Save();
 
                         return true;
                     }

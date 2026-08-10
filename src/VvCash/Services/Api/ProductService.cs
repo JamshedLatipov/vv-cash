@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -85,8 +85,6 @@ public class ProductService : IProductService
             if (response.IsSuccessStatusCode)
             {
                 var content = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"[ProductService] Response content: {content}");
-                Debug.WriteLine($"[ProductService] Response content: {content}");
 
                 using var jsonDoc = JsonDocument.Parse(content);
                 var root = jsonDoc.RootElement;

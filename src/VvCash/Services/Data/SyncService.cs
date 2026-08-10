@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
@@ -96,7 +96,6 @@ public class SyncService : ISyncService
             var versionsResponse = await _httpClient.GetAsync(versionsUrl);
             var versionsContent = await versionsResponse.Content.ReadAsStringAsync();
             Console.WriteLine($"[SyncService] GET {versionsUrl} -> {(int)versionsResponse.StatusCode} {versionsResponse.StatusCode}");
-            Console.WriteLine($"[SyncService] versions body: {versionsContent}");
 
             if (versionsResponse.IsSuccessStatusCode)
             {
@@ -120,7 +119,6 @@ public class SyncService : ISyncService
                                     var updateResponse = await _httpClient.GetAsync(updateUrl);
                                     var updateContent = await updateResponse.Content.ReadAsStringAsync();
                                     Console.WriteLine($"[SyncService] GET {updateUrl} -> {(int)updateResponse.StatusCode} {updateResponse.StatusCode}");
-                                    Console.WriteLine($"[SyncService] update/{version} body: {updateContent}");
 
                                     if (updateResponse.IsSuccessStatusCode)
                                     {
@@ -146,7 +144,6 @@ public class SyncService : ISyncService
                                                 {
                                                     try
                                                     {
-                                                        Console.WriteLine($"[SyncService] RAW item: {item.GetRawText()}");
                                                         string productId = Guid.NewGuid().ToString();
                                                         string productName = string.Empty;
                                                         string productSku = string.Empty;
@@ -241,7 +238,6 @@ public class SyncService : ISyncService
                                                             (sellInUnitElem.ValueKind == JsonValueKind.True || sellInUnitElem.ValueKind == JsonValueKind.False))
                                                             sellInSecondaryUnit = sellInUnitElem.GetBoolean();
 
-                                                        Console.WriteLine($"[SyncService] Product '{productName}' imagePath='{imagePath}' category='{productCategory}'");
                                                         updatedProducts.Add(new Product
                                                         {
                                                             Id = productId,
