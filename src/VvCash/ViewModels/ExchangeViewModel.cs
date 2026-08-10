@@ -181,6 +181,20 @@ public partial class ExchangeViewModel : ViewModelBase
     /// shown without a minus sign, since the label already carries the direction.</summary>
     public decimal RefundDue => TillPays ? -Difference : 0m;
 
+    /// <summary>How the customer settles the replacement sale. The three-document shape
+    /// means step 2 hands the whole returned total out of the till and step 3 takes the
+    /// replacement's full price back, so the drawer nets to the difference — but only if
+    /// the sale records which way that money actually moved. It was hardcoded to cash,
+    /// so a difference settled on a card terminal left the books saying the drawer took
+    /// money it never saw, and the shift did not reconcile.</summary>
+    [ObservableProperty]
+    private bool _payByCard;
+
+    /// <summary>Whether the card option applies at all. Only when the customer owes
+    /// something: if the till is the one paying out, the money leaves through the cash
+    /// payout of step 2 and there is nothing to put on a terminal.</summary>
+    public bool CanPayByCard => CustomerPays;
+
     public bool CanSubmit => IsOnline && !IsSubmitting
         && ReturnedLines.Any(l => l.ReturnQty > 0)
         && IssuedLines.Any(l => l.Quantity > 0);
@@ -585,6 +599,7 @@ public partial class ExchangeViewModel : ViewModelBase
         OnPropertyChanged(nameof(Difference));
         OnPropertyChanged(nameof(CustomerPays));
         OnPropertyChanged(nameof(TillPays));
+        OnPropertyChanged(nameof(CanPayByCard));
         OnPropertyChanged(nameof(RefundDue));
         OnPropertyChanged(nameof(CanSubmit));
     }
@@ -729,11 +744,15 @@ public partial class ExchangeViewModel : ViewModelBase
             // with no quote there was no discount to declare, which is precisely why an
             // exchange charged the full catalog price for goods a running promotion had
             // sold at half of it.
+            // Whole replacement price into one slot or the other — never split, since
+            // the cashier states one method for the difference and the rest of this
+            // total is the returned money going straight back out through step 2's
+            // payout. PayByCard only reaches here when CanPayByCard allowed it.
             Payment = new Payment
             {
                 ToPay = IssuedTotal,
-                PaidInCash = IssuedTotal,
-                PaidByCreditCard = 0m,
+                PaidInCash = PayByCard && CanPayByCard ? 0m : IssuedTotal,
+                PaidByCreditCard = PayByCard && CanPayByCard ? IssuedTotal : 0m,
                 DiscountType = "cash",
                 Discount = IssuedDiscount,
                 Remained = 0m,

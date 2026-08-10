@@ -1,4 +1,4 @@
-{
+﻿{
   "LuxeThreadsPOS": "Proffi POS",
   "WelcomebackPleaseent": "Қош келдіңіз! Жалғастыру үшін мәліметтеріңізді енгізіңіз.",
   "SignIn": "Кіру",
@@ -208,6 +208,7 @@
   "ExchangeIssuedLabel": "Беру:",
   "ExchangeCustomerPaysLabel": "Қосымша төлем:",
   "ExchangeRefundDueLabel": "Қайтарылатын сома:",
+  "ExchangePayByCard": "Айырманы картамен төлеу",
   "ExchangeOfflineWarning": "Айырбас серверге қосылуды талап етеді",
   "ExchangePayoutCategoryWarning": "Кассадан ақша беру үшін шығыс бабы таңдалмаған — айырбас қолжетімсіз",
   "ExchangePayoutCategory": "Кассадан ақша беру шығыс бабы (айырбас)",

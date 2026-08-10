@@ -1,4 +1,4 @@
-{
+﻿{
   "LuxeThreadsPOS": "Proffi POS",
   "WelcomebackPleaseent": "Хуш омадед! Лутфан маълумоти худро ворид кунед.",
   "SignIn": "Вуруд",
@@ -208,6 +208,7 @@
   "ExchangeIssuedLabel": "Баровардан:",
   "ExchangeCustomerPaysLabel": "Иловапулӣ:",
   "ExchangeRefundDueLabel": "Бозгашти пул:",
+  "ExchangePayByCard": "Пардохти фарқият бо корт",
   "ExchangeOfflineWarning": "Иваз пайвастшавӣ ба сервер лозим аст",
   "ExchangePayoutCategoryWarning": "Моддаи хароҷот барои додани пул аз касса интихоб нашудааст — иваз дастрас нест",
   "ExchangePayoutCategory": "Моддаи хароҷот барои додани пул аз касса (иваз)",

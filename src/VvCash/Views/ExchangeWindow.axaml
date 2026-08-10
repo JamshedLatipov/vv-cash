@@ -301,6 +301,13 @@
                 <TextBlock Text="{Binding [ExchangeRefundDueLabel], Source={x:Static services:I18nService.Instance}}" FontSize="13" Foreground="{StaticResource Slate600Brush}" VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding RefundDue, StringFormat='{}{0:N2}'}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource PrimaryBrush}"/>
               </StackPanel>
+              <!-- Only when the customer owes something: if the till is the one paying
+                   out, that money leaves through the cash payout and there is nothing to
+                   put on a terminal. Which slot the replacement sale is booked against
+                   is what makes the shift reconcile against the card terminal. -->
+              <CheckBox IsChecked="{Binding PayByCard}" IsVisible="{Binding CanPayByCard}" FontSize="13">
+                <TextBlock Text="{Binding [ExchangePayByCard], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
+              </CheckBox>
             </StackPanel>
           </StackPanel>
           <Button Grid.Column="1" Classes="PrimaryButton" Command="{Binding SubmitExchangeCommand}" IsEnabled="{Binding CanSubmit}" MinWidth="180" HorizontalContentAlignment="Center">

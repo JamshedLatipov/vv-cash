@@ -1,4 +1,4 @@
-{
+﻿{
   "LuxeThreadsPOS": "Proffi POS",
   "WelcomebackPleaseent": "Welcome back! Please enter your credentials to continue.",
   "SignIn": "Sign In",
@@ -208,6 +208,7 @@
   "ExchangeIssuedLabel": "Issued:",
   "ExchangeCustomerPaysLabel": "Customer pays:",
   "ExchangeRefundDueLabel": "Refund due:",
+  "ExchangePayByCard": "Difference paid by card",
   "ExchangeOfflineWarning": "Exchange requires a server connection",
   "ExchangePayoutCategoryWarning": "No payout expense category is configured — exchange is unavailable",
   "ExchangePayoutCategory": "Cash payout expense category (exchange)",
