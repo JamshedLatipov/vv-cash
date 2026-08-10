@@ -345,6 +345,7 @@ public class PosViewModelSellerGateTest
         public bool ReturnOpenCashDrawer { get; set; }
         public bool ReturnPrintReceipt { get; set; }
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+        public string ReturnPayoutCategoryId { get; set; } = string.Empty;
         public string PhoneFormatId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged;
         public void Save() { }

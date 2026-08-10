@@ -18,6 +18,7 @@ public class SettingsData
     public bool ReturnOpenCashDrawer { get; set; } = true;
     public bool ReturnPrintReceipt { get; set; } = true;
     public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+    public string ReturnPayoutCategoryId { get; set; } = string.Empty;
     public string PhoneFormatId { get; set; } = string.Empty;
 }
 
@@ -88,6 +89,12 @@ public class SettingsService : ISettingsService
         set => _data.ExchangePayoutCategoryId = value ?? string.Empty;
     }
 
+    public string ReturnPayoutCategoryId
+    {
+        get => _data.ReturnPayoutCategoryId;
+        set => _data.ReturnPayoutCategoryId = value ?? string.Empty;
+    }
+
     public string PhoneFormatId
     {
         get => _data.PhoneFormatId;
@@ -127,6 +134,10 @@ public class SettingsService : ISettingsService
                 if (_data.ExchangePayoutCategoryId == null)
                 {
                     _data.ExchangePayoutCategoryId = string.Empty;
+                }
+                if (_data.ReturnPayoutCategoryId == null)
+                {
+                    _data.ReturnPayoutCategoryId = string.Empty;
                 }
                 if (_data.PhoneFormatId == null)
                 {

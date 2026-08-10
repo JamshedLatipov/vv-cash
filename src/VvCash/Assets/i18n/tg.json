@@ -211,6 +211,8 @@
   "ExchangeOfflineWarning": "Иваз пайвастшавӣ ба сервер лозим аст",
   "ExchangePayoutCategoryWarning": "Моддаи хароҷот барои додани пул аз касса интихоб нашудааст — иваз дастрас нест",
   "ExchangePayoutCategory": "Моддаи хароҷот барои додани пул аз касса (иваз)",
+  "ReturnPayoutCategoryWarning": "Моддаи хароҷот барои додани пул аз касса интихоб нашудааст — баргардонидан дастрас нест",
+  "ReturnPayoutCategory": "Моддаи хароҷот барои додани пул аз касса (баргардонидан)",
   "ExchangeAction": "Иваз кардан",
   "SelectSaleToExchange": "Чекро аз рӯи рақам ёбед",
   "IssuedGoods": "Моли баровардашуда",

@@ -1699,7 +1699,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             if (mainWindow != null)
             {
                 var dialog = new VvCash.Views.ReturnsWindow();
-                var returnsVm = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features);
+                var returnsVm = new ReturnsViewModel(dialog, _returnService, _printerService, _settingsService, _features,
+                    _cashOperationService, _counterpartyService, _session.CashId);
                 dialog.DataContext = returnsVm;
                 await dialog.ShowDialog(mainWindow);
 

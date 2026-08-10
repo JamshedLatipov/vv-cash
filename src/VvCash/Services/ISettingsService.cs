@@ -33,6 +33,14 @@ public interface ISettingsService
     /// discovering it at the payout step leaves a return already booked.</summary>
     string ExchangePayoutCategoryId { get; set; }
 
+    /// <summary>Same thing for the returns screen's own till payout, kept as its own
+    /// setting rather than shared with the exchange: a return and an exchange are
+    /// different lines in the back office's expense report, and a store that wants
+    /// them under one heading can simply pick the same category twice. Empty until an
+    /// administrator picks one, and the return button refuses while it is — for the
+    /// same reason the exchange does, since a return cannot be cancelled.</summary>
+    string ReturnPayoutCategoryId { get; set; }
+
     /// <summary>Id записи из PhoneFormats — какой формат телефона у клиентов
     /// этой кассы. Пусто на кассе, где настройку не трогали; PhoneFormats.Resolve
     /// читает пустое и незнакомое как Россию, поэтому обновление существующей

@@ -211,6 +211,8 @@
   "ExchangeOfflineWarning": "Almashtirish uchun serverga ulanish kerak",
   "ExchangePayoutCategoryWarning": "Kassadan pul berish uchun xarajat moddasi tanlanmagan — almashtirish mavjud emas",
   "ExchangePayoutCategory": "Kassadan pul berish xarajat moddasi (almashtirish)",
+  "ReturnPayoutCategoryWarning": "Kassadan pul berish uchun xarajat moddasi tanlanmagan — qaytarish mavjud emas",
+  "ReturnPayoutCategory": "Kassadan pul berish xarajat moddasi (qaytarish)",
   "ExchangeAction": "Almashtirish",
   "SelectSaleToExchange": "Chekni raqami bo'yicha toping",
   "IssuedGoods": "Beriladigan mahsulot",

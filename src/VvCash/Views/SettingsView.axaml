@@ -180,6 +180,13 @@
                         <ComboBox ItemsSource="{Binding PaymentCategories}" SelectedItem="{Binding SelectedPaymentCategory, Mode=TwoWay}"
                                   DisplayMemberBinding="{Binding Name}" Classes="SettingsCombo"/>
 
+                        <!-- Return payout category: same story for the returns screen, which
+                             books its own till payout. Kept separate from the exchange one so
+                             the two read as different lines in the expense report. -->
+                        <TextBlock Text="{Binding [ReturnPayoutCategory], Source={x:Static services:I18nService.Instance}}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                        <ComboBox ItemsSource="{Binding PaymentCategories}" SelectedItem="{Binding SelectedReturnPaymentCategory, Mode=TwoWay}"
+                                  DisplayMemberBinding="{Binding Name}" Classes="SettingsCombo"/>
+
                         <!-- Return Post-Action Toggles: read-only, showing what the register will
                              actually do — these are now decided by the server (see ReturnsViewModel /
                              SettingsViewModel's Effective properties), not by this checkbox. -->
