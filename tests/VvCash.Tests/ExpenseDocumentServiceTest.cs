@@ -145,6 +145,95 @@ public class ExpenseDocumentServiceTest
     }
 
     [Fact]
+    public async Task Create_ForbiddenFromTheAuthMiddleware_IsQueuedNotDropped()
+    {
+        // This backend answers 403 — not 401 — for an expired or invalid bearer token:
+        // middlewares/site_authentication.go calls redirectToAccessDenied, which writes
+        // {"status":"error","message":"forbidden"}. Treating that as a refusal on the
+        // merits throws away a sale the cashier has already taken money for, and tells
+        // them a retry is pointless when signing in again is the actual fix.
+        //
+        // Note the shape: "status" here is the STRING "error". The application's own
+        // refusals carry a NUMERIC status (-1, see response.Response in the backend), and
+        // that is what tells the two apart.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.Forbidden, """{"status":"error","message":"forbidden"}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.True(ok);
+        Assert.Equal(new[] { "doc1" }, storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Create_PaymentRequiredFromBilling_IsQueuedNotDropped()
+    {
+        // middlewares/billing_access.go answers 402 when the billing lookup itself errors.
+        // Nothing about the document is established by that.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.PaymentRequired, """{"status":"error","message":"billing"}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.True(ok);
+        Assert.Equal(new[] { "doc1" }, storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Create_BadRequestWithoutTheApiEnvelope_IsQueuedNotDropped()
+    {
+        // A 4xx that is not this API's own envelope did not come from the application
+        // layer — a proxy, a gateway, an HTML error page. Nothing was established about
+        // the document, so it must survive.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.BadRequest, "<html><body>Bad Request</body></html>"));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var ok = await svc.CreateExpenseDocumentAsync(Request("doc1"));
+
+        Assert.True(ok);
+        Assert.Equal(new[] { "doc1" }, storage.SavedKeys);
+    }
+
+    [Fact]
+    public async Task Sync_ForbiddenOnFirstDocument_StopsLoop_LeavesEverythingQueued_RaisesSessionRevoked()
+    {
+        // The 403 is what a dead session actually looks like against this backend, so it
+        // has to behave exactly as the 401 branch does: stop, keep everything, raise the
+        // banner. Marking the queue rejected here would take an entire offline stretch of
+        // already-paid sales out of the rotation within one sync interval.
+        var requestCount = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requestCount++;
+            return (HttpStatusCode.Forbidden, """{"status":"error","message":"forbidden"}""");
+        });
+        var storage = new FakeStorage(new[]
+        {
+            new KeyValuePair<string, string>("doc1", Payload("doc1")),
+            new KeyValuePair<string, string>("doc2", Payload("doc2")),
+        });
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var sessionRevokedCount = 0;
+        svc.SessionRevoked += (s, e) => sessionRevokedCount++;
+
+        await svc.SyncOfflineDocumentsAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(1, requestCount);
+        Assert.Empty(storage.DeletedKeys);
+        Assert.Empty(storage.RejectedKeys);
+        Assert.Equal(1, sessionRevokedCount);
+        Assert.Equal(2, (await storage.GetUnsyncedDocumentsAsync()).Count());
+    }
+
+    [Fact]
     public async Task Create_NetworkUnreachable_IsQueuedAndCheckoutContinues()
     {
         // The case the offline queue exists for. Nothing was learned about the document

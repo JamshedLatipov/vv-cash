@@ -380,16 +380,81 @@ public class ExchangeViewModelTest
         await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
         Assert.Single(rig.Returns.Requests);            // booked once; the retry did not repeat it
+        Assert.Single(rig.Payout.Requests);             // and the till paid out once
         Assert.Equal(2, rig.Sale.Requests.Count);
         Assert.NotEmpty(rig.Sale.Requests[0].DocumentHash);
         Assert.Equal(rig.Sale.Requests[0].DocumentHash, rig.Sale.Requests[1].DocumentHash);
 
-        // A changed basket is a different exchange: new key, and a return of its own.
+        // A changed REPLACEMENT basket is a different sale — new hash — but it is the same
+        // goods coming back, so the return and its payout stay booked exactly once. They
+        // are built from the returned basket, which nothing here touched.
         rig.Vm.AddIssuedLine(MakeIssuedLine(30m));
         await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
 
         Assert.Equal(3, rig.Sale.Requests.Count);
         Assert.NotEqual(rig.Sale.Requests[1].DocumentHash, rig.Sale.Requests[2].DocumentHash);
+        Assert.Single(rig.Returns.Requests);
+        Assert.Single(rig.Payout.Requests);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_RetryAfterAFailedPayout_DoesNotPayOutTwice()
+    {
+        // The payout is real money leaving the drawer and CashOperationService has no
+        // cancel endpoint. A retry after the sale leg failed must not post a second one:
+        // the books would say 160 left the till for an 80 return.
+        var rig = BuildForSubmit(returnedPrice: 80m, issuedPrice: 100m);
+        rig.Sale.Throw = new System.Net.Http.HttpRequestException("connection reset");
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Single(rig.Payout.Requests);
+        Assert.Equal(80m, rig.Payout.Requests[0].Details[0].Amount);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_EditingTheIssuedBasketAfterAPartialFailure_DoesNotBookTheReturnAgain()
+    {
+        // Leg 1 committed, leg 2 refused. The cashier swaps the replacement for a cheaper
+        // one — an edit to the ISSUED basket, which is no part of the return document.
+        // Re-posting the return credits the same goods to stock twice, and there is no
+        // endpoint that cancels a return.
+        var rig = BuildForSubmit(returnedPrice: 80m, issuedPrice: 100m);
+        rig.Payout.Outcome = CashOpOutcome.Failed("cash balance would go negative");
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+        Assert.Single(rig.Returns.Requests);
+
+        rig.Vm.AddIssuedLine(MakeIssuedLine(60m));
+        rig.Payout.Outcome = CashOpOutcome.Ok();
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        // Still exactly one return: it committed, and nothing about the issued basket
+        // makes it a different one.
+        Assert.Single(rig.Returns.Requests);
+        // The payout, by contrast, is attempted twice on purpose — the first attempt was
+        // refused, so no money left the drawer and it genuinely has to be retried.
+        Assert.Equal(2, rig.Payout.Requests.Count);
+    }
+
+    [Fact]
+    public async Task SubmitExchange_EditingTheReturnedBasket_DoesBookANewReturn()
+    {
+        // The other half of the same rule: the returned basket IS what the return document
+        // is built from, so changing it is a genuinely different return.
+        var rig = BuildForSubmit(returnedPrice: 80m, issuedPrice: 100m);
+        rig.Payout.Outcome = CashOpOutcome.Failed("cash balance would go negative");
+
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+        Assert.Single(rig.Returns.Requests);
+
+        rig.Vm.SetReturnedLines(new[] { MakeReturnedLine(40m) });
+        rig.Vm.ReturnedLines[0].ReturnQty = 1;
+        rig.Payout.Outcome = CashOpOutcome.Ok();
+        await rig.Vm.SubmitExchangeCommand.ExecuteAsync(null);
+
+        Assert.Equal(2, rig.Returns.Requests.Count);
     }
 
     [Fact]
@@ -578,21 +643,25 @@ public class ExchangeViewModelTest
     }
 
     [Fact]
-    public void BuildSaleRequest_PaidByCard_BooksTheReplacementAgainstTheCardSlot()
+    public void BuildSaleRequest_PaidByCard_SplitsTheTenderTheWayTheMoneyActuallyMoved()
     {
-        // The whole replacement sale was hardcoded to paid_in_cash. A customer who
-        // settles the difference on a terminal left the books saying the drawer took
-        // money it never saw, and the shift did not reconcile against the terminal.
+        // The checkbox says the DIFFERENCE is paid by card. Step 2 has already handed the
+        // returned total out of the drawer, and the customer hands that same cash straight
+        // back for the replacement — only the difference goes on the terminal. Booking the
+        // whole replacement to the card slot leaves the drawer over by the returned total
+        // and the terminal short by it, which is a bigger error than the all-cash version
+        // this option replaced.
         var vm = new ExchangeViewModel();
-        vm.SetReturnedLines(new[] { MakeReturnedLine(50m) });
-        vm.AddIssuedLine(MakeIssuedLine(120m));
+        vm.SetReturnedLines(new[] { MakeReturnedLine(80m) });
+        vm.AddIssuedLine(MakeIssuedLine(100m));
 
         vm.PayByCard = true;
         var req = vm.BuildSaleRequest();
 
-        Assert.Equal(0m, req.Payment.PaidInCash);
-        Assert.Equal(120m, req.Payment.PaidByCreditCard);
-        Assert.Equal(120m, req.Payment.ToPay);
+        Assert.Equal(80m, req.Payment.PaidInCash);        // the returned money, back in
+        Assert.Equal(20m, req.Payment.PaidByCreditCard);  // the difference, on the terminal
+        Assert.Equal(100m, req.Payment.ToPay);
+        Assert.Equal(req.Payment.ToPay, req.Payment.PaidInCash + req.Payment.PaidByCreditCard);
         Assert.Equal(0m, req.Payment.Remained);
     }
 

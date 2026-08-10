@@ -140,37 +140,68 @@ public class ExpenseDocumentService : IExpenseDocumentService
     /// either produces the identical answer every time. That is precisely what used to
     /// happen, forever, because the replay loop only ever removes a document on status 0.
     ///
-    /// Excluded are the 4xx codes that describe the moment rather than the document:
-    /// 401 (the session is dead, but signing in again revives it — the replay loop has
-    /// its own handling for that one), 408 and 429 (the server is asking to be asked
-    /// again). 5xx likewise: the server broke, the document did not.
+    /// Excluded are the codes that describe the moment rather than the document: 408 and
+    /// 429 (the server is asking to be asked again), and 401/403 — see below. 5xx
+    /// likewise: the server broke, the document did not.
     ///
-    /// A 2xx whose envelope this cannot read at all is deliberately NOT a refusal.
-    /// Nothing was established about the document, and between losing a sale and
-    /// retrying one the server may already hold, the retry is the recoverable mistake —
-    /// document_hash is what makes the server treat the replay as the same sale.</summary>
+    /// 403 is the important one, and this client had it backwards. It is what an expired
+    /// or invalid bearer token produces here: middlewares/site_authentication.go calls
+    /// redirectToAccessDenied, and this API emits 401 only from the login and refresh
+    /// endpoints — never from an authenticated route. The same 403 also comes out of a
+    /// tenant-database blip in getCashFromToken, and 402 out of a billing lookup that
+    /// errored. None of those says anything about the document.
+    ///
+    /// Which is why the HTTP class alone is not enough to conclude anything, and the
+    /// envelope decides. The application's own refusals are response.Response, whose
+    /// status is an int (-1 for an error, 0 for success). The middleware's are
+    /// gin.H{"status": "error"} — a STRING. Requiring a NUMERIC non-zero status is
+    /// therefore exactly the line between "the application considered this document and
+    /// refused it" and "something in front of the application turned the request away".
+    ///
+    /// Everything else — a 4xx that is not this envelope at all (a proxy, a gateway, an
+    /// HTML error page), or a 2xx whose body cannot be read — is deliberately NOT a
+    /// refusal. Nothing was established about the document, and between losing a sale
+    /// and retrying one the server may already hold, the retry is the recoverable
+    /// mistake: document_hash is what makes the server treat the replay as the same sale.</summary>
     private static bool IsFinalRefusal(HttpStatusCode status, string responseContent)
     {
         if (status is HttpStatusCode.Unauthorized
+            or HttpStatusCode.Forbidden
+            or HttpStatusCode.PaymentRequired
             or HttpStatusCode.RequestTimeout
             or HttpStatusCode.TooManyRequests) return false;
 
-        if ((int)status >= 400 && (int)status < 500) return true;
         if ((int)status >= 500) return false;
 
+        return CarriesRefusalEnvelope(responseContent);
+    }
+
+    /// <summary>Whether the body is this API's own error envelope: an object whose
+    /// "status" is a number other than zero. A string "status" is the middleware's shape,
+    /// not the application's — see IsFinalRefusal.</summary>
+    private static bool CarriesRefusalEnvelope(string responseContent)
+    {
         try
         {
             using var doc = JsonDocument.Parse(responseContent);
             return doc.RootElement.ValueKind == JsonValueKind.Object
                    && doc.RootElement.TryGetProperty("status", out var envelope)
                    && envelope.ValueKind == JsonValueKind.Number
-                   && envelope.GetInt32() != 0;
+                   && envelope.TryGetInt32(out var code)
+                   && code != 0;
         }
         catch (JsonException)
         {
             return false;
         }
     }
+
+    /// <summary>The status codes that mean this register's session is no longer accepted.
+    /// 403 is the one this backend actually sends (see IsFinalRefusal); 401 is kept
+    /// because the login and refresh endpoints do use it and a future server change
+    /// might extend that.</summary>
+    private static bool IsSessionRejected(HttpStatusCode status)
+        => status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     /// <summary>The server's own explanation, for the rejected-document record. Falls
     /// back to the raw body: an unrecognised envelope is still worth keeping verbatim,
@@ -232,7 +263,7 @@ public class ExpenseDocumentService : IExpenseDocumentService
                     {
                         var response = await _httpClient.PostAsJsonAsync(url, request);
 
-                        if (response.StatusCode == HttpStatusCode.Unauthorized)
+                        if (IsSessionRejected(response.StatusCode))
                         {
                             // The shift session was rejected server-side. Every other
                             // queued document would fail the exact same way, so stop
