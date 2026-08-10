@@ -1,0 +1,7 @@
+# Shell scripts must check out with LF endings whatever the developer's core.autocrlf
+# says. This repository is developed on Windows, where autocrlf is normally true, and a
+# .sh checked out with CRLF fails on macOS and Linux with "bad interpreter: /bin/bash^M"
+# -- an error that names the shell rather than the line endings and reads like a broken
+# machine. build/installer/build_mac.sh is run on a Mac by definition, so it would hit
+# this on its first use.
+*.sh text eol=lf
