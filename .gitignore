@@ -40,3 +40,6 @@ test.*
 
 # Server details for build/installer/release.ps1 -Publish. Local only.
 build/installer/publish.local.json
+
+# macOS DMG build output
+dist/
