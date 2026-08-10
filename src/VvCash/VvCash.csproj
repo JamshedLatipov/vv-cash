@@ -10,7 +10,7 @@
     <!-- Single source of the product version: the installer script reads it from here
          and passes it to ISCC, and IAppVersionProvider reads it back off the built
          assembly at run time. Bump this line to cut a release. -->
-    <Version>1.0.5</Version>
+    <Version>1.0.11</Version>
     <!-- Audit transitive packages too, and fail the build rather than warn: the
          e_sqlite3 advisory below sat in the log as a warning through several
          releases because nothing was watching for NU19xx. -->
