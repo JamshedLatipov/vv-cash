@@ -11,6 +11,12 @@ public interface IOfflineStorageService
     Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId);
     Task<Product?> GetProductByBarcodeAsync(string barcode);
 
+    /// <summary>Products whose name, article or barcode contain <paramref name="query"/>,
+    /// matched case-insensitively. In the database rather than over an in-memory copy of
+    /// the catalog: this runs on every keystroke in the POS search box, and loading and
+    /// materialising every product per character is what it used to cost.</summary>
+    Task<IEnumerable<Product>> SearchProductsAsync(string query);
+
     Task SaveCategoriesAsync(IEnumerable<Category> categories);
     Task<IEnumerable<Category>> GetCategoriesAsync();
 

@@ -255,4 +255,89 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.Equal(0m, product.UnitFactor);
         Assert.False(product.HasSecondaryUnit);
     }
+
+    // ---------------------------------------------------------------------------------
+    // Search. Every keystroke in the POS search box used to load the whole catalog out
+    // of SQLite and filter it in memory — a full table scan plus one materialised
+    // Product per row, per character typed.
+    // ---------------------------------------------------------------------------------
+
+    private static Product Searchable(string id, string name, string sku = "", string barcode = "") =>
+        new() { Id = id, Name = name, Sku = sku, Barcode = barcode, Price = 10m };
+
+    [Fact]
+    public async Task SearchProductsAsync_MatchesNameSkuAndBarcode()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            Searchable("p1", "Плитка настенная", sku: "TILE-1", barcode: "4600001"),
+            Searchable("p2", "Краска白", sku: "PAINT-9", barcode: "4600002"),
+        });
+
+        Assert.Equal("p1", Assert.Single(await _service.SearchProductsAsync("настен")).Id);
+        Assert.Equal("p2", Assert.Single(await _service.SearchProductsAsync("PAINT")).Id);
+        Assert.Equal("p1", Assert.Single(await _service.SearchProductsAsync("4600001")).Id);
+    }
+
+    [Fact]
+    public async Task SearchProductsAsync_IsCaseInsensitiveForCyrillic()
+    {
+        // The reason the match column is lowercased in C# rather than by SQLite's own
+        // lower(): SQLite's built-in one only folds ASCII, so "ПЛИТКА" would never find
+        // "Плитка" — which is most of this catalog.
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[] { Searchable("p1", "Плитка настенная") });
+
+        Assert.Equal("p1", Assert.Single(await _service.SearchProductsAsync("ПЛИТКА")).Id);
+        Assert.Equal("p1", Assert.Single(await _service.SearchProductsAsync("плитка")).Id);
+    }
+
+    [Fact]
+    public async Task SearchProductsAsync_TreatsWildcardsAsOrdinaryCharacters()
+    {
+        // '%' and '_' are LIKE syntax. A cashier typing either must not match everything.
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            Searchable("p1", "Плитка"),
+            Searchable("p2", "Скидка 50% декабрь"),
+        });
+
+        Assert.Equal("p2", Assert.Single(await _service.SearchProductsAsync("50%")).Id);
+        Assert.Empty(await _service.SearchProductsAsync("_"));
+    }
+
+    [Fact]
+    public async Task SearchProductsAsync_FindsRowsWrittenBeforeTheSearchColumnExisted()
+    {
+        // A register upgrading in the middle of the day has a full Products table and no
+        // match column yet. If the migration only added the column, search would come
+        // back empty until the next full catalog sync — which is up to SyncIntervalMinutes
+        // away, and needs a connection the register may not have.
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[] { Searchable("p1", "Плитка настенная") });
+
+        using (var connection = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE Products SET SearchText = NULL";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var reopened = new OfflineStorageService(_dbPath);
+        await reopened.InitializeAsync();
+
+        Assert.Equal("p1", Assert.Single(await reopened.SearchProductsAsync("настен")).Id);
+    }
+
+    [Fact]
+    public async Task SearchProductsAsync_BlankQueryReturnsNothing()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[] { Searchable("p1", "Плитка") });
+
+        Assert.Empty(await _service.SearchProductsAsync("   "));
+    }
 }

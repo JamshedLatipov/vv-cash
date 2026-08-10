@@ -209,9 +209,19 @@ public class PosViewModelSellerGateTest
 
     private class FakeProductService : IProductService
     {
+        public int SearchCallCount { get; private set; }
+        public string? LastQuery { get; private set; }
+
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult(Enumerable.Empty<Product>());
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category) => Task.FromResult(Enumerable.Empty<Product>());
-        public Task<IEnumerable<Product>> SearchProductsAsync(string query) => Task.FromResult(Enumerable.Empty<Product>());
+
+        public Task<IEnumerable<Product>> SearchProductsAsync(string query)
+        {
+            SearchCallCount++;
+            LastQuery = query;
+            return Task.FromResult(Enumerable.Empty<Product>());
+        }
+
         public Task<Product?> GetProductByBarcodeAsync(string barcode) => Task.FromResult<Product?>(null);
         public Task<IEnumerable<string>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<string>());
     }
@@ -281,6 +291,7 @@ public class PosViewModelSellerGateTest
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult(Enumerable.Empty<Product>());
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId) => Task.FromResult(Enumerable.Empty<Product>());
         public Task<Product?> GetProductByBarcodeAsync(string barcode) => Task.FromResult<Product?>(null);
+        public Task<IEnumerable<Product>> SearchProductsAsync(string query) => Task.FromResult(Enumerable.Empty<Product>());
         public Task SaveCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
         public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
         public Task SaveQuickAccessCategoriesAsync(IEnumerable<Category> categories) => Task.CompletedTask;
@@ -554,6 +565,7 @@ public class PosViewModelSellerGateTest
         public FakeCashFeatureService Features { get; } = new();
         public FakeSyncService SyncService { get; } = new();
         public FakeQuoteService QuoteService { get; } = new();
+        public FakeProductService ProductService { get; } = new();
         public HttpClient HttpClient { get; } = new();
     }
 
@@ -562,7 +574,7 @@ public class PosViewModelSellerGateTest
         deps = new Deps();
         configure?.Invoke(deps);
         return new PosViewModel(
-            new FakeProductService(),
+            deps.ProductService,
             new FakeCategoryService(),
             deps.CartService,
             new FakePrinterService(),
@@ -1477,6 +1489,26 @@ public class PosViewModelSellerGateTest
 
         Assert.Equal(0, raisedCount);
         Assert.Equal(0m, deps.CartService.ManualDiscountAmount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Search debounce. Every keystroke used to fire its own catalog query.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchQuery_TypedQuickly_QueriesTheCatalogOnceForTheFinalText()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        vm.SearchQuery = "пл";
+        vm.SearchQuery = "пли";
+        vm.SearchQuery = "плит";
+
+        await Task.Delay(700);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(1, deps.ProductService.SearchCallCount);
+        Assert.Equal("плит", deps.ProductService.LastQuery);
     }
 
     // ---------------------------------------------------------------------------------

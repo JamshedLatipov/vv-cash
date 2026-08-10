@@ -41,19 +41,11 @@ public class ProductService : IProductService
         return await _storageService.GetProductsByCategoryAsync(category);
     }
 
-    public async Task<IEnumerable<Product>> SearchProductsAsync(string query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return Array.Empty<Product>();
-
-        var allProducts = await _storageService.GetAllProductsAsync();
-        var lowerQuery = query.ToLowerInvariant();
-        
-        return allProducts.Where(p => 
-            (p.Name != null && p.Name.ToLowerInvariant().Contains(lowerQuery)) ||
-            (p.Sku != null && p.Sku.ToLowerInvariant().Contains(lowerQuery)) ||
-            (p.Barcode != null && p.Barcode.ToLowerInvariant().Contains(lowerQuery)));
-    }
+    /// <summary>Straight to the database. This used to load the entire catalog and
+    /// filter it with LINQ — a full table scan plus one materialised Product per row,
+    /// and PosViewModel calls it on every keystroke in the search box.</summary>
+    public Task<IEnumerable<Product>> SearchProductsAsync(string query)
+        => _storageService.SearchProductsAsync(query);
 
     public async Task<Product?> GetProductByBarcodeAsync(string barcode)
     {

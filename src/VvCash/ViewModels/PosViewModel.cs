@@ -80,6 +80,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ICashFeatureService _features;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
+    private CancellationTokenSource? _searchCts;
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
 
@@ -940,7 +941,38 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             HasSubcategories = catsList.Count > 0;
         }
 
-        _ = LoadProductsAsync(SelectedCategory?.Id);
+        // Category filtering above is in-memory and stays immediate. The catalog query
+        // is debounced: it hits SQLite, and firing one per keystroke meant a five-letter
+        // product name cost five queries, four of whose results were replaced before the
+        // cashier could read them. Same 300ms and same supersede-by-CTS shape as the
+        // quote debounce.
+        _ = SearchDebouncedAsync();
+    }
+
+    private async Task SearchDebouncedAsync()
+    {
+        _searchCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _searchCts = cts;
+        try
+        {
+            await Task.Delay(300, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return; // a later keystroke owns the search now
+        }
+
+        try
+        {
+            await LoadProductsAsync(SelectedCategory?.Id);
+        }
+        catch (Exception ex)
+        {
+            // Detached task, same as RequoteSafeAsync: a failed search must not vanish
+            // silently nor take the register down.
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Search failed: {ex}");
+        }
     }
 
     private void OnCartChanged(object? sender, EventArgs e)
@@ -1195,6 +1227,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _quoteCts?.Cancel();
         _quoteCts?.Dispose();
         _quoteCts = null;
+
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
     }
 
     [RelayCommand]

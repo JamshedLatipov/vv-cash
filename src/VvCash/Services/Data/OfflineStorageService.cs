@@ -78,7 +78,12 @@ public class OfflineStorageService : IOfflineStorageService
                 UnitShortName TEXT,
                 UnitFactor REAL,
                 IsDivisible INTEGER,
-                SellInSecondaryUnit INTEGER
+                SellInSecondaryUnit INTEGER,
+                -- Name, Sku and Barcode joined and lowercased, for the POS search box.
+                -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
+                -- only: an all-caps Cyrillic query would never match its own product, and
+                -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
+                SearchText TEXT
             );
 
             -- Auto-applied promotions, stored as the raw server payload: the rules
@@ -175,6 +180,7 @@ public class OfflineStorageService : IOfflineStorageService
             "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
             "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
             "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
+            "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
         })
         {
             try
@@ -185,8 +191,58 @@ public class OfflineStorageService : IOfflineStorageService
             catch { /* column already exists */ }
         }
 
+        await BackfillSearchTextAsync(connection);
+
         _isInitialized = true;
     }
+
+    /// <summary>Fills SearchText for rows written before the column existed. Adding the
+    /// column alone would leave a register that upgraded mid-day with a search box that
+    /// finds nothing until the next full catalog sync — which is up to SyncIntervalMinutes
+    /// away and needs a connection the register may not have. Runs once: after this, every
+    /// row has a value and the WHERE below matches nothing.</summary>
+    private static async Task BackfillSearchTextAsync(SqliteConnection connection)
+    {
+        var pending = new List<(string Id, string Text)>();
+
+        using (var read = connection.CreateCommand())
+        {
+            read.CommandText = "SELECT Id, Name, Sku, Barcode FROM Products WHERE SearchText IS NULL";
+            using var reader = await read.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                pending.Add((
+                    reader.GetString(0),
+                    SearchTextOf(
+                        reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                        reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                        reader.IsDBNull(3) ? string.Empty : reader.GetString(3))));
+            }
+        }
+
+        if (pending.Count == 0) return;
+
+        using var transaction = connection.BeginTransaction();
+        using var write = connection.CreateCommand();
+        write.Transaction = transaction;
+        write.CommandText = "UPDATE Products SET SearchText = $SearchText WHERE Id = $Id";
+        var textParam = write.Parameters.Add("$SearchText", SqliteType.Text);
+        var idParam = write.Parameters.Add("$Id", SqliteType.Text);
+
+        foreach (var (id, text) in pending)
+        {
+            idParam.Value = id;
+            textParam.Value = text;
+            await write.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    /// <summary>The one place the match column's contents are defined, so writes and the
+    /// query below can never disagree about what is being compared.</summary>
+    private static string SearchTextOf(string? name, string? sku, string? barcode)
+        => $"{name} {sku} {barcode}".ToLowerInvariant();
 
     public async Task SaveProductsAsync(IEnumerable<Product> products)
     {
@@ -199,10 +255,11 @@ public class OfflineStorageService : IOfflineStorageService
 
         command.CommandText = @"
             INSERT INTO Products (Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags,
-                                  UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit)
+                                  UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit, SearchText)
             VALUES ($Id, $Name, $Sku, $Category, $Price, $OriginalPrice, $DiscountPercent, $ImagePath, $Barcode, $Tags,
-                    $UnitId, $UnitCode, $UnitShortName, $UnitFactor, $IsDivisible, $SellInSecondaryUnit)
+                    $UnitId, $UnitCode, $UnitShortName, $UnitFactor, $IsDivisible, $SellInSecondaryUnit, $SearchText)
             ON CONFLICT(Id) DO UPDATE SET
+                SearchText=excluded.SearchText,
                 Name=excluded.Name,
                 Sku=excluded.Sku,
                 Category=excluded.Category,
@@ -236,9 +293,11 @@ public class OfflineStorageService : IOfflineStorageService
         var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Real);
         var isDivisibleParam = command.Parameters.Add("$IsDivisible", SqliteType.Integer);
         var sellInUnitParam = command.Parameters.Add("$SellInSecondaryUnit", SqliteType.Integer);
+        var searchTextParam = command.Parameters.Add("$SearchText", SqliteType.Text);
 
         foreach (var p in products)
         {
+            searchTextParam.Value = SearchTextOf(p.Name, p.Sku, p.Barcode);
             idParam.Value = p.Id ?? string.Empty;
             nameParam.Value = p.Name ?? string.Empty;
             skuParam.Value = p.Sku ?? string.Empty;
@@ -341,6 +400,32 @@ public class OfflineStorageService : IOfflineStorageService
 
         return products;
     }
+
+    public async Task<IEnumerable<Product>> SearchProductsAsync(string query)
+    {
+        var products = new List<Product>();
+        if (string.IsNullOrWhiteSpace(query)) return products;
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        // ESCAPE, because '%' and '_' are LIKE syntax and a cashier typing either means
+        // the character — "50%" is a product name here, not "match everything".
+        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE SearchText LIKE $Query ESCAPE '\\'";
+        command.Parameters.AddWithValue("$Query", $"%{EscapeLike(query.Trim().ToLowerInvariant())}%");
+
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            products.Add(ReadProduct(reader));
+        }
+
+        return products;
+    }
+
+    private static string EscapeLike(string value)
+        => value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     public async Task<Product?> GetProductByBarcodeAsync(string barcode)
     {
