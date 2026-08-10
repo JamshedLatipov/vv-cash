@@ -39,6 +39,22 @@ public partial class LoginViewModel : ViewModelBase
         SettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>The login screen's way out of the app. It exists because the window is now
+    /// borderless and full screen (see MainWindow.axaml) — there is no system X to click, and
+    /// the POS's own power button lives behind the login. No exit menu here on purpose: with no
+    /// session and no shift, "exit" has only one meaning, so this closes outright.
+    ///
+    /// MainWindow.OnClosing only intercepts while a PosViewModel is on screen, so this needs no
+    /// equivalent of PosViewModel.IsExitConfirmed to get past it.</summary>
+    [RelayCommand]
+    private void ExitApplication()
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.MainWindow?.Close();
+        }
+    }
+
     [RelayCommand]
     private async Task LoginAsync()
     {

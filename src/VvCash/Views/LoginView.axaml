@@ -53,6 +53,15 @@
             <Setter Property="Background" Value="{StaticResource Slate200Brush}"/>
             <Setter Property="Foreground" Value="{StaticResource Slate600Brush}"/>
         </Style>
+
+        <!-- Targets the icon directly: MaterialIcon does not pick up the ContentPresenter's
+             Foreground, which is why the cog above sets its own colour inline. -->
+        <Style Selector="Button.ExitButton material|MaterialIcon">
+            <Setter Property="Foreground" Value="{StaticResource Slate400Brush}"/>
+        </Style>
+        <Style Selector="Button.ExitButton:pointerover material|MaterialIcon">
+            <Setter Property="Foreground" Value="{StaticResource Red500Brush}"/>
+        </Style>
     </UserControl.Styles>
 
     <Grid ColumnDefinitions="*, *" Background="{StaticResource Slate50Brush}">
@@ -105,10 +114,17 @@
         <!-- Right Side: Email/Password Entry -->
         <Border Grid.Column="1" Padding="48">
             <Grid>
-                <!-- Settings Button -->
-                <Button Classes="SettingsButton" VerticalAlignment="Top" HorizontalAlignment="Right" Command="{Binding OpenSettingsCommand}">
-                    <material:MaterialIcon Kind="Cog" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}" />
-                </Button>
+                <!-- Settings + Exit. The window is borderless and full screen, so this is the
+                     only way out of the app before signing in. -->
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Top" HorizontalAlignment="Right">
+                    <Button Classes="SettingsButton" Command="{Binding OpenSettingsCommand}">
+                        <material:MaterialIcon Kind="Cog" Width="28" Height="28" Foreground="{StaticResource Slate400Brush}" />
+                    </Button>
+                    <Button Classes="SettingsButton ExitButton" Command="{Binding ExitApplicationCommand}"
+                            ToolTip.Tip="{Binding [ExitCloseApp], Source={x:Static services:I18nService.Instance}}">
+                        <material:MaterialIcon Kind="Power" Width="28" Height="28" />
+                    </Button>
+                </StackPanel>
 
                 <StackPanel MaxWidth="400" VerticalAlignment="Center" HorizontalAlignment="Stretch">
                     <TextBlock Text="{Binding [SignIn], Source={x:Static services:I18nService.Instance}}" FontSize="36" FontWeight="Black" Foreground="{StaticResource Slate900Brush}" HorizontalAlignment="Center" Margin="0,0,0,32"/>

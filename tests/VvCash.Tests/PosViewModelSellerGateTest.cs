@@ -1309,6 +1309,187 @@ public class PosViewModelSellerGateTest
     }
 
     // ---------------------------------------------------------------------------------
+    // Exit menu: the power button (and the window's X) now asks what "exit" means instead
+    // of closing the window outright — close the shift and leave, hand the register to the
+    // next cashier, or shut down with the shift left open. Covered here: each branch does
+    // only its own thing, closing-and-leaving still goes through the CanCloseShift gate and
+    // the parked-sales confirm, and an abandoned "and then exit" never leaks into a later
+    // plain close from the header button.
+    //
+    // These assert on IsExitConfirmed rather than on the app actually closing:
+    // CloseApplication's Window.Close() call is a no-op under xunit (no Avalonia desktop
+    // lifetime exists), but the flag it sets first is the real signal MainWindow.OnClosing
+    // reads, so it is what distinguishes "decided to exit" from "did not".
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ExitWithShiftClose_SellerHasRight_ClosesTheShiftThenExits()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        vm.OpenExitMenuCommand.Execute(null);
+
+        await vm.ExitWithShiftCloseCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsExitMenuVisible);
+        Assert.False(vm.IsShiftOpen);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+        Assert.True(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public async Task ExitWithShiftClose_WhenCloseShiftAsyncFails_LeavesTheShiftOpenAndDoesNotExit()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.ShiftService.CloseShiftResult = false;
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+
+        await vm.ExitWithShiftCloseCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsShiftOpen);
+        Assert.False(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public void ExitWithShiftClose_SellerLacksRight_EscalatesInsteadOfExiting()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: false));
+        var raisedCount = 0;
+        vm.CloseShiftApprovalRequested += (s, e) => raisedCount++;
+
+        vm.ExitWithShiftCloseCommand.Execute(null);
+
+        Assert.Equal(1, raisedCount);
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+        Assert.False(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public async Task ExitWithShiftClose_ApprovedBySupervisor_ClosesAndStillExits()
+    {
+        // The pending "and then exit" has to survive the approval overlay: approving is
+        // the continuation of this same request, not a fresh close.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: false));
+        vm.ExitWithShiftCloseCommand.Execute(null);
+
+        await vm.OnCloseShiftApproved();
+
+        Assert.False(vm.IsShiftOpen);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+        Assert.True(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public async Task ExitWithShiftClose_ParkedSalesPending_WaitsForTheConfirm_CancelDropsTheExit()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        vm.ParkedSalesCount = 1;
+
+        await vm.ExitWithShiftCloseCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsShiftCloseConfirmVisible);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+        Assert.False(vm.IsExitConfirmed);
+
+        vm.CancelCloseShiftCommand.Execute(null);
+
+        Assert.False(vm.IsShiftCloseConfirmVisible);
+        Assert.True(vm.IsShiftOpen);
+        Assert.False(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public async Task ExitWithShiftClose_ParkedSalesConfirmed_ClosesAndExits()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        vm.ParkedSalesCount = 1;
+        await vm.ExitWithShiftCloseCommand.ExecuteAsync(null);
+
+        await vm.ConfirmCloseShiftCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsShiftOpen);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+        Assert.True(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public async Task CloseShiftCommand_AfterAnAbandonedExitRequest_ClosesWithoutExiting()
+    {
+        // The leak worth guarding: an exit-initiated close that escalated and was then
+        // abandoned (the cashier dismissed the approval overlay, so no continuation ever
+        // ran) must not turn the header's own close-shift button into an app exit.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: false));
+        vm.ExitWithShiftCloseCommand.Execute(null);
+        deps.SellerSession.SetCurrent(MakeSeller("s2", canCloseShift: true));
+
+        await vm.CloseShiftCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsShiftOpen);
+        Assert.Equal(1, deps.ShiftService.CloseShiftCallCount);
+        Assert.False(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public void ExitToLogin_SignsOutButLeavesTheShiftOpen()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        var logoutCount = 0;
+        vm.LogoutRequested += (s, e) => logoutCount++;
+        vm.OpenExitMenuCommand.Execute(null);
+
+        vm.ExitToLoginCommand.Execute(null);
+
+        Assert.Equal(1, logoutCount);
+        Assert.Equal(1, deps.AuthService.ClearSessionCallCount);
+        Assert.Null(deps.SellerSession.Current);
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+        Assert.False(vm.IsExitMenuVisible);
+        Assert.False(vm.IsExitConfirmed);
+    }
+
+    [Fact]
+    public void ExitApplication_WithAShiftOpen_ExitsAndLeavesTheShiftAlone()
+    {
+        // Deliberately allowed: the shift lives on the server and whoever starts the
+        // register next resumes it — the menu says as much (ExitShiftStaysOpen).
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        vm.OpenExitMenuCommand.Execute(null);
+
+        vm.ExitApplicationCommand.Execute(null);
+
+        Assert.True(vm.IsExitConfirmed);
+        Assert.False(vm.IsExitMenuVisible);
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+    }
+
+    [Fact]
+    public void CancelExit_ClosesTheMenuAndDoesNothingElse()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1", canCloseShift: true));
+        vm.OpenExitMenuCommand.Execute(null);
+
+        vm.CancelExitCommand.Execute(null);
+
+        Assert.False(vm.IsExitMenuVisible);
+        Assert.False(vm.IsExitConfirmed);
+        Assert.True(vm.IsShiftOpen);
+        Assert.Equal(0, deps.ShiftService.CloseShiftCallCount);
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+    }
+
+    // ---------------------------------------------------------------------------------
     // Returns gate (Task 20): opening returns requires CanRefund, escalates through the
     // approval overlay when it's missing (same shape as the close-shift gate above), and
     // approving genuinely opens the returns dialog rather than just dismissing the
