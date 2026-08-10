@@ -101,12 +101,20 @@ public class SettingsService : ISettingsService
         set => _data.PhoneFormatId = value;
     }
 
-    public SettingsService()
+    /// <summary>Creates the service against the standard per-user settings file. Pass
+    /// <paramref name="settingsFilePath"/> to point at a different one (e.g. a temp file
+    /// in tests); left null/empty, DI and production code get the usual
+    /// LocalApplicationData path unchanged — same arrangement as OfflineStorageService.</summary>
+    public SettingsService(string? settingsFilePath = null)
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var appDir = Path.Combine(appDataPath, "VvCash");
-        Directory.CreateDirectory(appDir);
-        _settingsFilePath = Path.Combine(appDir, "settings.json");
+        if (string.IsNullOrEmpty(settingsFilePath))
+        {
+            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var appDir = Path.Combine(appDataPath, "VvCash");
+            Directory.CreateDirectory(appDir);
+            settingsFilePath = Path.Combine(appDir, "settings.json");
+        }
+        _settingsFilePath = settingsFilePath;
 
         Load();
     }
@@ -144,14 +152,37 @@ public class SettingsService : ISettingsService
                     _data.PhoneFormatId = string.Empty;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                // Defaults, so the register still starts — but not before the file that
+                // could not be read is put somewhere it will survive. The first Save
+                // after this overwrites settings.json, and what it overwrites used to be
+                // the only copy of the backend URL, the cash token and the printer
+                // configuration for this terminal. A register coming up blank is bad; a
+                // register coming up blank with nothing left to recover from is worse.
+                Console.WriteLine($"[SettingsService] Could not read settings: {ex.GetType().Name}: {ex.Message}");
+                KeepCorruptFileAside();
                 _data = new SettingsData();
             }
         }
         else
         {
             _data = new SettingsData();
+        }
+    }
+
+    private void KeepCorruptFileAside()
+    {
+        try
+        {
+            var kept = $"{_settingsFilePath}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            File.Copy(_settingsFilePath, kept, overwrite: true);
+            Console.WriteLine($"[SettingsService] Unreadable settings kept at {kept}");
+        }
+        catch (Exception ex)
+        {
+            // Best effort — the register must still start.
+            Console.WriteLine($"[SettingsService] Could not keep the unreadable settings file: {ex.Message}");
         }
     }
 
@@ -163,9 +194,13 @@ public class SettingsService : ISettingsService
             File.WriteAllText(_settingsFilePath, json);
             SettingsChanged?.Invoke(this, EventArgs.Empty);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Log exception here
+            // Swallowed on purpose — a settings screen that throws mid-save strands the
+            // cashier — but no longer silently: a register whose settings never actually
+            // persist looks identical to one that was never configured, and that is a
+            // support call nobody can diagnose without this line.
+            Console.WriteLine($"[SettingsService] Could not save settings: {ex.GetType().Name}: {ex.Message}");
         }
     }
 }

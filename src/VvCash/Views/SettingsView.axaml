@@ -307,6 +307,17 @@
                     </StackPanel>
                 </Border>
 
+                <!-- Why the last Save was refused. Sits directly above the button that
+                     refused, because a Save that quietly does nothing leaves the screen
+                     showing values the register is not actually running on. -->
+                <Border IsVisible="{Binding HasError}" Background="#FEF2F2" BorderBrush="#FCA5A5" BorderThickness="1"
+                        CornerRadius="10" Padding="14,10" Margin="0,0,0,12">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <material:MaterialIcon Kind="AlertCircleOutline" Width="20" Height="20" Foreground="#B91C1C" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- Save Button -->
                 <Button Classes="SaveButton" Command="{Binding SaveCommand}">                    <Button.ContentTemplate>
                         <DataTemplate>
