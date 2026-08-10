@@ -81,6 +81,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private CancellationTokenSource? _searchCts;
+
+    /// <summary>Whether a receipt is currently open, i.e. whether the cart last had
+    /// anything in it. Only read by <see cref="OnCartChanged"/>, to tell "a receipt just
+    /// began" apart from "a receipt that was already open changed".</summary>
+    private bool _receiptOpen;
     private bool _applyingQuoteResult;
     private string? _activePromoCode;
 
@@ -951,9 +956,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     private async Task SearchDebouncedAsync()
     {
-        _searchCts?.Cancel();
+        var previous = _searchCts;
         var cts = new CancellationTokenSource();
         _searchCts = cts;
+        previous?.Cancel();
+        previous?.Dispose();
         try
         {
             await Task.Delay(300, cts.Token);
@@ -979,15 +986,23 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         CartItems = new ObservableCollection<CartItem>(_cartService.Items);
         RefreshPromoChip();
-        if (CartItems.Count == 1)
+
+        // Gated on the empty -> non-empty transition, not on "the cart now holds exactly
+        // one line". That older condition is true again after every +/- tap on a
+        // single-line receipt, and again the moment a two-line receipt drops back to one
+        // — so the number that is supposed to count receipts climbed while the cashier
+        // adjusted a quantity.
+        var hasItems = CartItems.Count > 0;
+        if (hasItems && !_receiptOpen)
         {
             OrderNumber++;
             OrderDateTime = DateTime.Now.ToString("dd MMM, yyyy • HH:mm");
         }
-        else if (!CartItems.Any())
+        else if (!hasItems)
         {
             OrderDateTime = string.Empty;
         }
+        _receiptOpen = hasItems;
         Subtotal = _cartService.Subtotal;
         OnPropertyChanged(nameof(CustomerDiscountAmount));
 
@@ -1029,9 +1044,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     private async Task RequoteDebouncedAsync()
     {
-        _quoteCts?.Cancel();
-        var cts = new System.Threading.CancellationTokenSource();
-        _quoteCts = cts;
+        // Cancel, then dispose: a CancellationTokenSource holds the timer registration
+        // its Task.Delay created, and one is superseded per cart change — several per
+        // second while a receipt is being rung up.
+        ReplaceQuoteCts(out var cts);
         try { await Task.Delay(300, cts.Token); }
         catch (TaskCanceledException) { return; }
         await RequoteAsync(cts);
@@ -1045,9 +1061,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            _quoteCts?.Cancel();
-            var cts = new System.Threading.CancellationTokenSource();
-            _quoteCts = cts;
+            ReplaceQuoteCts(out var cts);
             await RequoteAsync(cts);
         }
         catch (Exception ex)
@@ -1105,6 +1119,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             StatusMessage = "Промокод применён";
         }
+    }
+
+    /// <summary>Cancels and disposes whatever quote request was in flight, and installs a
+    /// fresh source as the current one. The dispose is the point: the superseded source
+    /// still holds the timer registration behind its Task.Delay, and one is superseded per
+    /// cart change — several a second while a receipt is being rung up.</summary>
+    private void ReplaceQuoteCts(out System.Threading.CancellationTokenSource cts)
+    {
+        var previous = _quoteCts;
+        cts = new System.Threading.CancellationTokenSource();
+        _quoteCts = cts;
+        previous?.Cancel();
+        previous?.Dispose();
     }
 
     // True only while cts is still the active request (not superseded by a newer
@@ -1192,16 +1219,29 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSystemOnline = isOnline);
     }
 
-    private async void OnProductsSynced(object? sender, EventArgs e)
-    {
-        // The sync that just finished also refreshed the promotion cache in SQLite.
-        await _promotionProvider.RefreshAsync();
+    // Not async void. This is raised from the background sync loop, so an exception out
+    // of it — a SQLite read that fails, a catalog load that throws — has no caller to
+    // land in and takes the process down with it. Fire the work off as a task with its
+    // own catch instead, the same shape RequoteSafeAsync uses.
+    private void OnProductsSynced(object? sender, EventArgs e) => _ = OnProductsSyncedAsync();
 
-        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+    private async Task OnProductsSyncedAsync()
+    {
+        try
         {
-            await LoadCategoriesAsync();
-            await LoadProductsAsync(SelectedCategory?.Id);
-        });
+            // The sync that just finished also refreshed the promotion cache in SQLite.
+            await _promotionProvider.RefreshAsync();
+
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                await LoadCategoriesAsync();
+                await LoadProductsAsync(SelectedCategory?.Id);
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Post-sync refresh failed: {ex}");
+        }
     }
 
     public void Dispose()

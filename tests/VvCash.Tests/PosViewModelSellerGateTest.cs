@@ -367,10 +367,14 @@ public class PosViewModelSellerGateTest
     {
         public DocumentRequest? LastRequest { get; private set; }
 
-        /// <summary>What CreateExpenseDocumentAsync reports back — defaults to success
-        /// (matching prior behaviour). The end-of-receipt tests flip it to false to
-        /// exercise the failed-payment branch, where the seller must survive so a retry
-        /// doesn't demand a fresh PIN.</summary>
+        /// <summary>Whether the document is accepted — defaults to success. The
+        /// end-of-receipt tests flip it to false to exercise the failed-payment branch,
+        /// where the seller must survive so a retry doesn't demand a fresh PIN.
+        ///
+        /// Governs both overloads. It used to govern only the bool one, which left the
+        /// detailed path always reporting success — so once Pay switched to it (to show
+        /// the server's own rejection reason), the failure tests were silently exercising
+        /// the success branch.</summary>
         public bool CreateResult { get; set; } = true;
 
         public Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
@@ -382,7 +386,9 @@ public class PosViewModelSellerGateTest
         public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
         {
             LastRequest = request;
-            return Task.FromResult(ExpenseDocumentOutcome.Sent("1"));
+            return Task.FromResult(CreateResult
+                ? ExpenseDocumentOutcome.Sent("1")
+                : ExpenseDocumentOutcome.Refused("товар не найден"));
         }
 
         public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
@@ -1489,6 +1495,63 @@ public class PosViewModelSellerGateTest
 
         Assert.Equal(0, raisedCount);
         Assert.Equal(0m, deps.CartService.ManualDiscountAmount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Order number. It counts receipts, so it may only move when one begins.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void OrderNumber_AdvancesOnceWhenAReceiptBegins()
+    {
+        using var vm = CreateViewModel(out var deps);
+        var before = vm.OrderNumber;
+
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        Assert.Equal(before + 1, vm.OrderNumber);
+    }
+
+    [Fact]
+    public void OrderNumber_DoesNotAdvanceWhenTheOnlyLineChangesQuantity()
+    {
+        // The old condition was "the cart now has exactly one line", which is true again
+        // after every +/- tap on a single-line receipt — so the number climbed while the
+        // cashier adjusted a quantity, and again when a second line was removed.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        var afterFirstItem = vm.OrderNumber;
+
+        vm.IncreaseQuantityCommand.Execute(deps.CartService.Items[0]);
+        vm.IncreaseQuantityCommand.Execute(deps.CartService.Items[0]);
+
+        Assert.Equal(afterFirstItem, vm.OrderNumber);
+    }
+
+    [Fact]
+    public void OrderNumber_DoesNotAdvanceWhenASecondLineIsRemoved()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+        var afterTwoItems = vm.OrderNumber;
+
+        vm.RemoveFromCartCommand.Execute(deps.CartService.Items[1]);
+
+        Assert.Equal(afterTwoItems, vm.OrderNumber);
+    }
+
+    [Fact]
+    public void OrderNumber_AdvancesAgainForTheNextReceipt()
+    {
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+        var first = vm.OrderNumber;
+
+        vm.ClearCartCommand.Execute(null);
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 50m));
+
+        Assert.Equal(first + 1, vm.OrderNumber);
     }
 
     // ---------------------------------------------------------------------------------
