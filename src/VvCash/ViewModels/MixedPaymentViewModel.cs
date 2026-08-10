@@ -24,20 +24,23 @@ public partial class MixedPaymentViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(QuickInputText))]
     private decimal _cardAmount;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(RemainingAmount))]
-    [NotifyPropertyChangedFor(nameof(QuickInputText))]
-    private decimal _giftAmount;
-
     // Numpad target field
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QuickInputText))]
     private string _selectedMethod = "Cash";
 
-    public decimal RemainingAmount => TotalAmount - (CashAmount + CardAmount + GiftAmount);
+    public decimal RemainingAmount => TotalAmount - (CashAmount + CardAmount);
 
     // ---- Receipt-panel helpers (redesigned payment screen) ----
-    public decimal PaidAmount => CashAmount + CardAmount + GiftAmount;
+    /// <summary>What has been tendered — and, by construction, exactly what the
+    /// completion callback hands back. The sale document carries two money slots
+    /// (paid_in_cash, paid_by_credit_card) and nothing else, so a tender this
+    /// screen counts here that the callback cannot carry books the receipt as
+    /// unpaid: the money is in the drawer while the document says the customer
+    /// still owes it. That is what a third "gift card" tender used to do. Any new
+    /// tender added here has to arrive together with a slot on the document to
+    /// land in — see Payment in DocumentRequest.cs.</summary>
+    public decimal PaidAmount => CashAmount + CardAmount;
     public decimal RemainingDue => Math.Max(0, RemainingAmount);
     public decimal ChangeAmount => Math.Max(0, -RemainingAmount);
     /// <summary>Under half a cent counts as settled. Totals reach this screen
@@ -110,7 +113,6 @@ public partial class MixedPaymentViewModel : ViewModelBase
     {
         "Cash" => CashAmount,
         "Card" => CardAmount,
-        "Gift" => GiftAmount,
         _ => 0
     };
 
@@ -133,7 +135,6 @@ public partial class MixedPaymentViewModel : ViewModelBase
 
     partial void OnCashAmountChanged(decimal value) => NotifyDerived();
     partial void OnCardAmountChanged(decimal value) => NotifyDerived();
-    partial void OnGiftAmountChanged(decimal value) => NotifyDerived();
     partial void OnTotalAmountChanged(decimal value) => NotifyDerived();
 
     [RelayCommand]
@@ -190,14 +191,12 @@ public partial class MixedPaymentViewModel : ViewModelBase
             // callers), and this hook fires on every path that changes it.
             if (value != "Cash") CashAmount = 0;
             if (value != "Card") CardAmount = 0;
-            if (value != "Gift") GiftAmount = 0;
         }
 
         _currentInputBuffer = value switch
         {
             "Cash" => CashAmount.ToString("0.##", CultureInfo.InvariantCulture),
             "Card" => CardAmount.ToString("0.##", CultureInfo.InvariantCulture),
-            "Gift" => GiftAmount.ToString("0.##", CultureInfo.InvariantCulture),
             _ => "0"
         };
         RecomputeQuickAmounts();
@@ -292,9 +291,6 @@ public partial class MixedPaymentViewModel : ViewModelBase
                 break;
             case "Card":
                 CardAmount = newValue;
-                break;
-            case "Gift":
-                GiftAmount = newValue;
                 break;
         }
     }
