@@ -1,8 +1,16 @@
-# Cut a VvCash release: stamp the version, build the installer, and write the update
-# manifest the registers poll.
+# Cut a VvCash release: stamp the version, build both installers, and write the update
+# manifests the registers poll.
 #
+# Two flavors ship from one version: x64 for the fleet, and x86 for the registers still
+# on 32-bit Windows 7. Each has its own installer and its own manifest; a register only
+# ever sees the one matching the architecture it runs as.
+#
+#   Release: powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Publish
 #   Build:   powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Version 1.0.1
 #   Verify:  powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Verify
+#
+# With no -Version the next version is derived from the one in the csproj: -Bump patch
+# (the default), minor or major. Pass -Version to override that and name one outright.
 #
 # The verify pass checks what is actually published on the server, which is the only way
 # to catch the failure this whole feature is most exposed to: proffi.io is a single-page
@@ -18,10 +26,17 @@
 [CmdletBinding(DefaultParameterSetName = 'Build')]
 param(
     # Product version to stamp, e.g. 1.0.1. Written to VvCash.csproj, from where MSBuild,
-    # the installer and IAppVersionProvider all read it.
-    [Parameter(Mandatory = $true, ParameterSetName = 'Build')]
+    # the installer and IAppVersionProvider all read it. Optional: left off, the version
+    # is derived from what the csproj already says by applying -Bump to it.
+    [Parameter(ParameterSetName = 'Build')]
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version,
+
+    # Which part to step when -Version is not given. The csproj is the source of truth
+    # for the current number, so a release needs no bookkeeping beyond running this.
+    [Parameter(ParameterSetName = 'Build')]
+    [ValidateSet('patch', 'minor', 'major')]
+    [string]$Bump = 'patch',
 
     # Release notes shown to the cashier in the update dialog. Free text, any language.
     [Parameter(ParameterSetName = 'Build')]
@@ -37,19 +52,51 @@ param(
     [Parameter(Mandatory = $true, ParameterSetName = 'Verify')]
     [switch]$Verify,
 
-    # Where the registers fetch the manifest from. Must match ManifestUrl in UpdateService.cs.
-    [string]$ManifestUrl = 'https://proffi.io/downloads/kassa-latest.json'
+    # Where the registers fetch the manifest from. Must match UpdateService.cs, which
+    # picks between these two from the architecture of the running process.
+    [string]$ManifestUrl = 'https://proffi.io/downloads/kassa-latest.json',
+
+    # The 32-bit flavor's manifest, polled by the registers still on Windows 7. Separate
+    # files rather than one manifest describing both, so a 32-bit register cannot be
+    # handed the 64-bit installer by a parsing mistake - see UpdateService.cs.
+    [string]$ManifestUrlX86 = 'https://proffi.io/downloads/kassa-latest-x86.json'
 )
 
 $ErrorActionPreference = 'Stop'
 
 $root      = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $proj      = Join-Path $root 'src\VvCash\VvCash.csproj'
-$publishExe = Join-Path $root 'publish\win-x64\VvCash.exe'
 $outputDir = Join-Path $PSScriptRoot 'Output'
-$builtExe  = Join-Path $outputDir 'VvCashInstaller.exe'
-$manifest  = Join-Path $outputDir 'kassa-latest.json'
 $publishCfg = Join-Path $PSScriptRoot 'publish.local.json'
+
+# Everything a release does, it does once per flavor. Kept as a table rather than as two
+# parallel sets of variables, because the failure this whole feature is most exposed to
+# is doing five of the six steps for one flavor and forgetting the sixth - hashing the
+# x64 installer into the x86 manifest, uploading one installer and both manifests, and
+# so on. A loop cannot forget a flavor; a copied block can.
+#
+# The x64 names are exactly what the fleet already polls and downloads. Registers in the
+# field must not notice this change at all.
+$flavors = @(
+    [pscustomobject]@{
+        Name         = 'x64'
+        PublishExe   = Join-Path $root 'publish\win-x64\VvCash.exe'
+        BuiltExe     = Join-Path $outputDir 'VvCashInstaller.exe'
+        KeptName     = 'VvCashInstaller-{0}.exe'
+        ManifestFile = Join-Path $outputDir 'kassa-latest.json'
+        ManifestUrl  = $ManifestUrl
+        RemoteExe    = 'proffi-kassa-setup.exe'
+    }
+    [pscustomobject]@{
+        Name         = 'x86'
+        PublishExe   = Join-Path $root 'publish\win-x86\VvCash.exe'
+        BuiltExe     = Join-Path $outputDir 'VvCashInstaller-x86.exe'
+        KeptName     = 'VvCashInstaller-x86-{0}.exe'
+        ManifestFile = Join-Path $outputDir 'kassa-latest-x86.json'
+        ManifestUrl  = $ManifestUrlX86
+        RemoteExe    = 'proffi-kassa-setup-x86.exe'
+    }
+)
 
 function Write-Step($text) { Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok($text)   { Write-Host "    OK  $text" -ForegroundColor Green }
@@ -80,6 +127,31 @@ function ConvertTo-JsonString($value) {
 
 function Get-Sha256($path) {
     return (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+}
+
+# Step one part of a three-part version. Uses [regex]::Match rather than -match on
+# purpose: the build path below assigns to $matches itself, which shadows the automatic
+# variable -match would write through, and this is not a place to depend on which of the
+# two wins. Stepping major or minor zeroes what follows, so 1.4.7 -minor is 1.5.0 and not
+# 1.5.7 - a version that would sort above the release it came from while claiming patches
+# it never shipped.
+function Step-Version([string]$current, [string]$part) {
+    $m = [regex]::Match($current, '^(\d+)\.(\d+)\.(\d+)$')
+    if (-not $m.Success) {
+        throw "Cannot step version '$current' - the csproj must hold a plain three-part version like 1.0.8. Pass -Version to name the next one outright."
+    }
+
+    $major = [int]$m.Groups[1].Value
+    $minor = [int]$m.Groups[2].Value
+    $patch = [int]$m.Groups[3].Value
+
+    switch ($part) {
+        'major' { $major++; $minor = 0; $patch = 0 }
+        'minor' { $minor++; $patch = 0 }
+        default { $patch++ }
+    }
+
+    return "$major.$minor.$patch"
 }
 
 function Invoke-Native($exe, $argList, $what) {
@@ -175,13 +247,18 @@ function Invoke-Verify($ManifestUrl) {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Verify') {
-    Invoke-Verify $ManifestUrl
+    # Both, always. Verifying only the flavor you happened to think about is how the
+    # other one sits broken on the server for a week: the registers polling it fail the
+    # hash check silently and retry hourly, which looks like nothing at all from here.
+    foreach ($flavor in $flavors) {
+        Write-Host ''
+        Write-Host "--- $($flavor.Name) ---" -ForegroundColor Cyan
+        Invoke-Verify $flavor.ManifestUrl
+    }
     return
 }
 
 # ---------------------------------------------------------------- build mode
-
-Write-Step "Stamping version $Version into VvCash.csproj"
 
 $csprojText = Get-Content $proj -Raw
 $matches = [regex]::Matches($csprojText, '<Version>[^<]*</Version>')
@@ -193,6 +270,25 @@ if ($matches.Count -gt 1) {
 }
 
 $previous = [regex]::Match($csprojText, '<Version>([^<]*)</Version>').Groups[1].Value
+
+if (-not $Version) {
+    $Version = Step-Version $previous $Bump
+    Write-Step "No -Version given; stepping the $Bump part: $previous -> $Version"
+}
+
+# An explicit -Version that goes backwards is worth refusing rather than stamping. The
+# registers compare versions numerically (UpdateService.CheckAsync), so shipping a lower
+# number than the fleet already runs is a release nobody ever sees, and one that quietly
+# strands the real newest build behind a manifest that now names an older one. Equal is
+# allowed and only warned about below: re-running the same version is how a release whose
+# upload died halfway gets pushed again.
+$previousParsed = $null
+if ([Version]::TryParse($previous, [ref]$previousParsed) -and [Version]$Version -lt $previousParsed) {
+    throw "Refusing to stamp $Version over $previous - it goes backwards. Registers only update to a higher version, so this release would be invisible to the whole fleet."
+}
+
+Write-Step "Stamping version $Version into VvCash.csproj"
+
 if ($previous -eq $Version) {
     Write-Warn "csproj already says $Version - nothing to stamp."
 } else {
@@ -205,30 +301,31 @@ Write-Step 'Building the installer'
 & (Join-Path $PSScriptRoot 'build_installer.ps1')
 if ($LASTEXITCODE -ne 0) { throw "build_installer.ps1 failed ($LASTEXITCODE)" }
 
-# The point of this check is that the version has to survive four hops - csproj, MSBuild,
-# the published apphost, and the Inno define - and a mismatch anywhere means registers
-# compare the wrong number and either never update or update in a loop.
-Write-Step 'Checking the version reached the binary'
-$fileVersion = (Get-Item $publishExe).VersionInfo.FileVersion
-if ($fileVersion -ne "$Version.0") {
-    throw "Published VvCash.exe reports FileVersion $fileVersion, expected $Version.0. The version did not survive the build."
-}
-Write-Ok "VvCash.exe reports $fileVersion"
+$releasedAt = (Get-Date).ToString('yyyy-MM-dd')
 
-if (-not (Test-Path $builtExe)) { throw "Installer not found at $builtExe" }
+foreach ($flavor in $flavors) {
+    Write-Step "Preparing the $($flavor.Name) flavor"
 
-$keptExe = Join-Path $outputDir "VvCashInstaller-$Version.exe"
-Copy-Item $builtExe $keptExe -Force
+    # The point of this check is that the version has to survive four hops - csproj,
+    # MSBuild, the published apphost, and the Inno define - and a mismatch anywhere means
+    # registers compare the wrong number and either never update or update in a loop.
+    $fileVersion = (Get-Item $flavor.PublishExe).VersionInfo.FileVersion
+    if ($fileVersion -ne "$Version.0") {
+        throw "Published $($flavor.Name) VvCash.exe reports FileVersion $fileVersion, expected $Version.0. The version did not survive the build."
+    }
+    Write-Ok "VvCash.exe reports $fileVersion"
 
-$sha  = Get-Sha256 $keptExe
-$size = (Get-Item $keptExe).Length
+    if (-not (Test-Path $flavor.BuiltExe)) { throw "Installer not found at $($flavor.BuiltExe)" }
 
-Write-Step 'Writing the manifest'
+    $keptExe = Join-Path $outputDir ($flavor.KeptName -f $Version)
+    Copy-Item $flavor.BuiltExe $keptExe -Force
 
-$downloadUrl = ([Uri]$ManifestUrl).GetLeftPart([System.UriPartial]::Authority) + '/downloads/proffi-kassa-setup.exe'
-$releasedAt  = (Get-Date).ToString('yyyy-MM-dd')
+    $sha  = Get-Sha256 $keptExe
+    $size = (Get-Item $keptExe).Length
 
-$json = @"
+    $downloadUrl = ([Uri]$flavor.ManifestUrl).GetLeftPart([System.UriPartial]::Authority) + '/downloads/' + $flavor.RemoteExe
+
+    $json = @"
 {
   "product": "vvcash",
   "version": "$Version",
@@ -240,38 +337,60 @@ $json = @"
 }
 "@
 
-# No BOM: the manifest is consumed by System.Text.Json over HTTP, and a BOM is one more
-# thing that has to survive an upload tool intact for no benefit.
-[System.IO.File]::WriteAllText($manifest, $json, (New-Object System.Text.UTF8Encoding($false)))
+    # No BOM: the manifest is consumed by System.Text.Json over HTTP, and a BOM is one
+    # more thing that has to survive an upload tool intact for no benefit.
+    [System.IO.File]::WriteAllText($flavor.ManifestFile, $json, (New-Object System.Text.UTF8Encoding($false)))
 
-# Re-read what was written rather than trusting the string above - this is the artifact
-# that decides whether every register in the field updates.
-$check = Get-Content $manifest -Raw | ConvertFrom-Json
-if ($check.sha256 -ne $sha)      { throw 'Manifest hash does not match the installer it was written for.' }
-if ($check.version -ne $Version) { throw 'Manifest version does not match the build.' }
-Write-Ok 'Manifest re-read and consistent.'
+    # Re-read what was written rather than trusting the string above - this is the
+    # artifact that decides whether every register in the field updates.
+    $check = Get-Content $flavor.ManifestFile -Raw | ConvertFrom-Json
+    if ($check.sha256 -ne $sha)      { throw "The $($flavor.Name) manifest hash does not match the installer it was written for." }
+    if ($check.version -ne $Version) { throw "The $($flavor.Name) manifest version does not match the build." }
+    if ($check.url -ne $downloadUrl) { throw "The $($flavor.Name) manifest points at $($check.url), expected $downloadUrl." }
+    Write-Ok 'Manifest re-read and consistent.'
 
-$mb = [math]::Round($size / 1MB, 1)
+    # Carried on the flavor so the publish and reporting steps below need no second pass
+    # over the filesystem to recover what this loop already computed.
+    $flavor | Add-Member -NotePropertyName KeptExe     -NotePropertyValue $keptExe    -Force
+    $flavor | Add-Member -NotePropertyName Sha         -NotePropertyValue $sha        -Force
+    $flavor | Add-Member -NotePropertyName Size        -NotePropertyValue $size       -Force
+    $flavor | Add-Member -NotePropertyName DownloadUrl -NotePropertyValue $downloadUrl -Force
+}
+
+# Both flavors are cut from one source tree at one version, so two installers claiming
+# different versions means the build picked up a stamp mid-flight. Registers would then
+# split across two releases with no way to tell from the server which is which.
+$distinctHashes = ($flavors | Select-Object -ExpandProperty Sha | Sort-Object -Unique).Count
+if ($distinctHashes -ne $flavors.Count) {
+    throw 'Two flavors hashed identically. That means the same installer was copied twice - one architecture would be shipped the other one.'
+}
 
 Write-Host ''
 Write-Host "Release $Version ready." -ForegroundColor Green
-Write-Host ''
-Write-Host "  installer  $keptExe ($mb MB)"
-Write-Host "  sha256     $sha"
-Write-Host "  manifest   $manifest"
+foreach ($flavor in $flavors) {
+    $mb = [math]::Round($flavor.Size / 1MB, 1)
+    Write-Host ''
+    Write-Host "  $($flavor.Name)"
+    Write-Host "    installer  $($flavor.KeptExe) ($mb MB)"
+    Write-Host "    sha256     $($flavor.Sha)"
+    Write-Host "    manifest   $($flavor.ManifestFile)"
+}
+
 if (-not $Publish) {
     Write-Host ''
-    Write-Host 'Upload both, keeping these names:' -ForegroundColor Cyan
-    Write-Host "  $keptExe  ->  $downloadUrl"
-    Write-Host "  $manifest  ->  $ManifestUrl"
+    Write-Host 'Upload all four, keeping these names:' -ForegroundColor Cyan
+    foreach ($flavor in $flavors) {
+        Write-Host "  $($flavor.KeptExe)  ->  $($flavor.DownloadUrl)"
+        Write-Host "  $($flavor.ManifestFile)  ->  $($flavor.ManifestUrl)"
+    }
     Write-Host ''
     Write-Host 'Then confirm the server really has them:' -ForegroundColor Cyan
     Write-Host '  powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Verify'
     Write-Host ''
     Write-Host 'Or let the script do it:  -Publish' -ForegroundColor Cyan
     Write-Host ''
-    Write-Host 'Uploading the installer without the manifest leaves every register on the old' -ForegroundColor Yellow
-    Write-Host 'version silently. Uploading the manifest without the installer is worse: registers' -ForegroundColor Yellow
+    Write-Host 'Uploading an installer without its manifest leaves those registers on the old' -ForegroundColor Yellow
+    Write-Host 'version silently. Uploading a manifest without its installer is worse: registers' -ForegroundColor Yellow
     Write-Host 'download whatever is there, fail the hash check, and retry every hour.' -ForegroundColor Yellow
     return
 }
@@ -303,21 +422,32 @@ foreach ($field in @('sshTarget', 'remoteDir')) {
 $sshPort = $null
 if ($cfg.PSObject.Properties.Name.Contains('sshPort') -and $cfg.sshPort) { $sshPort = $cfg.sshPort }
 
-$remoteExeName = [System.IO.Path]::GetFileName(([Uri]$downloadUrl).AbsolutePath)
-$remoteManifestName = [System.IO.Path]::GetFileName(([Uri]$ManifestUrl).AbsolutePath)
-
 Write-Step "Publishing to $($cfg.sshTarget):$($cfg.remoteDir)"
 
-# Order is not a style choice. The manifest is what makes a release visible to the
-# registers, so it goes last: if the installer upload fails, nothing has changed and
-# every register stays on the old version. Publish the manifest first and a failed
-# installer upload leaves the fleet downloading whatever stale file is still there,
-# failing the hash check, and retrying every hour with no way to tell the cashier why.
-Send-File $keptExe   $cfg.remoteDir $remoteExeName      $cfg.sshTarget $sshPort
-Send-File $manifest  $cfg.remoteDir $remoteManifestName $cfg.sshTarget $sshPort
+# Order is not a style choice. A manifest is what makes a release visible to the
+# registers, so manifests go last: if an installer upload fails, nothing has changed and
+# every register stays on the old version. Publish a manifest first and a failed
+# installer upload leaves that half of the fleet downloading whatever stale file is still
+# there, failing the hash check, and retrying every hour with no way to tell the cashier
+# why.
+#
+# For the same reason the two loops are not merged into one pass per flavor: that would
+# put the x64 manifest live before the x86 installer had been sent, and a failure in
+# between would leave the server describing a release only half of it can actually serve.
+foreach ($flavor in $flavors) {
+    $remoteExeName = [System.IO.Path]::GetFileName(([Uri]$flavor.DownloadUrl).AbsolutePath)
+    Send-File $flavor.KeptExe $cfg.remoteDir $remoteExeName $cfg.sshTarget $sshPort
+}
+foreach ($flavor in $flavors) {
+    $remoteManifestName = [System.IO.Path]::GetFileName(([Uri]$flavor.ManifestUrl).AbsolutePath)
+    Send-File $flavor.ManifestFile $cfg.remoteDir $remoteManifestName $cfg.sshTarget $sshPort
+}
 
-Write-Host ''
-Invoke-Verify $ManifestUrl
+foreach ($flavor in $flavors) {
+    Write-Host ''
+    Write-Host "--- $($flavor.Name) ---" -ForegroundColor Cyan
+    Invoke-Verify $flavor.ManifestUrl
+}
 
 Write-Host ''
 Write-Host "Release $Version is live." -ForegroundColor Green

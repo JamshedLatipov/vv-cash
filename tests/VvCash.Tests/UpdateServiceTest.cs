@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Services.Update;
@@ -194,6 +195,76 @@ public class UpdateServiceTest
 
         // A register with no internet must not see an error — it just keeps trading.
         Assert.Null(await service.CheckAsync(CancellationToken.None));
+    }
+
+    // ------------------------------------------------------------------ flavors
+    //
+    // Two builds ship per release: x64 for the fleet and x86 for the registers left on
+    // 32-bit Windows 7. Each polls its own manifest, so neither can ever be handed the
+    // other's installer.
+
+    private const string X86ManifestUrl = "https://proffi.io/downloads/kassa-latest-x86.json";
+
+    private static (UpdateService Service, StubHttpMessageHandler Handler) BuildFor(
+        string manifestUrl, string body)
+    {
+        var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body));
+        var service = new UpdateService(
+            new HttpClient(handler),
+            new FakeVersionProvider("1.0.0"),
+            downloadDirectory: null,
+            manifestUrl: manifestUrl);
+        return (service, handler);
+    }
+
+    [Fact]
+    public void DefaultManifestUrlFollowsTheProcessArchitecture()
+    {
+        // Both literals are a contract with release.ps1, which publishes exactly these
+        // two file names. A register polling a name no release ever uploads reads the
+        // 404 as "nothing new" and sits on an old build indefinitely, with nothing
+        // anywhere reporting a fault.
+        var expected = RuntimeInformation.ProcessArchitecture == Architecture.X86
+            ? X86ManifestUrl
+            : "https://proffi.io/downloads/kassa-latest.json";
+
+        Assert.Equal(expected, UpdateService.DefaultManifestUrl);
+    }
+
+    [Fact]
+    public async Task ThePollGoesToTheManifestItWasGiven()
+    {
+        var (service, handler) = BuildFor(X86ManifestUrl, Manifest());
+
+        await service.CheckAsync(CancellationToken.None);
+
+        Assert.Equal(X86ManifestUrl, handler.LastRequest?.RequestUri?.ToString());
+    }
+
+    [Fact]
+    public async Task DownloadHostIsPinnedToTheManifestActuallyPolled()
+    {
+        // Pinning follows this instance's manifest rather than a fixed constant. Had it
+        // stayed bound to the x64 URL, moving the x86 manifest to another host would
+        // quietly disable the check for those registers instead of failing loudly.
+        var (service, _) = BuildFor(
+            X86ManifestUrl,
+            Manifest(url: "https://elsewhere.example/downloads/proffi-kassa-setup-x86.exe"));
+
+        Assert.Null(await service.CheckAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TheX86FlavorIsOfferedItsOwnInstaller()
+    {
+        var (service, _) = BuildFor(
+            X86ManifestUrl,
+            Manifest(url: "https://proffi.io/downloads/proffi-kassa-setup-x86.exe"));
+
+        var info = await service.CheckAsync(CancellationToken.None);
+
+        Assert.NotNull(info);
+        Assert.Equal("https://proffi.io/downloads/proffi-kassa-setup-x86.exe", info!.Url);
     }
 
     private static string Sha256Of(string content)
