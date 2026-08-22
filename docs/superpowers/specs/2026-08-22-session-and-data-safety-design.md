@@ -143,25 +143,35 @@ NavigateToPos():
         customerVm = resolve CustomerDisplayViewModel
         posVm.CustomerDisplayViewModel = customerVm
         customerWindow.DataContext = customerVm            // перевешиваем, окно то же
-        posVm.CustomerDisplayVisibilityChanged += (_, v) => v ? Show() : Hide()
-        применить текущее posVm.IsCustomerDisplayEnabled
+        posVm.SubscribeCustomerDisplayVisibility((_, v) => v ? Show() : Hide())
 ```
 
 **Нужно и событие, и применение текущего значения.** Сгенерированный
 `OnIsCustomerDisplayEnabledChanged` срабатывает только на *изменение*.
 `CashFeatureService` — синглтон и переживает logout→login, поэтому на момент
 `NavigateToPos` флаг уже может быть в финальном значении и события не будет
-никогда. Отсюда: хост применяет текущее значение при подвязке, а событие ловит
-последующую поправку от `InitializeAsync` → `RefreshAsync` → `ApplyFeatures`.
-Все четыре комбинации (было/стало × вкл/выкл) сходятся.
+никогда. Оба шага упакованы в `SubscribeCustomerDisplayVisibility`: он подписывает
+и тут же зовёт обработчик с текущим значением. Правило, оставленное комментарием,
+однажды забудут — здесь его нельзя обойти. Все четыре комбинации
+(было/стало × вкл/выкл) сходятся.
 
 **Скрытие при выходе.** В существующий обработчик `posVm.LogoutRequested`
 добавляется `customerWindow?.Hide()` — иначе экран покупателя продолжает светить
 последнюю корзину, пока следующий кассир вводит пароль. Та же поломка времени
 жизни, чинится в том же месте.
 
-Утечки подписки нет: издатель события — транзиентный `PosViewModel`, подписчик —
-лямбда хоста; уходит `posVm`, уходит и лямбда.
+**Про утечку подписки — исходное утверждение спеки было неверным.** Здесь стояло
+«издатель транзиентный, уходит `posVm` — уходит и лямбда». Это опровергается
+комментариями самого `App.axaml.cs`: `PosViewModel` резолвится через
+`GetRequiredService` из корневого провайдера, а контейнер удерживает каждый
+созданный им `IDisposable` до конца жизни процесса (ровно поэтому
+`SellerSwitchViewModel` строится через `ActivatorUtilities.CreateInstance`).
+Экземпляры не собираются, и `InitializeAsync`, запущенный fire-and-forget без
+токена отмены, может дописать флаг уже после того, как экран сменился — и дёрнуть
+общее долгоживущее окно текущей сессии. Поэтому `PosViewModel.Dispose` обнуляет
+`CustomerDisplayVisibilityChanged`, а подписка идёт через
+`SubscribeCustomerDisplayVisibility`, который сам применяет текущее значение —
+правило, которое вызывающий не может забыть.
 
 ### Тестовый обход двух экранов
 

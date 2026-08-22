@@ -985,7 +985,7 @@ Then replace the body of `OnIsCustomerDisplayEnabledChanged` with:
 & ./run-tests.ps1
 ```
 
-Expected: 701 passed, 0 failed.
+Expected: 702 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
 
@@ -1125,17 +1125,17 @@ with:
                     posVm.CustomerDisplayViewModel = customerVm;
                     customerWindow.DataContext = customerVm;
 
-                    // Both halves are required. The generated OnIsCustomerDisplayEnabledChanged
-                    // fires only on a CHANGE, and ICashFeatureService is a singleton that
-                    // survives logout->login — so the flag may already hold its final value by
-                    // now and never raise anything. Apply what we have, then let the event carry
-                    // InitializeAsync's later correction once the cached map is actually loaded.
+                    // SubscribeCustomerDisplayVisibility, not +=. The generated
+                    // OnIsCustomerDisplayEnabledChanged fires only on a CHANGE, and
+                    // ICashFeatureService is a singleton that survives logout->login — so the
+                    // flag may already hold its final value by now and never raise anything at
+                    // all. That method subscribes AND calls the handler with the current value,
+                    // so the initial sync cannot be forgotten here.
                     var window = customerWindow;
-                    posVm.CustomerDisplayVisibilityChanged += (s, visible) =>
+                    posVm.SubscribeCustomerDisplayVisibility((s, visible) =>
                     {
                         if (visible) window.Show(); else window.Hide();
-                    };
-                    if (posVm.IsCustomerDisplayEnabled) window.Show(); else window.Hide();
+                    });
                 }
 ```
 
@@ -1150,7 +1150,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: `Build succeeded`, then 701 passed, 0 failed.
+Expected: `Build succeeded`, then 702 passed, 0 failed.
 
 - [ ] **Step 6: Commit**
 
@@ -1281,7 +1281,7 @@ Expected: no matches at all.
 & ./run-tests.ps1
 ```
 
-Expected: 701 passed, 0 failed.
+Expected: 702 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1620,7 +1620,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: five `ok` lines, `Build succeeded`, then 706 passed, 0 failed.
+Expected: five `ok` lines, `Build succeeded`, then 707 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1652,7 +1652,7 @@ at compile time.
 & ./run-tests.ps1
 ```
 
-Expected: 706 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
+Expected: 707 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
 a real one. Run it twice: a result that differs between runs means something reintroduced
 parallel access to `Dispatcher.UIThread`.
 
@@ -1718,7 +1718,7 @@ fix before considering batch A done — do not open batch B on top of an unverif
 ## Done when
 
 - All ten tasks (0 through 9) are checked off.
-- `& ./run-tests.ps1` reports 706 passed and 0 failed, twice in a row.
+- `& ./run-tests.ps1` reports 707 passed and 0 failed, twice in a row.
 - Task 9's manual checklist passed on a real run of the app.
 - Findings 1, 2 and 5 from the code review are closed. Findings 3, 4, 6–18 remain open and
   belong to batches B, C and D.
