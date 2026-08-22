@@ -15,6 +15,7 @@ public class ShiftService : IShiftService
     private readonly ISessionContext _session;
 
     public event EventHandler? SessionRevoked;
+    public event EventHandler? AccessDenied;
 
     public ShiftService(HttpClient httpClient, ISettingsService settingsService, ISessionContext session)
     {
@@ -34,6 +35,17 @@ public class ShiftService : IShiftService
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             SessionRevoked?.Invoke(this, EventArgs.Empty);
+        });
+    }
+
+    /// <summary>Mirrors <see cref="NotifySessionRevoked"/>'s marshalling for the same
+    /// reason: the subscriber mutates UI-bound state, and posting keeps this safe if a
+    /// future caller ever awaits either method from a background thread.</summary>
+    private void NotifyAccessDenied()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            AccessDenied?.Invoke(this, EventArgs.Empty);
         });
     }
 
@@ -111,6 +123,17 @@ public class ShiftService : IShiftService
                 Console.WriteLine("[ShiftService] OpenShiftAsync got 401 Unauthorized — session revoked.");
                 Debug.WriteLine("[ShiftService] OpenShiftAsync got 401 Unauthorized — session revoked.");
                 NotifySessionRevoked();
+                return null;
+            }
+
+            // The code this backend really uses for a rejected session. Not merged with the
+            // 401 branch above: 403 is ambiguous here (see IShiftService.AccessDenied), so
+            // it must not reach PosViewModel's automatic sign-out.
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                Console.WriteLine("[ShiftService] OpenShiftAsync got 403 Forbidden — access denied.");
+                Debug.WriteLine("[ShiftService] OpenShiftAsync got 403 Forbidden — access denied.");
+                NotifyAccessDenied();
                 return null;
             }
 
@@ -220,6 +243,14 @@ public class ShiftService : IShiftService
                 Console.WriteLine("[ShiftService] GetShiftStateAsync got 401 Unauthorized — session revoked.");
                 Debug.WriteLine("[ShiftService] GetShiftStateAsync got 401 Unauthorized — session revoked.");
                 NotifySessionRevoked();
+            }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                // Same ambiguity as OpenShiftAsync's own 403 branch — see
+                // IShiftService.AccessDenied for why this is not a sign-out.
+                Console.WriteLine("[ShiftService] GetShiftStateAsync got 403 Forbidden — access denied.");
+                Debug.WriteLine("[ShiftService] GetShiftStateAsync got 403 Forbidden — access denied.");
+                NotifyAccessDenied();
             }
             return null;
         }

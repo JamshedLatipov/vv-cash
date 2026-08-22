@@ -284,6 +284,13 @@ public class PosViewModelSellerGateTest
         /// OnShiftSessionRevoked subscription is what's under test, not this fake's
         /// plumbing (mirrors FakeExpenseDocumentService.RaiseSessionRevoked above).</summary>
         public void RaiseSessionRevoked() => SessionRevoked?.Invoke(this, EventArgs.Empty);
+
+        public event EventHandler? AccessDenied;
+
+        /// <summary>Stands in for the real ShiftService hitting a 403 — the code this
+        /// backend actually sends for a rejected session. Unlike RaiseSessionRevoked this
+        /// must NOT lead to a sign-out; see IShiftService.AccessDenied.</summary>
+        public void RaiseAccessDenied() => AccessDenied?.Invoke(this, EventArgs.Empty);
     }
 
     private class FakeOfflineStorageService : IOfflineStorageService
