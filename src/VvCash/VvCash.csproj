@@ -31,6 +31,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
     <PackageReference Include="System.IO.Ports" Version="8.0.0" />
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
     <!-- Security override: transitive Tmds.DBus.Protocol 0.20.0 (via Avalonia.FreeDesktop) has GHSA-xrw6-gwf8-vvr9. Pin to patched 0.21.3. Linux D-Bus path only; no Windows impact. -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
     <!-- Security override: transitive SQLitePCLRaw 2.1.11 (via Microsoft.Data.Sqlite 10.0.5)
