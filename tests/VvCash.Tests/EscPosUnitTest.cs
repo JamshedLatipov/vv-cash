@@ -148,6 +148,22 @@ public class EscPosUnitTest
     }
 
     [Fact]
+    public void PreReceipt_CarriesItsLinesAndTotal()
+    {
+        // Разметка пречека до извлечения BuildPreReceipt доставалась только через
+        // сокет, поэтому не проверялась вовсе — а печатают его за смену чаще
+        // любого другого чека.
+        var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 2m };
+
+        var text = EscPosCodePages.Cp866.Encoding.GetString(
+            EscPosPrinterService.BuildPreReceipt(EscPosCodePages.Cp866, new[] { line }, total: 20m));
+
+        Assert.Contains("PRE-RECEIPT", text);
+        Assert.Contains("Товар x2", text);
+        Assert.Contains("20.00", text);
+    }
+
+    [Fact]
     public void ReturnReceipt_SelectsTheCodePage()
     {
         var bytes = EscPosPrinterService.BuildReturnReceipt(

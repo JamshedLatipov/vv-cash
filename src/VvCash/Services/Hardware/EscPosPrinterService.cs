@@ -171,9 +171,9 @@ public class EscPosPrinterService : IPrinterService
     }
 
     /// <summary>Builds the pre-receipt bytes. Static and separate from sending,
-    /// exactly as BuildSaleReceipt is — this used to be assembled inline inside
-    /// PrintPreReceiptAsync, the one of the four ESC @ sites WriteInit guards
-    /// against drift that had no test of its own.</summary>
+    /// exactly as BuildSaleReceipt is. This was assembled inline in
+    /// PrintPreReceiptAsync, which is why it was the one ESC @ site with no test
+    /// of its own: the layout could only be reached through a socket.</summary>
     public static byte[] BuildPreReceipt(EscPosCodePage codePage, IEnumerable<CartItem> items, decimal total)
     {
         using var ms = new MemoryStream();
@@ -213,10 +213,14 @@ public class EscPosPrinterService : IPrinterService
     private static void Write(MemoryStream ms, byte[] data) => ms.Write(data, 0, data.Length);
 
     /// <summary>ESC @ и следом ESC t n. Одним методом, а не двумя командами по
-    /// месту: CmdInit пишется в каждом билдере, и дописывать выбор таблицы руками
-    /// рядом с каждым значит однажды пропустить один из них. Пречек за смену
-    /// печатается чаще всех прочих чеков вместе взятых, и его молчаливый откат на
-    /// дефолтную таблицу выглядел бы как «иногда печатает мусор».</summary>
+    /// месту: инициализацию пишет каждый билдер, а новый документ заводится
+    /// копированием соседнего. Дописывай выбор таблицы руками — рано или поздно
+    /// скопируется один ESC @ без него, и это ничем себя не выдаст: принтер не
+    /// ругается на неназванную таблицу, он молча берёт свою умолчательную и
+    /// печатает кириллицу мусором. Дороже всего промах в пречеке — за смену их
+    /// выходит больше, чем всех прочих чеков вместе, — и до разработчика жалоба
+    /// доходит как «иногда печатает абракадабру», без документа и без принтера,
+    /// на которые её можно повесить.</summary>
     private static void WriteInit(MemoryStream ms, EscPosCodePage codePage)
     {
         Write(ms, CmdInit);
