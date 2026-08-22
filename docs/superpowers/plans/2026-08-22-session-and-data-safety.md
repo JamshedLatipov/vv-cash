@@ -27,9 +27,8 @@ inside `Avalonia.Threading.DispatcherPriorityQueue`. The cause is ours, not Aval
 `RunJobs()`, and xunit's default parallelises across collections (one per class). Task 0
 serialises the suite so every task after it has a signal worth reading.
 
-The per-task expected counts are 678 plus the tests each task adds: Task 1 adds 5, Task 2
-adds 3, Task 4 adds 9 (the `off` theory counts as three cases), Task 5 adds 2, Task 8 adds
-5 — ending at 702 passing, zero failing. Tasks 3, 6, 7 and 9 add none. A count that is off
+The per-task expected counts are 678 plus the tests each task adds: Task 1 adds 6, Task 2
+adds 3, Task 4 adds 12, Task 5 adds 2, Task 8 adds 5 — ending at 706 passing, zero failing. Tasks 3, 6, 7 and 9 add none. A count that is off
 by a fixed amount from the start means the baseline moved rather than the task failing;
 re-check with `git stash` before hunting a bug.
 
@@ -372,7 +371,7 @@ and Task 2's tests need it anyway.
 & ./run-tests.ps1
 ```
 
-Expected: 683 passed, 0 failed — the 678 baseline plus the five new tests.
+Expected: 684 passed, 0 failed — the 678 baseline plus the six new tests.
 
 - [ ] **Step 7: Commit**
 
@@ -551,7 +550,7 @@ In `Dispose`, directly below the existing line
 & ./run-tests.ps1
 ```
 
-Expected: 686 passed, 0 failed. Task 0 serialised the suite, so a failure here is a real
+Expected: 687 passed, 0 failed. Task 0 serialised the suite, so a failure here is a real
 one — read it rather than re-running until it goes away.
 
 - [ ] **Step 5: Commit**
@@ -734,20 +733,20 @@ public class CustomerDisplayPlacementSelectorTest
 
         Assert.NotNull(placement);
         Assert.Equal(Secondary.Position, placement!.Position);
-        Assert.False(placement.ForcedForTesting);
+        Assert.False(placement.ForcedOnSingleScreen);
     }
 
     [Fact]
     public void ForceOnASingleScreen_PlacesItOnTheOnlyScreen_AndMarksItForced()
     {
-        // The development escape hatch. ForcedForTesting is what makes the host raise the
+        // The development escape hatch. ForcedOnSingleScreen is what makes the host raise the
         // window above the full-screen Topmost MainWindow — without it the window would be
         // created, shown, and completely invisible.
         var placement = CustomerDisplayPlacementSelector.Select("force", Screens(Primary));
 
         Assert.NotNull(placement);
         Assert.Equal(Primary.Position, placement!.Position);
-        Assert.True(placement.ForcedForTesting);
+        Assert.True(placement.ForcedOnSingleScreen);
     }
 
     [Fact]
@@ -760,7 +759,7 @@ public class CustomerDisplayPlacementSelectorTest
 
         Assert.NotNull(placement);
         Assert.Equal(Secondary.Position, placement!.Position);
-        Assert.False(placement.ForcedForTesting);
+        Assert.False(placement.ForcedOnSingleScreen);
     }
 
     [Theory]
@@ -818,11 +817,11 @@ namespace VvCash.Services;
 
 /// <summary>Where the customer-facing window goes, or that it should not exist.</summary>
 /// <param name="Position">Top-left corner, in device pixels.</param>
-/// <param name="ForcedForTesting">True only when the window was forced onto a machine that
+/// <param name="ForcedOnSingleScreen">True only when the window was forced onto a machine that
 /// has just one screen. The host reads this to make the window Topmost and modestly sized:
 /// MainWindow is full-screen and Topmost, so a customer window merely placed beside it on
 /// the same monitor would sit behind it and be invisible. Always false in production.</param>
-public sealed record CustomerDisplayPlacement(PixelPoint Position, bool ForcedForTesting);
+public sealed record CustomerDisplayPlacement(PixelPoint Position, bool ForcedOnSingleScreen);
 
 /// <summary>Decides whether this register gets a customer-facing window and where it lands,
 /// before any such window exists.
@@ -846,16 +845,16 @@ public static class CustomerDisplayPlacementSelector
         var mode = overrideValue?.Trim().ToLowerInvariant();
 
         if (mode == "off") return null;
-        if (screens is null || screens.Count == 0) return null;
+        if (screens.Count == 0) return null;
 
         // A real second screen always wins, override or not. "force" exists to make the
         // window EXIST on a one-screen machine, not to turn a genuine customer display into
         // a Topmost overlay on top of the POS.
         if (screens.Count > 1)
-            return new CustomerDisplayPlacement(screens[1].Position, ForcedForTesting: false);
+            return new CustomerDisplayPlacement(screens[1].Position, ForcedOnSingleScreen: false);
 
         return mode == "force"
-            ? new CustomerDisplayPlacement(screens[0].Position, ForcedForTesting: true)
+            ? new CustomerDisplayPlacement(screens[0].Position, ForcedOnSingleScreen: true)
             : null;
     }
 }
@@ -864,10 +863,21 @@ public static class CustomerDisplayPlacementSelector
 - [ ] **Step 4: Run the tests to verify they pass**
 
 ```powershell
-& ./run-tests.ps1 --filter "FullyQualifiedName~CustomerDisplayPlacementSelectorTest"
+& ./run-tests.ps1
 ```
 
-Expected: PASS, 9 tests.
+Expected: **699 passed, 0 failed** — 687 plus this task's 12 cases (each of the two
+theories contributes three).
+
+> **Review outcome:** the code review held this against its stated model,
+> `RenderingSelector`/`RenderingSelectorTest`, and required three additions before it was
+> honestly at parity: a three-screen case (so narrowing `> 1` to `== 2` cannot pass), the
+> `""` and `"   "` override cases the model pins explicitly, and dropping the `screens is
+> null` guard — the parameter is non-nullable under `<Nullable>enable</Nullable>` and the
+> model trusts its own contract rather than defending an unreachable state. `ForcedForTesting`
+> was also renamed to `ForcedOnSingleScreen`: production host code branches on it, so a name
+> implying a test-only concern misleads at the call site. The code above already reflects all
+> of that.
 
 - [ ] **Step 5: Commit**
 
@@ -975,7 +985,7 @@ Then replace the body of `OnIsCustomerDisplayEnabledChanged` with:
 & ./run-tests.ps1
 ```
 
-Expected: 697 passed, 0 failed.
+Expected: 701 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
 
@@ -1101,7 +1111,7 @@ with:
                         // Topmost, so a customer window merely placed beside it on the same
                         // screen would sit behind it and never be seen. Never true in
                         // production — see CustomerDisplayPlacementSelector.
-                        if (placement.ForcedForTesting)
+                        if (placement.ForcedOnSingleScreen)
                         {
                             customerWindow.Topmost = true;
                             customerWindow.Width = 640;
@@ -1140,7 +1150,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: `Build succeeded`, then 697 passed, 0 failed.
+Expected: `Build succeeded`, then 701 passed, 0 failed.
 
 - [ ] **Step 6: Commit**
 
@@ -1271,7 +1281,7 @@ Expected: no matches at all.
 & ./run-tests.ps1
 ```
 
-Expected: 697 passed, 0 failed.
+Expected: 701 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1610,7 +1620,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: five `ok` lines, `Build succeeded`, then 702 passed, 0 failed.
+Expected: five `ok` lines, `Build succeeded`, then 706 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1642,7 +1652,7 @@ at compile time.
 & ./run-tests.ps1
 ```
 
-Expected: 702 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
+Expected: 706 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
 a real one. Run it twice: a result that differs between runs means something reintroduced
 parallel access to `Dispatcher.UIThread`.
 
@@ -1708,7 +1718,7 @@ fix before considering batch A done — do not open batch B on top of an unverif
 ## Done when
 
 - All ten tasks (0 through 9) are checked off.
-- `& ./run-tests.ps1` reports 702 passed and 0 failed, twice in a row.
+- `& ./run-tests.ps1` reports 706 passed and 0 failed, twice in a row.
 - Task 9's manual checklist passed on a real run of the app.
 - Findings 1, 2 and 5 from the code review are closed. Findings 3, 4, 6–18 remain open and
   belong to batches B, C and D.
