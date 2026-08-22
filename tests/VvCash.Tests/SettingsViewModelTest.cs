@@ -105,6 +105,17 @@ public class SettingsViewModelTest
             new FakePaymentCategories());
     }
 
+    /// <summary>Для тестов, которым нужна касса с уже настроенным состоянием:
+    /// Build(out …) создаёт FakeSettings сам, и заполнить их до конструктора
+    /// вью-модели нечем, а часть настроек читается именно там.</summary>
+    private static SettingsViewModel BuildWith(FakeSettings settings)
+        => new SettingsViewModel(
+            new MainViewModel(),
+            settings,
+            new FakeStorage(),
+            new FakeFeatures(),
+            new FakePaymentCategories());
+
     [Theory]
     [InlineData("http://api.example.test/v1/")]
     [InlineData("example.test")]
@@ -221,5 +232,38 @@ public class SettingsViewModelTest
 
         Assert.Equal(0, storage.ClearProductsCallCount);
         Assert.Equal(1, storage.ClearCategoriesCallCount);
+    }
+
+    [Fact]
+    public void Save_WritesTheCodePagePerPrinter()
+    {
+        // На принтер, а не на кассу: в магазине могут стоять две разные железки.
+        var vm = Build(out var settings);
+        // Save() отказывает без валидного адреса (см. Save_RefusesAnAddressThatIsNotHttps);
+        // это не то, что проверяет этот тест, поэтому адрес просто предоставлен.
+        vm.BackendUrl = "https://api.example.test/v1/";
+        vm.AddPrinterCommand.Execute(null);
+        vm.Printers[0].SelectedCodePage = EscPosCodePages.Cp1251;
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal("CP1251", settings.Printers[0].CodePageId);
+    }
+
+    [Fact]
+    public void Load_ResolvesAnUnknownCodePageToTheDefault()
+    {
+        var settings = new FakeSettings
+        {
+            Printers = new List<PrinterConfig>
+            {
+                new() { Name = "P", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.1:9100", CodePageId = "CP-gone" }
+            }
+        };
+
+        var vm = BuildWith(settings);
+
+        Assert.Same(EscPosCodePages.Default, vm.Printers[0].SelectedCodePage);
     }
 }

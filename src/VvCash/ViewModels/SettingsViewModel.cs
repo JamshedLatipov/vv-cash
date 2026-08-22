@@ -32,6 +32,16 @@ public partial class PrinterConfigViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ConnectionLabel))]
     private PrinterConnectionType _connectionType;
 
+    /// <summary>Каталог целиком: он неизменен и не зависит от сети — как
+    /// AvailablePhoneFormats рядом.</summary>
+    public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
+
+    /// <summary>Nullable по той же причине, что SelectedPhoneFormat: SelectingItemsControl
+    /// приводит SelectedItem к null и пишет его обратно через TwoWay, если присвоенного
+    /// значения не нашлось в ItemsSource.</summary>
+    [ObservableProperty]
+    private EscPosCodePage? _selectedCodePage = EscPosCodePages.Default;
+
     public ObservableCollection<string> AvailableConnections { get; } = new();
 
     public bool IsLan => ConnectionType == PrinterConnectionType.LAN;
@@ -198,7 +208,8 @@ public partial class SettingsViewModel : ViewModelBase
                 Name = printer.Name,
                 ConnectionType = printer.ConnectionType,
                 ConnectionString = printer.ConnectionString,
-                IsEnabled = printer.IsEnabled
+                IsEnabled = printer.IsEnabled,
+                SelectedCodePage = EscPosCodePages.Resolve(printer.CodePageId)
             };
             vm.UpdateAvailableConnections();
             Printers.Add(vm);
@@ -227,7 +238,8 @@ public partial class SettingsViewModel : ViewModelBase
             Name = "New Printer",
             ConnectionType = PrinterConnectionType.LAN,
             ConnectionString = "192.168.1.100:9100",
-            IsEnabled = true
+            IsEnabled = true,
+            SelectedCodePage = EscPosCodePages.Default
         };
         vm.UpdateAvailableConnections();
         Printers.Add(vm);
@@ -379,7 +391,10 @@ public partial class SettingsViewModel : ViewModelBase
             Name = p.Name,
             ConnectionType = p.ConnectionType,
             ConnectionString = p.ConnectionString,
-            IsEnabled = p.IsEnabled
+            IsEnabled = p.IsEnabled,
+            // Пустой выбор — это не «страницу сбросили»: тот же приём, что у
+            // SelectedPhoneFormat и категорий платежа выше.
+            CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id
         }).ToList();
 
         _settingsService.Save();

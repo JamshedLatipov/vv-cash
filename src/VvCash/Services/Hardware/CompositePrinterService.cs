@@ -43,7 +43,7 @@ public class CompositePrinterService : IPrinterService
             foreach (var config in configs)
             {
                 var printer = new EscPosPrinterService(config.ConnectionType, config.ConnectionString,
-                    EscPosCodePages.Default);
+                    EscPosCodePages.Resolve(config.CodePageId));
                 printer.StatusChanged += OnPrinterStatusChanged;
                 _printers.Add(printer);
             }
