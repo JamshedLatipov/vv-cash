@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text;
 using VvCash.Models;
 using VvCash.Services.Hardware;
 using Xunit;
@@ -14,8 +13,8 @@ public class EscPosExchangeTest
         var returned = new List<ReturnReceiptLine> { new("Old Shirt", 1, 80m) };
         var issued = new List<ReturnReceiptLine> { new("New Shirt", 1, 130m) };
 
-        var bytes = EscPosPrinterService.BuildExchangeReceipt(returned, issued, 50m, "9");
-        var text = Encoding.UTF8.GetString(bytes);
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(EscPosCodePages.Cp866, returned, issued, 50m, "9");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
 
         Assert.Contains("Old Shirt", text);
         Assert.Contains("New Shirt", text);
@@ -30,8 +29,8 @@ public class EscPosExchangeTest
         var returned = new List<ReturnReceiptLine> { new("Old Shirt", 1, 130m) };
         var issued = new List<ReturnReceiptLine> { new("New Shirt", 1, 90m) };
 
-        var bytes = EscPosPrinterService.BuildExchangeReceipt(returned, issued, -40m, "9");
-        var text = Encoding.UTF8.GetString(bytes);
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(EscPosCodePages.Cp866, returned, issued, -40m, "9");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
 
         Assert.Contains("REFUND", text); // refund label carries the direction
         Assert.Contains("40", text);
@@ -45,8 +44,8 @@ public class EscPosExchangeTest
         var returned = new List<ReturnReceiptLine> { new("Old Shirt", 1, 90m) };
         var issued = new List<ReturnReceiptLine> { new("New Shirt", 1, 90m) };
 
-        var bytes = EscPosPrinterService.BuildExchangeReceipt(returned, issued, 0m, "9");
-        var text = Encoding.UTF8.GetString(bytes);
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(EscPosCodePages.Cp866, returned, issued, 0m, "9");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
 
         // Nothing is owed either way, so neither label applies — "REFUND: 0.00" reads
         // as a refund the customer never gets.
@@ -62,8 +61,8 @@ public class EscPosExchangeTest
         var issued = new List<ReturnReceiptLine> { new("New Shirt", 1, 130m) };
 
         var bytes = EscPosPrinterService.BuildExchangeReceipt(
-            returned, issued, 50m, "9", warehouseName: "Central Store", sellerName: "Ivanov I.", saleDate: "06.06.2026 17:32");
-        var text = Encoding.UTF8.GetString(bytes);
+            EscPosCodePages.Cp866, returned, issued, 50m, "9", warehouseName: "Central Store", sellerName: "Ivanov I.", saleDate: "06.06.2026 17:32");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
 
         Assert.Contains("Central Store", text);
         Assert.Contains("Ivanov I.", text);
