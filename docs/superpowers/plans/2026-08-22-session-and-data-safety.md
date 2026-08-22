@@ -132,6 +132,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `src/VvCash/Services/Api/IShiftService.cs`
 - Modify: `src/VvCash/Services/Api/ShiftService.cs`
 - Test: `tests/VvCash.Tests/ShiftServiceTest.cs`
+- Modify: `tests/VvCash.Tests/PosViewModelSellerGateTest.cs` (the fake's new member — see Step 5)
 
 **Root cause:** `ShiftService` checks only `HttpStatusCode.Unauthorized` (lines 109 and 216).
 This backend answers a rejected session with **403**, never 401 on an authenticated route —
@@ -341,20 +342,41 @@ insert:
             }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 5: Teach the test fake the new member, so the tree still builds**
 
-```powershell
-& ./run-tests.ps1 --filter "FullyQualifiedName~ShiftServiceTest"
+Adding a member to `IShiftService` breaks every implementer of it, including the fake in
+the other test file. `--filter` cannot route around this: it selects which tests *run*, not
+which files *compile*, so the whole test assembly must build regardless. Leaving that to
+the next task would mean shipping a commit that cannot build — useless to `git bisect` and
+red in CI on that SHA.
+
+In `tests/VvCash.Tests/PosViewModelSellerGateTest.cs`, inside `private class FakeShiftService`,
+directly below the existing `RaiseSessionRevoked` method, add:
+
+```csharp
+        public event EventHandler? AccessDenied;
+
+        /// <summary>Stands in for the real ShiftService hitting a 403 — the code this
+        /// backend actually sends for a rejected session. Unlike RaiseSessionRevoked this
+        /// must NOT lead to a sign-out; see IShiftService.AccessDenied.</summary>
+        public void RaiseAccessDenied() => AccessDenied?.Invoke(this, EventArgs.Empty);
 ```
 
-Expected: PASS. The `FakeShiftService` in `PosViewModelSellerGateTest` does not implement
-`AccessDenied` yet, so the full suite will not compile until Task 2 — that is expected;
-run only this filter for now.
+The raiser goes in now, not just the event: a declared-but-never-raised event warns CS0067,
+and Task 2's tests need it anyway.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run the full suite to verify it passes**
+
+```powershell
+& ./run-tests.ps1
+```
+
+Expected: 683 passed, 0 failed — the 678 baseline plus the five new tests.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/VvCash/Services/Api/IShiftService.cs src/VvCash/Services/Api/ShiftService.cs tests/VvCash.Tests/ShiftServiceTest.cs
+git add src/VvCash/Services/Api/IShiftService.cs src/VvCash/Services/Api/ShiftService.cs tests/VvCash.Tests/ShiftServiceTest.cs tests/VvCash.Tests/PosViewModelSellerGateTest.cs
 git commit -m "fix(shift): recognise the 403 this backend sends for a rejected session
 
 ShiftService checked only 401, which this API emits nowhere except login and
@@ -382,21 +404,10 @@ own, and leaving a scary red message over a register that has since opened its s
 worse than useless. It is cleared the instant a shift id actually comes back, from either
 path, via the generated `OnCurrentShiftIdChanged` hook.
 
-- [ ] **Step 1: Teach the test fake to raise the new event**
+`FakeShiftService` already carries `AccessDenied` and `RaiseAccessDenied` — Task 1 added them
+so that its own commit would still build. This task consumes them.
 
-In `tests/VvCash.Tests/PosViewModelSellerGateTest.cs`, inside `private class FakeShiftService`,
-below the existing `RaiseSessionRevoked` method, add:
-
-```csharp
-        public event EventHandler? AccessDenied;
-
-        /// <summary>Stands in for the real ShiftService hitting a 403 — the code this
-        /// backend actually sends for a rejected session. Unlike RaiseSessionRevoked this
-        /// must NOT lead to a sign-out; see IShiftService.AccessDenied.</summary>
-        public void RaiseAccessDenied() => AccessDenied?.Invoke(this, EventArgs.Empty);
-```
-
-- [ ] **Step 2: Write the failing tests**
+- [ ] **Step 1: Write the failing tests**
 
 In the same file, append inside the class, directly after
 `SignOutCommand_WorksWithNoOpenShift_RegardlessOfWhyTheModalIsUp`:
@@ -461,7 +472,7 @@ In the same file, append inside the class, directly after
     }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [ ] **Step 2: Run the tests to verify they fail**
 
 ```powershell
 & ./run-tests.ps1 --filter "FullyQualifiedName~PosViewModelSellerGateTest"
@@ -469,7 +480,7 @@ In the same file, append inside the class, directly after
 
 Expected: compile error — `'PosViewModel' does not contain a definition for 'IsShiftAccessDenied'`.
 
-- [ ] **Step 4: Add the property, the clear hook and the handler**
+- [ ] **Step 3: Add the property, the clear hook and the handler**
 
 In `src/VvCash/ViewModels/PosViewModel.cs`, directly below the existing
 `[ObservableProperty] private bool _isSessionRevoked;` declaration, add:
@@ -533,7 +544,7 @@ In `Dispose`, directly below the existing line
         _shiftService.AccessDenied -= OnShiftAccessDenied;
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 4: Run the tests to verify they pass**
 
 ```powershell
 & ./run-tests.ps1
@@ -542,7 +553,7 @@ In `Dispose`, directly below the existing line
 Expected: 686 passed, 0 failed. Task 0 serialised the suite, so a failure here is a real
 one — read it rather than re-running until it goes away.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/VvCash/ViewModels/PosViewModel.cs tests/VvCash.Tests/PosViewModelSellerGateTest.cs
