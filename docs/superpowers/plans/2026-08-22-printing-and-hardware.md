@@ -55,7 +55,7 @@
 
 ## Отклонения от спеки (осознанные, каждое — с причиной)
 
-1. **Провайдер кодировок регистрируется в статическом конструкторе `EscPosCodePages`, а не в `Program.Main`.** В тестовом процессе `Main` не выполняется вообще, а строка «Регистрация провайдера кодировок» стоит в таблице покрытия спеки. Статический конструктор каталога срабатывает раньше любого обращения к `Encoding` — потому что каталог и есть единственная дорога к нему. Task 1 правит соответствующий абзац спеки.
+1. **Провайдер кодировок регистрируется в статическом конструкторе `EscPosCodePage`, а не в `Program.Main`.** В тестовом процессе `Main` не выполняется вообще, а строка «Регистрация провайдера кодировок» стоит в таблице покрытия спеки. На типе записи, а не на каталоге: `GetEncoding` зовёт он, конструктор у него публичный, и явный статический конструктор снимает `beforefieldinit` — то есть CLR выполнит регистрацию до первого экземпляра, включая те, что создают инициализаторы полей каталога. Task 1 правит соответствующий абзац спеки.
 2. **Успех кнопок проверки показывается отдельным нейтральным баннером `StatusMessage`, а не `ErrorMessage`.** Спека говорит «через уже существующий баннер», но он красный, с иконкой `AlertCircleOutline`. «Пробный чек отправлен» в красной рамке читается как отказ. Отказы идут в `ErrorMessage` ровно как написано в спеке; успех — в соседний баннер.
 3. **Платформенная проверка — `OperatingSystem.IsWindows()`, а не `RuntimeInformation.IsOSPlatform`.** CA1416 распознаёт первую как platform guard гарантированно; вторая работает, но зависит от версии анализатора. Смысл тот же.
 
@@ -74,24 +74,28 @@
 **Files:**
 - Create: `src/VvCash/Models/EscPosCodePage.cs`
 - Create: `tests/VvCash.Tests/EscPosCodePageTest.cs`
-- Modify: `src/VvCash/VvCash.csproj` (добавить PackageReference)
 - Modify: `docs/superpowers/specs/2026-08-22-printing-and-hardware-design.md` (абзац про `Program.Main`)
 
-- [ ] **Step 1: Добавить пакет с однобайтовыми кодировками**
+- [ ] **Step 1: Пакет не нужен — проверить и не добавлять**
 
-В `src/VvCash/VvCash.csproj`, в тот же `<ItemGroup>`, где лежит `System.IO.Ports` (строка 33), рядом:
+Первая редакция плана велела добавить `PackageReference` на
+`System.Text.Encoding.CodePages`, ссылаясь на соседний `System.IO.Ports`. Аналогия
+ложная: `System.IO.Ports` действительно вне фреймворка, а `System.Text.Encoding.CodePages`
+на `net10.0` уже лежит в shared framework и в ref-паке. Пакет не даёт ни строчки в
+`deps.json`, не копируется в вывод, и единственное его следствие — постоянный `NU1510`
+на каждой сборке обоих проектов. Этот репозиторий держит лог сборки чистым сознательно
+(см. комментарий про advisory в самом csproj).
 
-```xml
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
-```
-
-Версия 8.0.0 — та же мажорная линия, что у соседнего `System.IO.Ports`, и пакет с тех пор не менялся.
+`src/VvCash/VvCash.csproj` не трогается. Провайдер кодировок регистрируется кодом
+(Step 4) — этого достаточно, что и подтверждает тест
+`Catalog_MakesSingleByteEncodingsAvailable`.
 
 - [ ] **Step 2: Написать падающий тест**
 
 Создать `tests/VvCash.Tests/EscPosCodePageTest.cs`:
 
 ```csharp
+using System;
 using System.Linq;
 using VvCash.Models;
 using Xunit;
@@ -170,6 +174,17 @@ public class EscPosCodePageTest
         Assert.Contains(EscPosCodePages.Pc437, EscPosCodePages.All);
         Assert.All(EscPosCodePages.All, e => Assert.False(string.IsNullOrWhiteSpace(e.DisplayName)));
     }
+
+    [Fact]
+    public void EveryEntryResolvesBackFromItsOwnId()
+    {
+        // Id — ключ хранения: запись, до которой Resolve не доходит, недостижима
+        // из настроек, хотя в каталоге лежит. Без этого теста четвёртая запись с
+        // опечаткой или дублем в Id прошла бы все остальные проверки.
+        Assert.All(EscPosCodePages.All, e => Assert.Same(e, EscPosCodePages.Resolve(e.Id)));
+        Assert.Equal(EscPosCodePages.All.Count,
+            EscPosCodePages.All.Select(e => e.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
 }
 ```
 
@@ -201,6 +216,19 @@ namespace VvCash.Models;
 public sealed class EscPosCodePage
 {
     private Encoding? _encoding;
+
+    // Регистрация живёт на типе, который зовёт GetEncoding, а не на каталоге.
+    // Явный статический конструктор снимает beforefieldinit, поэтому CLR выполнит
+    // его до появления первого экземпляра — включая инициализаторы полей самого
+    // каталога, которые эти экземпляры и создают. На каталоге она была бы верна
+    // лишь пока Encoding ленивое, и не спасала бы запись, построенную мимо
+    // каталога: конструктор EscPosCodePage публичный.
+    static EscPosCodePage()
+    {
+        // .NET Core не несёт однобайтовых кодировок: без этой строки первое же
+        // Encoding.GetEncoding(866) бросает NotSupportedException.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
 
     public EscPosCodePage(string id, string displayName, int codePage, byte escTSelector)
     {
@@ -244,17 +272,6 @@ public sealed class EscPosCodePage
 /// причина, по которой выбор вынесен в настройку с пробной печатью.</summary>
 public static class EscPosCodePages
 {
-    static EscPosCodePages()
-    {
-        // .NET Core не несёт однобайтовых кодировок: без этой строки первое же
-        // Encoding.GetEncoding(866) бросает NotSupportedException.
-        //
-        // Здесь, а не в Program.Main: Main не выполняется ни в тестовом процессе,
-        // ни в превьюере Avalonia, а этот тип — единственная дорога к кодировке,
-        // так что статический конструктор гарантированно опережает любое обращение.
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-    }
-
     public static readonly EscPosCodePage Cp866 =
         new("CP866", "CP866 — кириллица (DOS)", 866, 17);
 
@@ -298,18 +315,20 @@ public static class EscPosCodePages
 & ./run-tests.ps1 --filter "FullyQualifiedName~EscPosCodePageTest"
 ```
 
-Ожидание: `Passed! - Failed: 0`, **12** тестов (5 `[Fact]` + 7 `[InlineData]` в двух `[Theory]`).
+Ожидание: `Passed! - Failed: 0`, **13** тестов (6 `[Fact]` + 7 `[InlineData]` в двух `[Theory]`).
 
 - [ ] **Step 6: Поправить спеку под фактическое место регистрации**
 
 В `docs/superpowers/specs/2026-08-22-printing-and-hardware-design.md` заменить абзац, начинающийся со слов «Место — первая строка `Program.Main`», на:
 
 ```markdown
-Место — статический конструктор `EscPosCodePages`, а не `Program.Main`, как
+Место — статический конструктор `EscPosCodePage`, а не `Program.Main`, как
 предполагалось при проектировании. `Main` не выполняется ни в тестовом процессе,
 ни в превьюере Avalonia, а строка «регистрация провайдера кодировок» стоит в
-таблице покрытия ниже. Каталог — единственная дорога к `Encoding`, поэтому его
-инициализатор типа гарантированно опережает любое обращение, и `Program.cs`
+таблице покрытия ниже. Регистрация висит на типе записи, а не на каталоге:
+`GetEncoding` зовёт именно он, и явный статический конструктор снимает с типа
+`beforefieldinit`, поэтому CLR выполняет его до появления первого экземпляра —
+включая те экземпляры, которые создают инициализаторы полей каталога. `Program.cs`
 трогать не нужно вовсе.
 ```
 
@@ -464,7 +483,7 @@ internal static class WindowsRawPrinter
 dotnet build src/VvCash/VvCash.csproj -o build/verify
 ```
 
-Ожидание: `Build succeeded`, `0 Error(s)`. Одно предупреждение `NU1510` на `System.Text.Encoding.CodePages` — ожидаемое: эвристика обрезки пакетов SDK считает его лишним, потому что типы разрешаются в reference-сборках фреймворка, тогда как данные кодовых страниц приезжают только с пакетом. В `WarningsAsErrors` его нет, сборку оно не рушит. Появление `CA1416` означает, что guard не распознан — тогда пометить `SendViaUsb` атрибутом `[SupportedOSPlatform("windows")]` нельзя (метод вызывается кроссплатформенно); вместо этого вынести тело в отдельный `[SupportedOSPlatform("windows")] private static void SendViaSpooler(string, byte[])` и звать его под тем же guard'ом.
+Ожидание: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`. Появление `CA1416` означает, что guard не распознан — тогда пометить `SendViaUsb` атрибутом `[SupportedOSPlatform("windows")]` нельзя (метод вызывается кроссплатформенно); вместо этого вынести тело в отдельный `[SupportedOSPlatform("windows")] private static void SendViaSpooler(string, byte[])` и звать его под тем же guard'ом.
 
 - [ ] **Step 4: Прогнать весь набор — ничего не должно сломаться**
 
