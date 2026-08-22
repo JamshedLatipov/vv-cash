@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close three findings from the full code review — `ShiftService` never recognising the 403 the backend actually sends for a rejected session, `CustomerDisplayWindow` accumulating one window per login while ignoring its own feature flag, and the settings screen destroying the unsynced-sales queue in one unconfirmed tap.
+**Goal:** Make the test suite deterministic, then close three findings from the full code review — `ShiftService` never recognising the 403 the backend actually sends for a rejected session, `CustomerDisplayWindow` accumulating one window per login while ignoring its own feature flag, and the settings screen destroying the unsynced-sales queue in one unconfirmed tap.
 
 **Architecture:** One repo, `C:\work\vv-cash`. No backend changes. `IShiftService` gains a second event so 401 (unambiguous, auto sign-out) and 403 (ambiguous, explain and let the cashier decide) stay apart. `App.axaml.cs` stops building a customer-display window per navigation and keeps one for the whole run, its visibility driven by a new `PosViewModel` event; which screen it lands on — and whether it is created at all on a single-monitor dev box — is decided by a new pure selector modelled on `RenderingSelector`. The settings screen loses its queue-wiping button outright and gains a confirmation overlay copied in shape from `PosViewModel`'s existing shift-close confirm.
 
@@ -13,23 +13,116 @@
 **Correspondence to the review findings:**
 1. `ShiftService` doesn't recognise 403 → Tasks 1, 2, 3
 2. `CustomerDisplayWindow` leaks and ignores its feature flag → Tasks 4, 5, 6
+
+Task 0 is not from the review: it fixes a self-inflicted race in the test suite that would
+otherwise make every verification step below unreadable. See its own section.
 3. Settings destroys the unsynced queue with no confirmation → Tasks 7, 8
 
-**Test baseline before starting: 677 passed / 1 failed.** The failure is
-`UpdateViewModelTest.AvailableVersionTextCarriesTheReleaseVersion`, throwing inside
-`Avalonia.Threading.DispatcherPriorityQueue.RemoveItemFromPriorityChain` — a known
-dispatcher race, not logic. Every task below compares against this baseline, not against
-"all green". On any failure, read the stack trace first: Avalonia race or your diff.
+**Test baseline: 678 tests, all passing — but only after Task 0.**
 
-The per-task expected counts are that baseline plus the tests each task adds: Task 1 adds
-5, Task 2 adds 3, Task 4 adds 9 (the `off` theory counts as three cases), Task 5 adds 2,
-Task 8 adds 5 — ending at 701 passed. Tasks 3, 6, 7 and 9 add none. If your count is off by
-a fixed amount from the start, the baseline moved rather than the task failing; re-check
-against `git stash` before hunting a bug.
+Before Task 0 the suite is non-deterministic. Three consecutive runs on an unchanged tree
+gave 678/678, then 677/1, then 676/2, each failure landing on a *different* test and always
+inside `Avalonia.Threading.DispatcherPriorityQueue`. The cause is ours, not Avalonia's:
+`Dispatcher.UIThread` is a process-wide singleton, four test classes pump it with
+`RunJobs()`, and xunit's default parallelises across collections (one per class). Task 0
+serialises the suite so every task after it has a signal worth reading.
+
+The per-task expected counts are 678 plus the tests each task adds: Task 1 adds 5, Task 2
+adds 3, Task 4 adds 9 (the `off` theory counts as three cases), Task 5 adds 2, Task 8 adds
+5 — ending at 702 passing, zero failing. Tasks 3, 6, 7 and 9 add none. A count that is off
+by a fixed amount from the start means the baseline moved rather than the task failing;
+re-check with `git stash` before hunting a bug.
 
 **Running tests:** `& ./run-tests.ps1` from the repo root (PowerShell). Not `pwsh` — it is
 not installed on this machine. The script builds to `build/verify-tests` so a running
 register cannot lock the output.
+
+---
+
+## Task 0: Make the test suite deterministic
+
+**Files:**
+- Create: `tests/VvCash.Tests/AssemblyInfo.cs`
+
+**Root cause:** `Avalonia.Threading.Dispatcher.UIThread` is a process-wide singleton, and
+four test classes drive it with `RunJobs()` — `ExpenseDocumentServiceTest`,
+`PosViewModelSellerGateTest`, `ShiftServiceTest`, `UpdateViewModelTest`. The project has no
+xunit configuration, so the default is in force: test collections run in parallel, one
+collection per class. Those four therefore pump the same queue concurrently and corrupt its
+priority chain. Three consecutive runs on an unchanged tree produced 678/678, 677/1 and
+676/2, the failure landing on a different test each time.
+
+This has to be first. Three of the tasks that follow add tests that pump the dispatcher,
+and every task's verification step compares a test count — none of which is worth anything
+against a baseline that moves on its own.
+
+- [ ] **Step 1: Confirm the flake exists before fixing it**
+
+```powershell
+1..5 | ForEach-Object { & ./run-tests.ps1 --no-build 2>&1 | Select-String 'Passed!|Failed!|пройден' }
+```
+
+Expected: at least one run reports a failure, and the failing test is not always the same
+one. If all five runs are clean, run five more — the race does not fire on every pass. Note
+which tests failed; you will confirm the same ones pass reliably in Step 4.
+
+- [ ] **Step 2: Serialise the suite**
+
+Create `tests/VvCash.Tests/AssemblyInfo.cs`:
+
+```csharp
+using Xunit;
+
+// Avalonia's Dispatcher.UIThread is a process-wide singleton, and four classes in this
+// suite drive it with RunJobs() to prove their subjects marshal correctly:
+// ExpenseDocumentServiceTest, PosViewModelSellerGateTest, ShiftServiceTest and
+// UpdateViewModelTest. xunit's default runs collections in parallel with one collection
+// per class, so those four raced each other inside DispatcherPriorityQueue and a varying
+// test failed on roughly two runs in three — a baseline nobody could read a real
+// regression against.
+//
+// Serialising the whole assembly rather than grouping the four into one [Collection]:
+// the suite finishes in one to two seconds either way, so the parallelism buys nothing
+// measurable, and a per-class opt-in is a rule the next dispatcher-touching test has to
+// remember to join. This one cannot be forgotten.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+```
+
+- [ ] **Step 3: Run the suite once to confirm it builds and passes**
+
+```powershell
+& ./run-tests.ps1
+```
+
+Expected: 678 passed, 0 failed.
+
+- [ ] **Step 4: Run it five more times to confirm determinism**
+
+```powershell
+1..5 | ForEach-Object { & ./run-tests.ps1 --no-build 2>&1 | Select-String 'Passed!|Failed!|пройден' }
+```
+
+Expected: five identical clean runs, 678 passed and 0 failed every time. If any run still
+fails inside `DispatcherPriorityQueue`, stop and report — the attribute did not take
+effect, and nothing after this task can be trusted.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tests/VvCash.Tests/AssemblyInfo.cs
+git commit -m "test: stop the suite racing itself through Avalonia's dispatcher
+
+Dispatcher.UIThread is a process-wide singleton and four test classes pump it
+with RunJobs(). With xunit's default collection parallelism those four ran at the
+same time and corrupted the priority queue: three consecutive runs on an
+unchanged tree gave 678/678, 677/1 and 676/2, a different test failing each time.
+
+Serialising the assembly rather than grouping the four into one collection. The
+suite takes one to two seconds, so the parallelism was buying nothing, and an
+opt-in collection is a rule the next dispatcher-touching test has to remember.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
 
 ---
 
@@ -446,9 +539,8 @@ In `Dispose`, directly below the existing line
 & ./run-tests.ps1
 ```
 
-Expected: 685 passed / 1 failed, where the single failure is the known
-`UpdateViewModelTest` dispatcher race from the baseline. If anything else fails, read the
-stack trace before changing code.
+Expected: 686 passed, 0 failed. Task 0 serialised the suite, so a failure here is a real
+one — read it rather than re-running until it goes away.
 
 - [ ] **Step 6: Commit**
 
@@ -870,7 +962,7 @@ Then replace the body of `OnIsCustomerDisplayEnabledChanged` with:
 & ./run-tests.ps1
 ```
 
-Expected: 696 passed / 1 failed (the known `UpdateViewModelTest` race).
+Expected: 697 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
 
@@ -1035,7 +1127,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: `Build succeeded`, then 696 passed / 1 failed (the known race).
+Expected: `Build succeeded`, then 697 passed, 0 failed.
 
 - [ ] **Step 6: Commit**
 
@@ -1166,7 +1258,7 @@ Expected: no matches at all.
 & ./run-tests.ps1
 ```
 
-Expected: 696 passed / 1 failed (the known race).
+Expected: 697 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1505,7 +1597,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: five `ok` lines, `Build succeeded`, then 701 passed / 1 failed (the known race).
+Expected: five `ok` lines, `Build succeeded`, then 702 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1537,9 +1629,9 @@ at compile time.
 & ./run-tests.ps1
 ```
 
-Expected: 701 passed / 1 failed, the failure being `UpdateViewModelTest` inside
-`DispatcherPriorityQueue.RemoveItemFromPriorityChain`. Any other failure must be read
-before it is dismissed.
+Expected: 702 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
+a real one. Run it twice: a result that differs between runs means something reintroduced
+parallel access to `Dispatcher.UIThread`.
 
 - [ ] **Step 2: Customer display, forced onto a single monitor**
 
@@ -1602,9 +1694,8 @@ fix before considering batch A done — do not open batch B on top of an unverif
 
 ## Done when
 
-- All nine tasks are checked off.
-- `& ./run-tests.ps1` reports 701 passed with the single known `UpdateViewModelTest`
-  dispatcher race as the only failure.
+- All ten tasks (0 through 9) are checked off.
+- `& ./run-tests.ps1` reports 702 passed and 0 failed, twice in a row.
 - Task 9's manual checklist passed on a real run of the app.
 - Findings 1, 2 and 5 from the code review are closed. Findings 3, 4, 6–18 remain open and
   belong to batches B, C and D.
