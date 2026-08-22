@@ -1132,21 +1132,27 @@ git commit -m "fix(printing): encode receipts in the printer's code page"
         Assert.Equal("CP1251", settings.Printers[0].CodePageId);
     }
 
-    [Fact]
-    public void Load_ResolvesAnUnknownCodePageToTheDefault()
+    [Theory]
+    [InlineData("CP1251", false)]
+    [InlineData("CP-gone", true)]
+    public void Load_ResolvesTheStoredCodePage(string stored, bool expectDefault)
     {
+        // Известный id обязателен: на одном лишь неизвестном тест зелёный и без
+        // загрузки — инициализатор поля даёт ровно ту же ссылку, что и Resolve.
         var settings = new FakeSettings
         {
             Printers = new List<PrinterConfig>
             {
                 new() { Name = "P", ConnectionType = PrinterConnectionType.LAN,
-                        ConnectionString = "10.0.0.1:9100", CodePageId = "CP-gone" }
+                        ConnectionString = "10.0.0.1:9100", CodePageId = stored }
             }
         };
 
         var vm = BuildWith(settings);
 
-        Assert.Same(EscPosCodePages.Default, vm.Printers[0].SelectedCodePage);
+        Assert.Same(
+            expectDefault ? EscPosCodePages.Default : EscPosCodePages.Cp1251,
+            vm.Printers[0].SelectedCodePage);
     }
 ```
 
@@ -1159,6 +1165,8 @@ git commit -m "fix(printing): encode receipts in the printer's code page"
 ```
 
 Ожидание: `CS0117: 'PrinterConfig' does not contain a definition for 'CodePageId'`.
+
+**Красный на ошибке компиляции ничего не доказывает про сам тест.** До Step 3 проверяемых членов не существует вовсе, поэтому вакуумный тест выглядит точно так же, как настоящий. Зубы теста проверяются только мутацией после того, как всё зазеленело: убрать строку, ради которой тест написан, и убедиться, что он падает. Это относится ко всем оставшимся задачам плана, а не только к этой.
 
 - [ ] **Step 3: Поле в модели**
 
@@ -1331,6 +1339,23 @@ Task 4 добавил `SetStatus(PrinterStatus.Ready)` в успешную ве�
 2. **Убрать мёртвый `using System.Text;`** из `EscPosPrinterService.cs`: единственная ссылка на `Encoding` теперь `codePage.Encoding` из `VvCash.Models`.
 
 3. **Дописать в комментарий `EscPosCodePage.Encoding`** (файл `src/VvCash/Models/EscPosCodePage.cs`), что односимвольность замены стала несущей: `PadLine` и `Truncate` считают колонки в символах, и это верно ровно потому, что однобайтовая таблица плюс односимвольный фолбэк дают «символ == байт». Расширение замены до `"??"` или переход на `ExceptionFallback` молча сломают выравнивание чека.
+
+**Пересоздание принтеров — часть контракта, а не деталь реализации.** `EscPosPrinterService` захватывает кодовую страницу в конструкторе и больше её не перечитывает. Сегодня `InitializePrinters` пересоздаёт **все** экземпляры по `SettingsChanged`, и только поэтому смена кодовой страницы в настройках вступает в силу без перезапуска кассы. Если хардинг гонки приведёт к переиспользованию существующих экземпляров — например, чтобы не рвать принтер посреди печати, — переиспользованный принтер останется со старой страницей, и настройка тихо перестанет работать. Тесты этого не поймают: страницу неоткуда прочитать.
+
+Что и подводит к следующему пункту.
+
+- [ ] **Step 0d: сделать применённую кодовую страницу проверяемой**
+
+Task 6 закрылась grep-гейтом (`EscPosCodePages.Default` не должно остаться в композите) именно потому, что шва не было: `_printers` приватный, `_codePage` приватный, прочитать «какая страница реально доехала до принтера» неоткуда. Раз этот метод всё равно переписывается, шов стоит прорезать:
+
+```csharp
+    /// <summary>Какая таблица реально применена к этому принтеру. Существует ради
+    /// теста: строка, которая доносит настройку до боевой кассы, иначе не
+    /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
+    public EscPosCodePage CodePage => _codePage;
+```
+
+После этого «принтер построен с той страницей, что задана в настройках» становится обычным тестом в `CompositePrinterServiceTest`, а grep-гейт из Task 6 можно снять.
 
 - [ ] **Step 0c: `BuildPreReceipt` — четвёртое место `WriteInit` становится проверяемым**
 
