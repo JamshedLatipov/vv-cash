@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using VvCash.Models;
 using Xunit;
@@ -75,5 +76,15 @@ public class EscPosCodePageTest
         Assert.Contains(EscPosCodePages.Cp1251, EscPosCodePages.All);
         Assert.Contains(EscPosCodePages.Pc437, EscPosCodePages.All);
         Assert.All(EscPosCodePages.All, e => Assert.False(string.IsNullOrWhiteSpace(e.DisplayName)));
+    }
+
+    [Fact]
+    public void EveryEntryResolvesBackFromItsOwnId()
+    {
+        // Id — ключ хранения: запись, до которой Resolve не доходит, недостижима
+        // из настроек, хотя в каталоге лежит.
+        Assert.All(EscPosCodePages.All, e => Assert.Same(e, EscPosCodePages.Resolve(e.Id)));
+        Assert.Equal(EscPosCodePages.All.Count,
+            EscPosCodePages.All.Select(e => e.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 }

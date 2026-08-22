@@ -14,6 +14,17 @@ public sealed class EscPosCodePage
 {
     private Encoding? _encoding;
 
+    // Регистрация живёт на типе, который зовёт GetEncoding, а не на каталоге.
+    // Явный статический конструктор снимает beforefieldinit, поэтому CLR выполнит
+    // его до появления первого экземпляра — включая инициализаторы полей самого
+    // каталога, которые эти экземпляры и создают. Иначе запись, построенную мимо
+    // каталога, ждал бы NotSupportedException, а каталог с неленивым Encoding —
+    // TypeInitializationException при первом же обращении.
+    static EscPosCodePage()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
     public EscPosCodePage(string id, string displayName, int codePage, byte escTSelector)
     {
         Id = id;
@@ -56,17 +67,6 @@ public sealed class EscPosCodePage
 /// причина, по которой выбор вынесен в настройку с пробной печатью.</summary>
 public static class EscPosCodePages
 {
-    static EscPosCodePages()
-    {
-        // .NET Core не несёт однобайтовых кодировок: без этой строки первое же
-        // Encoding.GetEncoding(866) бросает NotSupportedException.
-        //
-        // Здесь, а не в Program.Main: Main не выполняется ни в тестовом процессе,
-        // ни в превьюере Avalonia, а этот тип — единственная дорога к кодировке,
-        // так что статический конструктор гарантированно опережает любое обращение.
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-    }
-
     public static readonly EscPosCodePage Cp866 =
         new("CP866", "CP866 — кириллица (DOS)", 866, 17);
 
