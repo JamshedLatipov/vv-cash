@@ -49,15 +49,22 @@ func redirectToAccessDenied(c *gin.Context) {
 ### Почему нельзя просто дописать `or Forbidden`
 
 Все 403 на проводе неразличимы — один и тот же
-`{"status":"error","message":"forbidden"}`. Причин пять:
+`{"status":"error","message":"forbidden"}`. Источников как минимум шесть — маршруты
+смены висят за цепочкой `SiteAuthentication → EnforceActiveTenant →
+EnforceBillingAccess → CashAuthentication → CashAuthorization` (`routes/routes.go:194`),
+и `redirectToAccessDenied` зовёт почти каждое звено:
 
 | Источник | Причина | Характер |
 |---|---|---|
 | `site_authentication.go` | протухший/битый JWT | сессия мертва |
 | `cash_authentication.go` | битый `Cash-Authorization` | конфигурация кассы |
 | `tenantdb.GetPgxPool` вернул ошибку | падение пула tenant-БД | **транзиентная** |
+| `active_tenant.go` | тенант заблокирован/удалён, либо сбой проверки статуса | биллинг или **транзиентная** |
 | `cash_authorization.go` → `checkAccess` | нет `is_seller` на эту кассу | конфигурация прав |
 | `authz` → `DenyAccess` | нет permission | конфигурация прав |
+
+Точное число здесь неважно и намеренно не фиксируется: важно, что «сессия мертва» —
+меньшинство случаев, а отличить их на клиенте нечем.
 
 Слепой авто-разлогин по 403 выбросит кассира при моргании БД, а при
 неправильных правах загонит в петлю: после релогина повторится то же самое.
