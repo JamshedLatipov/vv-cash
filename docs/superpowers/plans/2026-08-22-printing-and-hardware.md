@@ -2287,7 +2287,9 @@ git commit -m "fix(display): let the VFD report failure and speak Cyrillic"
 
 **1. `port.Open()` выполняется синхронно в потоке вызывающего.** `SendAsync` объявлен `async`, но всё до первого `await` — конструктор `SerialPort` и `Open()` — идёт в UI-потоке. Вызовы приходят из `AddToCart` и пересчёта итога, то есть **на каждое сканирование товара**. `_ =` это прячет: задача не ожидается, но синхронный пролог всё равно тормозит клик кассира. Отсутствующий порт дёшев (замерено 0.2–2.3 мс), а вот открытие живого COM на Windows — десятки миллисекунд.
 
-Тело `SendAsync` уходит в `Task.Run`.
+Тело `SendAsync` уходит с UI-потока — **но одного `Task.Run` мало**. UI-поток заодно сериализовал эти вызовы, и без него пять неожидаемых отправок начинают гоняться за один COM-порт: `AddToCart` поднимает `ShowTotalAsync` через `CartChanged`, а следом `ShowItemAsync`; `ClearCart` даёт четыре одновременные отправки на одно нажатие (`CartChanged` дважды из `ClearCart()`, третий раз из `ClearCustomerDiscount()`, плюс `ClearAsync`). Второй поток получит `UnauthorizedAccessException` на `Open()`, кадр молча потеряется, и какой уцелеет — неопределено.
+
+Поэтому отправки выстраиваются в цепочку на поле `Task _tail` под маленьким замком: она сохраняет порядок подачи, чего голый `SemaphoreSlim` не даёт, а порядок кадров у двухстрочного дисплея читается покупателем как последовательность.
 
 **2. `WriteTimeout` по умолчанию бесконечен, и новый канал `false` эту дыру не закрывает.** Порт, который открылся, но устройство за ним не разгребает буфер — мёртвый VFD, всё ещё числящийся в системе, или управление потоком, — оставит `WriteAsync` висеть навсегда. `using var port` не сработает никогда, дескриптор утечёт по одному на сканирование, а `catch` не поможет: ничего не бросается. Это единственный режим отказа, при котором служба по-прежнему молчит вместо того, чтобы отчитаться.
 
@@ -2636,7 +2638,12 @@ for f in src/VvCash/Assets/i18n/*.json; do python -c "import json,sys; d=json.lo
                 int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : 9600,
                 SelectedDisplayCodePage ?? EscPosCodePages.Default);
 
-        var ok = await display.ShowLineAsync("VV CASH", "Проверка / Test");
+        // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
+        // таймаута нет и SerialPort его не предлагает: зависший драйвер
+        // USB-serial держит открытие сколько угодно. Без этого кнопка не
+        // отчитается, а повиснет — то есть не сделает того, ради чего заведена.
+        var send = display.ShowLineAsync("VV CASH", "Проверка / Test");
+        var ok = await Task.WhenAny(send, Task.Delay(3000)) == send && send.Result;
 
         if (ok) StatusMessage = I18nService.Instance["DisplayCheckOk"];
         else ErrorMessage = I18nService.Instance["DisplayCheckFailed"];
