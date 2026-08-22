@@ -235,7 +235,7 @@ public sealed class EscPosCodePage
 [`ICustomerDisplayService`](../../../src/VvCash/Services/Hardware/ICustomerDisplayService.cs)
 живой: пять вызовов из `PosViewModel` на добавление товара, изменение корзины, очистку и
 оплату. Но зарегистрирован
-[`MockCustomerDisplayService`](../../../src/VvCash/Services/Hardware/MockCustomerDisplayService.cs),
+`MockCustomerDisplayService`,
 поэтому всё это уходит в `Console.WriteLine`.
 [`VfdDisplayService`](../../../src/VvCash/Services/Hardware/VfdDisplayService.cs) не
 создаётся нигде и не имеет настроек — их просто никогда не сделали.

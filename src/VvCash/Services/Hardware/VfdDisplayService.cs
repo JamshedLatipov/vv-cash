@@ -19,11 +19,6 @@ public class VfdDisplayService : ICustomerDisplayService
     private readonly int _baudRate;
     private readonly EscPosCodePage _codePage;
 
-    /// <summary>Последнее, что уходило на дисплей. Существует ради тестов: открыть
-    /// настоящий COM-порт в юнит-тесте нельзя, а разметку и отсутствие доллара
-    /// проверить надо.</summary>
-    public string LastRendered { get; private set; } = string.Empty;
-
     public VfdDisplayService(string portName, int baudRate, EscPosCodePage codePage)
     {
         _portName = portName;
@@ -31,8 +26,12 @@ public class VfdDisplayService : ICustomerDisplayService
         _codePage = codePage;
     }
 
+    /// <summary>Кадр отдельно от отправки, как Build*Receipt у принтера: разметку
+    /// можно проверить, не открывая порт.</summary>
+    public static string BuildFrame(string line1, string line2) => Pad(line1) + Pad(line2);
+
     public Task<bool> ShowLineAsync(string line1, string line2)
-        => SendAsync(Pad(line1) + Pad(line2));
+        => SendAsync(BuildFrame(line1, line2));
 
     // Без валюты: символ был зашит в "$" на кассах, которые долларов не берут —
     // ровно то же, что уже чинили на чеке.
@@ -49,8 +48,6 @@ public class VfdDisplayService : ICustomerDisplayService
 
     private async Task<bool> SendAsync(string text)
     {
-        LastRendered = text;
-
         try
         {
             using var port = new SerialPort(_portName, _baudRate);
