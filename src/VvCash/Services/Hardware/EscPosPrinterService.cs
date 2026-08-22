@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Threading.Tasks;
 using VvCash.Models;
@@ -217,9 +218,20 @@ public class EscPosPrinterService : IPrinterService
                 "USB printing goes through the Windows spooler and is unavailable on this OS.");
         }
 
-        WindowsRawPrinter.Send(_connectionString, data);
-        return Task.CompletedTask;
+        return SendViaSpoolerAsync(_connectionString, data);
     }
+
+    /// <summary>Отдельным методом с атрибутом, а не лямбдой на месте: guard из
+    /// SendViaUsb не протекает в тело лямбды, и CA1416 сработал бы на ней.
+    ///
+    /// Task.Run, а не синхронный вызов: OpenPrinter и StartDocPrinter — это RPC
+    /// в spoolsv.exe, и на зависшем спулере они блокируются на секунды. Без него
+    /// весь цикл проходил бы на UI-потоке — SendViaUsb никогда не уступал поток,
+    /// а CompositePrinterService строит список задач энергичным Select. Касса
+    /// замерзала бы ровно в момент закрытия продажи.</summary>
+    [SupportedOSPlatform("windows")]
+    private static Task SendViaSpoolerAsync(string queueName, byte[] data)
+        => Task.Run(() => WindowsRawPrinter.Send(queueName, data));
 
     private void SetStatus(PrinterStatus status)
     {

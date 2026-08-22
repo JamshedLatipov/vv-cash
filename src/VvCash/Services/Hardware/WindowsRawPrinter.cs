@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -29,6 +30,9 @@ internal static class WindowsRawPrinter
     [DllImport("winspool.drv", EntryPoint = "ClosePrinter", SetLastError = true)]
     private static extern bool ClosePrinter(IntPtr handle);
 
+    // Возвращает DWORD — идентификатор задания, не BOOL. Ненулевой при успехе,
+    // ноль при отказе, поэтому маршалинг в bool корректен; так же объявлено в
+    // образце RawPrinterHelper у Microsoft.
     [DllImport("winspool.drv", EntryPoint = "StartDocPrinterW", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool StartDocPrinter(IntPtr handle, int level, ref DocInfo1 info);
 
@@ -48,6 +52,12 @@ internal static class WindowsRawPrinter
     /// ловит и выставляет PrinterStatus.Error.</summary>
     public static void Send(string printerName, byte[] data)
     {
+        // Пустое задание встало бы в очередь и отчиталось успехом: WritePrinter
+        // пишет ноль байт без ошибки, и проверка короткой записи даёт 0 != 0.
+        // Сегодня недостижимо — любой построитель шлёт минимум ESC @, — но
+        // опираться на это молча не стоит.
+        if (data.Length == 0) throw new ArgumentException("Nothing to print.", nameof(data));
+
         if (!OpenPrinter(printerName, out var handle, IntPtr.Zero))
         {
             throw Failure($"OpenPrinter('{printerName}')");
@@ -77,21 +87,43 @@ internal static class WindowsRawPrinter
 
             // Короткая запись не считается отказом на уровне API, но чек при ней
             // выходит обрезанным — а обрезанный чек это тот же молчаливый успех.
+            // Обрезанное задание при этом всё равно зафиксируется в очереди: из
+            // принтера выйдет половина чека, а кассир прочитает отказ. Это
+            // сознательный размен — потерять половину чека лучше, чем считать
+            // напечатанным то, что напечаталось не полностью.
             if (written != data.Length)
             {
                 throw new InvalidOperationException(
                     $"WritePrinter accepted {written} of {data.Length} bytes.");
             }
+
+            if (!EndPagePrinter(handle)) throw Failure("EndPagePrinter");
+            pageStarted = false;
+
+            if (!EndDocPrinter(handle)) throw Failure("EndDocPrinter");
+            docStarted = false;
         }
         finally
         {
             if (buffer != IntPtr.Zero) Marshal.FreeCoTaskMem(buffer);
+            // Взведёнными флаги доходят сюда только при раскрутке исключения.
+            // Здесь отказы игнорируются сознательно: бросок из finally затёр бы
+            // исходное исключение, то есть настоящую причину. На успешном пути
+            // оба End* уже вызваны выше и проверены — иначе незафиксированное
+            // задание молча возвращало бы успех.
             if (pageStarted) EndPagePrinter(handle);
             if (docStarted) EndDocPrinter(handle);
+            // ClosePrinter игнорируется всегда: его отказ уже ничего не отменяет.
             ClosePrinter(handle);
         }
     }
 
     private static InvalidOperationException Failure(string call)
-        => new($"{call} failed: Win32 error {Marshal.GetLastWin32Error()}.");
+    {
+        // Снимается до создания Win32Exception: её конструктор сам может
+        // затереть последнюю ошибку потока.
+        var code = Marshal.GetLastWin32Error();
+        return new InvalidOperationException(
+            $"{call} failed: {new Win32Exception(code).Message} (Win32 {code}).");
+    }
 }
