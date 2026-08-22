@@ -857,12 +857,12 @@ git commit -m "fix(printing): keep the reason a receipt failed, and clear the er
         Assert.Contains("Ёжик", text);
         Assert.Contains("The quick brown fox", text);
         Assert.Contains("0123456789", text);
-        // Ни одной из одиннадцати таджикских и казахских букв в CP866 нет —
+        // Ни одной из десяти таджикских и казахских букв в CP866 нет —
         // строка целиком вырождается в вопросительные знаки, и предъявляется
         // это ровно там, где на неё смотрят. Утверждение точное, а не
         // Contains("?"): последнее прошло бы и на одной случайной замене,
         // то есть не отличило бы эту границу от опечатки в другом месте.
-        Assert.Contains("TJ/KK: ? ? ? ? ? ? ? ? ? ? ?", text);
+        Assert.Contains("TJ/KK: ? ? ? ? ? ? ? ? ? ?", text);
     }
 
     [Fact]
@@ -997,15 +997,15 @@ git commit -m "fix(printing): keep the reason a receipt failed, and clear the er
         WriteInit(ms, codePage);
         Write(ms, CmdAlignCenter);
         Write(ms, CmdBoldOn);
-        WriteLine(ms, "ПРОБНАЯ ПЕЧАТЬ", codePage);
+        WriteLine(ms, "TEST / ПРОБНАЯ ПЕЧАТЬ", codePage);
         Write(ms, CmdBoldOff);
-        WriteLine(ms, "--------------------------------", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         WriteLine(ms, "RU: Ёжик съел 12 шт.", codePage);
-        WriteLine(ms, "TJ/KK: ӯ ғ қ ҳ ҷ ә ң ө ұ ү і", codePage);
+        WriteLine(ms, "TJ/KK: ӯ ғ қ ҳ ҷ ә ң ө ұ ү", codePage);
         WriteLine(ms, "LAT: The quick brown fox", codePage);
         WriteLine(ms, "NUM: 0123456789", codePage);
-        WriteLine(ms, "--------------------------------", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         // Что именно пробовали — чтобы точка могла назвать это по телефону, не
         // залезая в настройки.
         WriteLine(ms, $"{codePage.Id}   ESC t {codePage.EscTSelector}", codePage);
@@ -1232,13 +1232,19 @@ public class PrinterConfig
                     EscPosCodePages.Resolve(config.CodePageId));
 ```
 
-- [ ] **Step 7: Прогнать**
+- [ ] **Step 7: Прогнать и убедиться, что настройка доехала до продакшена**
 
 ```bash
 & ./run-tests.ps1
 ```
 
 Ожидание: `Failed: 0`.
+
+```bash
+grep -n "EscPosCodePages.Default" src/VvCash/Services/Hardware/CompositePrinterService.cs
+```
+
+Ожидание: **пусто**. Строка со Step 6 — единственная, которая доносит всю фичу до боевой кассы, а оба теста этой задачи проверяют только round-trip вью-модели: забыть Step 6 и остаться зелёным здесь можно. Прочитать `_codePage` обратно нельзя — свойства у него нет, — поэтому проверка идёт грепом.
 
 - [ ] **Step 8: Коммит**
 
@@ -1263,6 +1269,8 @@ Task 4 добавил `SetStatus(PrinterStatus.Ready)` в успешную ве�
 1. **Окно гонки стало посещаться на счастливом пути.** Раньше в `UpdateOverallStatus` заходили только при сбое печати, то есть попасть в гонку можно было лишь сочетанием «печать упала одновременно со сменой настроек». Теперь туда заходят при каждой **успешной** печати, и достаточно «печать прошла одновременно со сменой настроек». Частота выросла на порядки.
 2. **Диагностируемость упала.** `SetStatus(Ready)` стоит внутри `try`, а `StatusChanged?.Invoke` синхронный. Значит исключение из `UpdateOverallStatus` — то самое, которое чинит эта задача, — больше не всплывает стеком, а ловится `catch` метода печати и превращается в `"Print failed."` на экране кассира **для чека, который физически напечатался**. Кассир печатает повторно, получается дубль. Искать этот баг придётся по симптому «касса иногда врёт про неудачную печать», а не по падению.
 3. **`volatile` в коде нет вообще** — ни у `_printers` (`CompositePrinterService.cs:12`), ни у `_overallStatus`, ни у `_status` в `EscPosPrinterService`. Ранняя редакция этого плана говорила иначе; исходить надо из фактического состояния.
+
+**Зависимость по порядку.** Step 3 ниже содержит `EscPosCodePages.Resolve(config.CodePageId)`, который не скомпилируется, пока Task 6 не добавит `PrinterConfig.CodePageId`. Эта задача обязана идти после Task 6.
 
 - [ ] **Step 0: `SetStatus` перестаёт превращать чужое исключение в отказ печати**
 
@@ -1292,6 +1300,52 @@ Task 4 добавил `SetStatus(PrinterStatus.Ready)` в успешную ве�
 ```
 
 Пояснительный комментарий из `PrintReceiptAsync` при этом переезжает сюда — в точку схождения всех пяти путей, куда читатель приходит по go-to-definition. На месте он объяснял самый очевидный случай («напечатали чек — принтер жив») и был в ста восьмидесяти строках от самого неочевидного, `OpenCashDrawerAsync`, где `SetStatus(PrinterStatus.Ready)` после удара по денежному ящику выглядит немотивированно.
+
+- [ ] **Step 0b: райдером, раз файл всё равно открыт**
+
+Три мелочи из ревью Task 5, каждая на строку, ни одна не стоит отдельной правки этого файла — он и так правится четвёртой задачей подряд:
+
+1. **`ESC t` перестаёт быть единственной командой без имени.** В `WriteInit` первые два байта пишутся голыми `WriteByte`, тогда как все прочие команды файла — константы `Cmd*`. Рантаймовый там только селектор:
+
+```csharp
+    private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
+```
+
+```csharp
+        Write(ms, CmdInit);
+        Write(ms, CmdSelectCodeTable);
+        ms.WriteByte(codePage.EscTSelector);   // единственное, что действительно рантайм
+```
+
+2. **Убрать мёртвый `using System.Text;`** из `EscPosPrinterService.cs`: единственная ссылка на `Encoding` теперь `codePage.Encoding` из `VvCash.Models`.
+
+3. **Дописать в комментарий `EscPosCodePage.Encoding`** (файл `src/VvCash/Models/EscPosCodePage.cs`), что односимвольность замены стала несущей: `PadLine` и `Truncate` считают колонки в символах, и это верно ровно потому, что однобайтовая таблица плюс односимвольный фолбэк дают «символ == байт». Расширение замены до `"??"` или переход на `ExceptionFallback` молча сломают выравнивание чека.
+
+- [ ] **Step 0c: `BuildPreReceipt` — четвёртое место `WriteInit` становится проверяемым**
+
+`PrintPreReceiptAsync` собирает буфер инлайном, поэтому единственное место, ради которого `WriteInit` вообще существует, — то самое, про которое его собственный комментарий пишет «однажды пропустить четвёртый», — осталось без теста. Защищены оказались три места, пропустить которые и так трудно.
+
+Извлечь четвёртым билдером в форме трёх соседей:
+
+```csharp
+    public static byte[] BuildPreReceipt(EscPosCodePage codePage, IEnumerable<CartItem> items, decimal total)
+```
+
+`PrintPreReceiptAsync` зовёт его, и тест — та же пятибайтовая проверка, что у трёх остальных:
+
+```csharp
+    [Fact]
+    public void PreReceipt_SelectsTheCodePage()
+    {
+        var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 1m };
+
+        var bytes = EscPosPrinterService.BuildPreReceipt(EscPosCodePages.Cp866, new[] { line }, total: 10m);
+
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
+    }
+```
+
+Класс от этого становится чище, а не толще: четыре билдера и пять отправителей вместо трёх билдеров, пяти отправителей и одной раскладки, спрятанной внутри отправителя.
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -2390,7 +2444,7 @@ for f in src/VvCash/Assets/i18n/*.json; do python -c "import json,sys; d=json.lo
 
 ```csharp
     [Fact]
-    public void TestPrint_OnAnUnreachablePrinter_ReportsTheReasonRatherThanStayingSilent()
+    public async Task TestPrint_OnAnUnreachablePrinter_ReportsTheReasonRatherThanStayingSilent()
     {
         // Точка проверяет кодовую страницу этой кнопкой, поэтому молчащий отказ
         // означает звонок разработчику — то есть кнопка не сделала того, ради
