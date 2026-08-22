@@ -246,10 +246,10 @@ public class PosViewModelSellerGateTest
 
     private class FakeCustomerDisplayService : ICustomerDisplayService
     {
-        public Task ShowLineAsync(string line1, string line2) => Task.CompletedTask;
-        public Task ShowItemAsync(string name, decimal price) => Task.CompletedTask;
-        public Task ShowTotalAsync(decimal total) => Task.CompletedTask;
-        public Task ClearAsync() => Task.CompletedTask;
+        public Task<bool> ShowLineAsync(string line1, string line2) => Task.FromResult(true);
+        public Task<bool> ShowItemAsync(string name, decimal price) => Task.FromResult(true);
+        public Task<bool> ShowTotalAsync(decimal total) => Task.FromResult(true);
+        public Task<bool> ClearAsync() => Task.FromResult(true);
     }
 
     private class FakeShiftService : IShiftService

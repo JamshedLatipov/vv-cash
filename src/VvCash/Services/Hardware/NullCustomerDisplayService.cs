@@ -9,13 +9,12 @@ namespace VvCash.Services.Hardware;
 /// и сорил каждой продажей в консоль. Имя врало: «mock» обещает подмену на время
 /// тестов, а это рабочее поведение ненастроенной кассы.
 ///
-/// Сигнатуры временно возвращают голый Task: ICustomerDisplayService меняется на
-/// Task&lt;bool&gt; следующим коммитом этого же батча, и эта заглушка меняется вместе
-/// с ним. Здесь, до правки интерфейса, Task&lt;bool&gt; не собрался бы.</summary>
+/// Возвращает true: «показывать нечего» — не отказ, и кнопка проверки дисплея на
+/// такой кассе не должна показывать ошибку.</summary>
 public class NullCustomerDisplayService : ICustomerDisplayService
 {
-    public Task ShowLineAsync(string line1, string line2) => Task.CompletedTask;
-    public Task ShowItemAsync(string name, decimal price) => Task.CompletedTask;
-    public Task ShowTotalAsync(decimal total) => Task.CompletedTask;
-    public Task ClearAsync() => Task.CompletedTask;
+    public Task<bool> ShowLineAsync(string line1, string line2) => Task.FromResult(true);
+    public Task<bool> ShowItemAsync(string name, decimal price) => Task.FromResult(true);
+    public Task<bool> ShowTotalAsync(decimal total) => Task.FromResult(true);
+    public Task<bool> ClearAsync() => Task.FromResult(true);
 }
