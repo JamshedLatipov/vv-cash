@@ -237,5 +237,6 @@
   "UpdateLaunchFailed": "Could not start the installer. Run this file by hand:",
   "PhoneRequired": "Enter a phone number",
   "ScanReturnItem": "Scan item",
-  "BarcodeNotFoundInReceipt": "No item with this barcode in this receipt"
+  "BarcodeNotFoundInReceipt": "No item with this barcode in this receipt",
+  "ShiftAccessDenied": "The server rejected this register's session, so the shift cannot be opened. Sign out and sign in again. If that does not help, check the cash token and the seller's permissions."
 }

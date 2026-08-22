@@ -1004,11 +1004,27 @@
                              Foreground="{StaticResource Slate900Brush}"
                              HorizontalAlignment="Center"/>
 
+                    <!-- Two mutually exclusive lines. The ordinary invitation, and — when
+                         the server answered a shift operation with 403 — an explanation of
+                         why the button below cannot work and what to do about it. This has
+                         to live inside the modal: the IsSessionRevoked banner at the top of
+                         this screen is left dimmed under this overlay's translucent scrim
+                         (RowSpan 3, ZIndex 1000), and a dimmed line behind a modal that is
+                         demanding a decision is easy to miss entirely. -->
                     <TextBlock Text="{Binding [Pleasestartyourshift], Source={x:Static services:I18nService.Instance}}"
                              FontSize="14"
                              Foreground="{StaticResource Slate600Brush}"
                              TextWrapping="Wrap"
-                             TextAlignment="Center"/>
+                             TextAlignment="Center"
+                             IsVisible="{Binding !IsShiftAccessDenied}"/>
+
+                    <TextBlock Text="{Binding [ShiftAccessDenied], Source={x:Static services:I18nService.Instance}}"
+                             FontSize="14"
+                             FontWeight="SemiBold"
+                             Foreground="{StaticResource DangerBrush}"
+                             TextWrapping="Wrap"
+                             TextAlignment="Center"
+                             IsVisible="{Binding IsShiftAccessDenied}"/>
 
                     <Button Classes="PrimaryButton"
                             Content="{Binding [StartShiftAction], Source={x:Static services:I18nService.Instance}}"

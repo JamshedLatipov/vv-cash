@@ -237,5 +237,6 @@
   "UpdateLaunchFailed": "O'rnatishni boshlab bo'lmadi. Faylni qo'lda ishga tushiring:",
   "PhoneRequired": "Telefon raqamini kiriting",
   "ScanReturnItem": "Mahsulotni skanerlang",
-  "BarcodeNotFoundInReceipt": "Ushbu chekda bu shtrix-kodli mahsulot topilmadi"
+  "BarcodeNotFoundInReceipt": "Ushbu chekda bu shtrix-kodli mahsulot topilmadi",
+  "ShiftAccessDenied": "Server ushbu kassa seansini rad etdi — smenani ochib bo'lmaydi. Chiqing va qaytadan kiring. Yordam bermasa, kassa tokeni va sotuvchi huquqlarini tekshiring."
 }
