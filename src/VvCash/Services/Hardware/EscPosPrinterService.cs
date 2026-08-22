@@ -361,7 +361,7 @@ public class EscPosPrinterService : IPrinterService
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         foreach (var l in lines)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
         WriteLine(ms, PadLine("REFUND:", Money(totalRefund), 32), codePage);
@@ -434,11 +434,11 @@ public class EscPosPrinterService : IPrinterService
 
         WriteLine(ms, "RETURNED:", codePage);
         foreach (var l in returned)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
 
         WriteLine(ms, "ISSUED:", codePage);
         foreach (var l in issued)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
 
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);

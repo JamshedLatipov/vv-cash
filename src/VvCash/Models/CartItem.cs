@@ -1,4 +1,3 @@
-using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace VvCash.Models;
@@ -71,9 +70,7 @@ public partial class CartItem : ObservableObject
 
     /// <summary>Quantity without trailing zeros, so a whole-unit line still reads
     /// "2" and not "2.000" on screen and on the receipt.</summary>
-    public string QuantityDisplay => Quantity == decimal.Truncate(Quantity)
-        ? decimal.Truncate(Quantity).ToString(CultureInfo.InvariantCulture)
-        : Quantity.ToString("0.###", CultureInfo.InvariantCulture);
+    public string QuantityDisplay => QuantityFormat.Display(Quantity, "0.###");
 
     /// <summary>Which unit the cashier typed this line in. Drives the quantity
     /// pad and how the line reads on screen and on the receipt; it never
@@ -94,7 +91,5 @@ public partial class CartItem : ObservableObject
 
     /// <summary>Amount in the secondary unit without trailing zeros, so a line
     /// reads "12.72" and not "12.720".</summary>
-    public string QuantityInUnitDisplay => QuantityInUnit == decimal.Truncate(QuantityInUnit)
-        ? decimal.Truncate(QuantityInUnit).ToString(CultureInfo.InvariantCulture)
-        : QuantityInUnit.ToString("0.######", CultureInfo.InvariantCulture);
+    public string QuantityInUnitDisplay => QuantityFormat.Display(QuantityInUnit, "0.######");
 }

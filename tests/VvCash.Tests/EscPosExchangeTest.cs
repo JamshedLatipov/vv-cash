@@ -68,4 +68,33 @@ public class EscPosExchangeTest
         Assert.Contains("Ivanov I.", text);
         Assert.Contains("06.06.2026 17:32", text);
     }
+
+    [Fact]
+    public void ExchangeReceipt_PrintsAFractionalIssuedQuantity()
+    {
+        // 1.4 кг печаталось как «x1»: ReturnReceiptLine объявлял int, а выданная
+        // сторона обмена приводила туда decimal.
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(
+            EscPosCodePages.Cp866,
+            System.Array.Empty<ReturnReceiptLine>(),
+            new[] { new ReturnReceiptLine("Сахар", 1.4m, 70m) },
+            difference: 70m, documentNumber: "EX-2");
+
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
+
+        Assert.Contains("Сахар x1.4", text);
+        Assert.DoesNotContain("Сахар x1 ", text);
+    }
+
+    [Fact]
+    public void ExchangeReceipt_StillPrintsAWholeQuantityWithoutADecimalTail()
+    {
+        var bytes = EscPosPrinterService.BuildExchangeReceipt(
+            EscPosCodePages.Cp866,
+            new[] { new ReturnReceiptLine("Товар", 2m, 20m) },
+            System.Array.Empty<ReturnReceiptLine>(),
+            difference: -20m, documentNumber: "EX-3");
+
+        Assert.Contains("Товар x2", EscPosCodePages.Cp866.Encoding.GetString(bytes));
+    }
 }
