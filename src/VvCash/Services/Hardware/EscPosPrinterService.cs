@@ -110,22 +110,25 @@ public class EscPosPrinterService : IPrinterService
     /// вопросительными знаками при ЛЮБОЙ записи каталога, и это ожидаемо —
     /// однобайтовой таблицы под них у ESC/POS нет. Она стоит здесь, чтобы это
     /// увидели на бумаге, а не на названиях товаров через неделю. Латиница и
-    /// цифры отделяют «таблица не та» от «принтер вообще не тот».</summary>
+    /// цифры отделяют «таблица не та» от «принтер вообще не тот». Казахская
+    /// «і» из образца намеренно убрана: она единственная из этого ряда есть в
+    /// CP1251, и на одной уцелевшей букве приёмка на точке спотыкалась бы о
+    /// собственную инструкцию «должны быть одни вопросительные знаки».</summary>
     public static byte[] BuildTestReceipt(EscPosCodePage codePage)
     {
         using var ms = new MemoryStream();
         WriteInit(ms, codePage);
         Write(ms, CmdAlignCenter);
         Write(ms, CmdBoldOn);
-        WriteLine(ms, "ПРОБНАЯ ПЕЧАТЬ", codePage);
+        WriteLine(ms, "TEST / ПРОБНАЯ ПЕЧАТЬ", codePage);
         Write(ms, CmdBoldOff);
-        WriteLine(ms, "--------------------------------", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         WriteLine(ms, "RU: Ёжик съел 12 шт.", codePage);
-        WriteLine(ms, "TJ/KK: ӯ ғ қ ҳ ҷ ә ң ө ұ ү і", codePage);
+        WriteLine(ms, "TJ/KK: ӯ ғ қ ҳ ҷ ә ң ө ұ ү", codePage);
         WriteLine(ms, "LAT: The quick brown fox", codePage);
         WriteLine(ms, "NUM: 0123456789", codePage);
-        WriteLine(ms, "--------------------------------", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         // Что именно пробовали — чтобы точка могла назвать это по телефону, не
         // залезая в настройки.
         WriteLine(ms, $"{codePage.Id}   ESC t {codePage.EscTSelector}", codePage);
@@ -136,7 +139,12 @@ public class EscPosPrinterService : IPrinterService
     }
 
     /// <summary>Отправляет <see cref="BuildTestReceipt"/> и не глотает отказ:
-    /// кнопке проверки нужен не bool, а причина.</summary>
+    /// кнопке проверки нужен не bool, а причина.
+    ///
+    /// SetStatus здесь намеренно нет, в отличие от пяти боевых методов. Служба
+    /// для проверки строится из несохранённых значений с экрана настроек, на её
+    /// StatusChanged никто не подписан — а если бы подписался, разовая
+    /// диагностика перекрашивала бы индикатор готовности боевой кассы.</summary>
     public Task PrintTestReceiptAsync() => SendAsync(BuildTestReceipt(_codePage));
 
     public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
