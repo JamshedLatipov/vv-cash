@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO.Ports;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace VvCash.Services.Hardware;
 
@@ -32,8 +33,16 @@ public static class PrinterDiscoveryService
                 var processInfo = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    Arguments = "-NoProfile -Command \"Get-WmiObject -Query 'SELECT Name FROM Win32_Printer' | Select-Object -ExpandProperty Name\"",
+                    // [Console]::OutputEncoding внутри самой команды, а не только
+                    // StandardOutputEncoding снаружи: Windows PowerShell кодирует
+                    // вывод раньше, чем его читает .NET, и одного ProcessStartInfo
+                    // мало. Пока USB был заглушкой, покорёженное кириллическое имя
+                    // никого не задевало — теперь на его побайтовой точности
+                    // держится OpenPrinter.
+                    Arguments = "-NoProfile -Command \"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                              + "Get-WmiObject -Query 'SELECT Name FROM Win32_Printer' | Select-Object -ExpandProperty Name\"",
                     RedirectStandardOutput = true,
+                    StandardOutputEncoding = Encoding.UTF8,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
