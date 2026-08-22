@@ -782,8 +782,6 @@ git commit -m "fix(printing): keep the reason a receipt failed, and clear the er
     // байтами кодируем и каким номером объявляем таблицу принтеру.
     // -------------------------------------------------------------------------------
 
-    private static readonly byte[] EscTCp866 = { 0x1B, 0x74, 17 };
-
     private static bool Contains(byte[] haystack, byte[] needle)
     {
         for (var i = 0; i + needle.Length <= haystack.Length; i++)
@@ -859,9 +857,12 @@ git commit -m "fix(printing): keep the reason a receipt failed, and clear the er
         Assert.Contains("Ёжик", text);
         Assert.Contains("The quick brown fox", text);
         Assert.Contains("0123456789", text);
-        // Таджикские и казахские буквы CP866 не покрывает — и предъявляет это
-        // вопросительными знаками ровно там, где на них смотрят.
-        Assert.Contains("?", text);
+        // Ни одной из одиннадцати таджикских и казахских букв в CP866 нет —
+        // строка целиком вырождается в вопросительные знаки, и предъявляется
+        // это ровно там, где на неё смотрят. Утверждение точное, а не
+        // Contains("?"): последнее прошло бы и на одной случайной замене,
+        // то есть не отличило бы эту границу от опечатки в другом месте.
+        Assert.Contains("TJ/KK: ? ? ? ? ? ? ? ? ? ? ?", text);
     }
 
     [Fact]
