@@ -535,7 +535,7 @@ internal static class WindowsRawPrinter
 dotnet build src/VvCash/VvCash.csproj -o build/verify
 ```
 
-Ожидание: `Build succeeded`, `0 Error(s)` и **ровно два предупреждения, оба унаследованных**: `CS8601` в `PosViewModel.cs:2266` и `CS0067` в `MockPrinterService.cs:11`. Оба есть и на чистом HEAD до этой задачи — сверить можно через `git stash` и пересборку. Второе исчезнет само в Task 9 вместе с удаляемым файлом; первое вне скоупа батча. Появление третьего означает, что его добавила эта правка. Появление `CA1416` означает, что guard не распознан — тогда пометить `SendViaUsb` атрибутом `[SupportedOSPlatform("windows")]` нельзя (метод вызывается кроссплатформенно); вместо этого вынести тело в отдельный `[SupportedOSPlatform("windows")] private static void SendViaSpooler(string, byte[])` и звать его под тем же guard'ом.
+Ожидание: `Build succeeded`, `0 Error(s)` и **унаследованные предупреждения, не более**. До Task 9 их два — `CS8601` в `PosViewModel.cs:2266` и `CS0067` в `MockPrinterService.cs:11`; после Task 9 остаётся одно, `CS8601`, потому что второй файл удалён. Появление лишнего означает, что его добавила эта правка. Появление `CA1416` означает, что guard не распознан — тогда пометить `SendViaUsb` атрибутом `[SupportedOSPlatform("windows")]` нельзя (метод вызывается кроссплатформенно); вместо этого вынести тело в отдельный `[SupportedOSPlatform("windows")] private static void SendViaSpooler(string, byte[])` и звать его под тем же guard'ом.
 
 - [ ] **Step 4: Прогнать весь набор — ничего не должно сломаться**
 
