@@ -32,10 +32,13 @@ public class CompositePrinterServiceTest
         public void Save() => SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private static PrinterConfig Lan(string address) => new()
+    /// <summary>Печатает мгновенно: ConnectionType нарочно вне диапазона enum, поэтому
+    /// SendAsync уходит в свою ветку default: и возвращается без единого байта
+    /// ввода-вывода. Почему это оправдано именно здесь — в комментарии теста ниже.</summary>
+    private static PrinterConfig Fast(string address) => new()
     {
         Name = address,
-        ConnectionType = PrinterConnectionType.LAN,
+        ConnectionType = (PrinterConnectionType)99,
         ConnectionString = address,
         IsEnabled = true
     };
@@ -43,16 +46,33 @@ public class CompositePrinterServiceTest
     [Fact]
     public async Task PrintingSurvivesASettingsChangeMidFlight()
     {
-        // Ни один из адресов не отвечает, поэтому печать честно провалится —
-        // проверяется не результат, а то, что метод не падает на изменившейся
-        // под ним коллекции. До правки это InvalidOperationException из Select
-        // по списку, который в этот момент чистят.
-        var settings = new FakeSettings { Printers = { Lan("127.0.0.1:9101") } };
+        // Транспорт здесь намеренно не сетевой. Первая редакция этого теста печатала
+        // на закрытый порт loopback и не воспроизвела гонку ни разу за три прогона по
+        // 6m46s/6m47s/6m48s: TcpClient.Connect на этой машине отказывает не сразу, а
+        // примерно за 2.2 секунды (замерено отдельно, напрямую), и цикл перенастройки
+        // успевал отработать все 200 итераций Clear()/Add(), пока цикл печати ещё
+        // стоял на первом же await ConnectAsync. Окно перекрытия, от которого зависел
+        // тест, схлопывалось в ноль что до фикса, что после — тест был зелёным при
+        // любом порядке дел, три раза из трёх, и не поймал бы регресс никогда.
+        //
+        // (PrinterConnectionType)99 — нарочно вне диапазона enum, чтобы SendAsync ушёл
+        // в собственную ветку default: и вернулся без единого байта ввода-вывода.
+        // Предмет теста — подмена списка _printers, а не транспорт; гонять здесь
+        // настоящий сокет так же не по адресу, как гонять настоящий принтер.
+        //
+        // Без сети гонка ловится с первой попытки за десятки миллисекунд. Симптом на
+        // .NET 10 — не классический InvalidOperationException: Collection was
+        // modified, а NullReferenceException из ListSelectIterator.Fill: быстрый путь
+        // List<T>.Select().ToList() читает внутренний массив по индексу напрямую, без
+        // версии и без MoveNext(), и конкурентный Clear() успевает обнулить элемент
+        // между двумя чтениями. Корень тот же самый — другое исключение здесь не
+        // значит, что тест сгнил.
+        var settings = new FakeSettings { Printers = { Fast("x1") } };
         var composite = new CompositePrinterService(settings);
 
         var printing = Task.Run(async () =>
         {
-            for (var i = 0; i < 200; i++)
+            for (var i = 0; i < 20000; i++)
             {
                 await composite.PrintPreReceiptAsync(Array.Empty<CartItem>(), 0m);
             }
@@ -60,9 +80,9 @@ public class CompositePrinterServiceTest
 
         var reconfiguring = Task.Run(() =>
         {
-            for (var i = 0; i < 200; i++)
+            for (var i = 0; i < 20000; i++)
             {
-                settings.Printers = new List<PrinterConfig> { Lan($"127.0.0.1:{9102 + (i % 3)}") };
+                settings.Printers = new List<PrinterConfig> { Fast($"x{2 + (i % 3)}") };
                 settings.Save();
             }
         });
