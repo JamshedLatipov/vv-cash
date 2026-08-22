@@ -162,6 +162,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     public bool IsExchangeVisible => _features.Current.IsEnabled(CashFeatureCodes.Exchange);
     public bool IsExchangeEnabled => IsExchangeVisible && IsSystemOnline;
 
+    /// <summary>Raised whenever <see cref="IsCustomerDisplayEnabled"/> changes, so the host
+    /// (App.axaml.cs) can show or hide the customer-facing window it owns. Same decoupling
+    /// role as <see cref="LogoutRequested"/>: this class states intent, the host performs
+    /// the window mechanics.
+    ///
+    /// Subscribe via <see cref="SubscribeCustomerDisplayVisibility"/> rather than <c>+=</c>
+    /// directly — see its remarks for why a bare subscription can silently never fire.</summary>
+    public event EventHandler<bool>? CustomerDisplayVisibilityChanged;
+
+    /// <summary>Subscribes <paramref name="handler"/> and immediately calls it with the
+    /// flag's current value. Use this rather than <c>+=</c>: the event only fires on a
+    /// *change*, and ICashFeatureService is a singleton that survives a logout/login cycle,
+    /// so the flag may already hold its final value by the time a host subscribes and
+    /// nothing would ever fire. Baking the initial call into the subscription is the only
+    /// version of that rule a caller cannot forget.</summary>
+    public void SubscribeCustomerDisplayVisibility(EventHandler<bool> handler)
+    {
+        CustomerDisplayVisibilityChanged += handler;
+        handler(this, IsCustomerDisplayEnabled);
+    }
+
     /// <summary>A display that was fed cart data before the flag actually loaded (see
     /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
     /// again once InitializeAsync's real fetch resolves) must not keep showing that
@@ -173,6 +194,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         if (!value && CustomerDisplayViewModel != null)
             CustomerDisplayViewModel.IsIdle = true;
+
+        // Raise after parking, not before: the host's handler acts on the shared customer
+        // window synchronously off the back of this call, and it must see the display view
+        // model already idle rather than still showing the last cart.
+        CustomerDisplayVisibilityChanged?.Invoke(this, value);
     }
 
     /// <summary>Parked sales already on this register outlive the flag being
@@ -1401,6 +1427,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
         _sellerSession.CurrentChanged -= OnSellerChanged;
+
+        // This class is the publisher of this one, not a subscriber, so there is nothing to
+        // unsubscribe from — but the instance is not collected when it is discarded either:
+        // PosViewModel is resolved from the root provider, which captures every IDisposable
+        // it constructs for its own eventual disposal (see App.axaml.cs's remarks where
+        // SellerSwitchViewModel deliberately avoids exactly that). Combined with
+        // InitializeAsync being fire-and-forget with no cancellation, a discarded instance
+        // can still reach ApplyFeatures and fire this event long after its screen is gone —
+        // at a host handler that drives the one long-lived customer window the *current*
+        // session is using. Dropping the invocation list makes that a guaranteed no-op.
+        CustomerDisplayVisibilityChanged = null;
 
         _syncCancellationTokenSource?.Cancel();
         _syncCancellationTokenSource?.Dispose();

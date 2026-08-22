@@ -2461,6 +2461,52 @@ public class PosViewModelSellerGateTest
         Assert.False(vm.IsShiftAccessDenied);
     }
 
+    [Fact]
+    public void CustomerDisplayVisibilityChanged_FiresWithEachNewFlagValue()
+    {
+        // The host owns the window, this class owns the flag. The event is how the two meet
+        // — see App.axaml.cs's NavigateToPos, which also applies the CURRENT value on
+        // subscribe, because this only fires on a change.
+        using var vm = CreateViewModel(out _);
+        var seen = new List<bool>();
+        vm.CustomerDisplayVisibilityChanged += (s, visible) => seen.Add(visible);
+
+        vm.IsCustomerDisplayEnabled = false;
+        vm.IsCustomerDisplayEnabled = true;
+
+        Assert.Equal(new[] { false, true }, seen);
+    }
+
+    [Fact]
+    public void CustomerDisplayDisabled_StillParksTheDisplayViewModelAsIdle()
+    {
+        // The pre-existing behaviour of the same hook must survive the event being added to
+        // it: a display already fed cart data before the flag loaded must not keep showing
+        // someone else's total.
+        using var vm = CreateViewModel(out _);
+        vm.CustomerDisplayViewModel = new CustomerDisplayViewModel { IsIdle = false };
+
+        vm.IsCustomerDisplayEnabled = false;
+
+        Assert.True(vm.CustomerDisplayViewModel.IsIdle);
+    }
+
+    [Fact]
+    public void CustomerDisplayVisibilityChanged_DoesNotFireWhenTheFlagIsSetToItsCurrentValue()
+    {
+        // ApplyFeatures runs twice on startup — once optimistically in the constructor, once
+        // after the cached flag map is actually loaded. On the common path both agree, and
+        // this is why that costs nothing: [ObservableProperty]'s generated equality check
+        // makes the second write a no-op. A hand-written property would quietly break it.
+        using var vm = CreateViewModel(out _);
+        var fired = 0;
+        vm.CustomerDisplayVisibilityChanged += (s, v) => fired++;
+
+        vm.IsCustomerDisplayEnabled = vm.IsCustomerDisplayEnabled;
+
+        Assert.Equal(0, fired);
+    }
+
     // ---------------------------------------------------------------------------------
     // Feature-flag gates (Task 13): disabled entry points hide rather than grey out, and
     // turning off seller switching must take its permission gates with it. Every flag
