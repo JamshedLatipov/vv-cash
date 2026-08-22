@@ -33,12 +33,14 @@ public static class PrinterDiscoveryService
                 var processInfo = new ProcessStartInfo
                 {
                     FileName = "powershell.exe",
-                    // [Console]::OutputEncoding внутри самой команды, а не только
-                    // StandardOutputEncoding снаружи: Windows PowerShell кодирует
-                    // вывод раньше, чем его читает .NET, и одного ProcessStartInfo
-                    // мало. Пока USB был заглушкой, покорёженное кириллическое имя
-                    // никого не задевало — теперь на его побайтовой точности
-                    // держится OpenPrinter.
+                    // powershell.exe пишет вывод в кодировке консоли (здесь
+                    // cp866), а .NET по умолчанию читает его в кодировке хоста
+                    // (в GUI-процессе cp1251) — оба конца надо задать явно, и
+                    // одного StandardOutputEncoding мало: он лишь меняет то, чем
+                    // декодируют по-прежнему не-UTF-8 байты. [Console]::OutputEncoding
+                    // внутри команды переключает сам PowerShell. Пока USB был
+                    // заглушкой, покорёженное кириллическое имя никого не
+                    // задевало — теперь на его точности держится OpenPrinter.
                     Arguments = "-NoProfile -Command \"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
                               + "Get-WmiObject -Query 'SELECT Name FROM Win32_Printer' | Select-Object -ExpandProperty Name\"",
                     RedirectStandardOutput = true,
