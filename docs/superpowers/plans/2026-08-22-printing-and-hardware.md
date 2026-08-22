@@ -179,7 +179,7 @@ public class EscPosCodePageTest
 & ./run-tests.ps1 --filter "FullyQualifiedName~EscPosCodePageTest"
 ```
 
-Ожидание: ошибка сборки, `CS0246: The type or namespace name 'EscPosCodePages' could not be found`.
+Ожидание: ошибка сборки, `CS0103: имя 'EscPosCodePages' не существует в текущем контексте`. (Не `CS0246`: в тесте тип встречается только в позиции доступа к члену, `EscPosCodePages.Resolve(...)`, а не в позиции объявления — компилятор до разрешения типа не доходит.)
 
 - [ ] **Step 4: Написать каталог**
 
@@ -298,7 +298,7 @@ public static class EscPosCodePages
 & ./run-tests.ps1 --filter "FullyQualifiedName~EscPosCodePageTest"
 ```
 
-Ожидание: `Passed! - Failed: 0`, 11 тестов.
+Ожидание: `Passed! - Failed: 0`, **12** тестов (5 `[Fact]` + 7 `[InlineData]` в двух `[Theory]`).
 
 - [ ] **Step 6: Поправить спеку под фактическое место регистрации**
 
@@ -464,7 +464,7 @@ internal static class WindowsRawPrinter
 dotnet build src/VvCash/VvCash.csproj -o build/verify
 ```
 
-Ожидание: `Build succeeded`, `0 Warning(s)`, `0 Error(s)`. Появление `CA1416` означает, что guard не распознан — тогда пометить `SendViaUsb` атрибутом `[SupportedOSPlatform("windows")]` нельзя (метод вызывается кроссплатформенно); вместо этого вынести тело в отдельный `[SupportedOSPlatform("windows")] private static void SendViaSpooler(string, byte[])` и звать его под тем же guard'ом.
+Ожидание: `Build succeeded`, `0 Error(s)`. Одно предупреждение `NU1510` на `System.Text.Encoding.CodePages` — ожидаемое: эвристика обрезки пакетов SDK считает его лишним, потому что типы разрешаются в reference-сборках фреймворка, тогда как данные кодовых страниц приезжают только с пакетом. В `WarningsAsErrors` его нет, сборку оно не рушит. Появление `CA1416` означает, что guard не распознан — тогда пометить `SendViaUsb` атрибутом `[SupportedOSPlatform("windows")]` нельзя (метод вызывается кроссплатформенно); вместо этого вынести тело в отдельный `[SupportedOSPlatform("windows")] private static void SendViaSpooler(string, byte[])` и звать его под тем же guard'ом.
 
 - [ ] **Step 4: Прогнать весь набор — ничего не должно сломаться**
 
