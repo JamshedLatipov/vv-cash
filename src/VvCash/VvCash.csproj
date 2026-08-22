@@ -46,8 +46,11 @@
   <ItemGroup>
     <!-- Lets VvCash.Tests reach CompositePrinterService.Printers, the read-only
          snapshot that lets a test see which EscPosCodePage each printer actually
-         got. Internal rather than public: nothing in production should be able
-         to reach past the composite to an individual printer. -->
+         got. Internal, not public: it keeps the snapshot off the public API surface
+         and marks it as not meant for production use. It does not stop production
+         code from reaching it: internal is visible to every file in this assembly,
+         and EscPosPrinterService is itself public regardless. Real enforcement
+         would need an analyser, which this is not worth. -->
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>VvCash.Tests</_Parameter1>
     </AssemblyAttribute>

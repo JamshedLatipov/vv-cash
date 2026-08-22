@@ -14,6 +14,18 @@ public class CompositePrinterService : IPrinterService
     /// но атомарность — не то же самое, что видимость. Атомарности хватает, чтобы не
     /// увидеть полусобранный список; чтобы гарантированно увидеть новый — нет.</summary>
     private volatile IReadOnlyList<EscPosPrinterService> _printers = Array.Empty<EscPosPrinterService>();
+
+    /// <summary>Пересборки сериализуются между собой. Печать этот замок не трогает
+    /// вовсе — внутри нет ни одного await, — так что прежнее рассуждение про
+    /// «не держать мьютекс на сетевом вводе-выводе» в силе.
+    ///
+    /// Без него два наложившихся SettingsChanged расходятся так: оба отписывают,
+    /// оба собирают, оба публикуют — и принтеры проигравшего остаются подписанными
+    /// на недостижимом списке, продолжая перекрашивать индикатор до конца жизни
+    /// процесса. Сегодня наложиться они не могут, потому что Save() всегда
+    /// достигается на UI-потоке, но это свойство четырёх чужих файлов, а не этого.</summary>
+    private readonly object _rebuildGate = new();
+
     private PrinterStatus _overallStatus = PrinterStatus.Ready;
 
     public PrinterStatus Status => _overallStatus;
@@ -37,37 +49,48 @@ public class CompositePrinterService : IPrinterService
     }
 
     /// <summary>Собирает новый список и присваивает его одним движением, вместо того
-    /// чтобы править существующий на месте. Без блокировки: методы печати await-ят
-    /// сетевой и последовательный ввод-вывод, и держать на нём мьютекс — значит
-    /// подвесить экран настроек на время печати.
+    /// чтобы править существующий на месте. Сама пересборка сериализована через
+    /// _rebuildGate; печать в этот замок не заходит вовсе — почему это безопасно,
+    /// см. его комментарий, — так что подвесить экран настроек на время печати он
+    /// не может.
     ///
     /// Печать, начатая до смены настроек, доводится до конца на прежнем составе.
     /// Если она упадёт ПОСЛЕ подмены, её StatusChanged уже некому услышать и общий
     /// Status останется Ready — возвращаемый bool при этом честный, расходится
     /// только индикатор. Принято сознательно: держать подписки на выброшенных
     /// принтерах до конца их последней задачи стоит заметно больше механики, чем
-    /// расхождение индикатора на одну печать.</summary>
+    /// расхождение индикатора на одну печать. Поэтому отписка — последним шагом
+    /// внутри лока, после публикации, а не первым: раньше она делала бы глухим уже
+    /// момент начала пересборки, а не момент подмены.</summary>
     private void InitializePrinters()
     {
-        foreach (var printer in _printers)
+        lock (_rebuildGate)
         {
-            printer.StatusChanged -= OnPrinterStatusChanged;
-        }
+            var previous = _printers;
 
-        var rebuilt = new List<EscPosPrinterService>();
-        var configs = _settingsService.Printers?.Where(p => p.IsEnabled);
-        if (configs != null)
-        {
-            foreach (var config in configs)
+            var rebuilt = new List<EscPosPrinterService>();
+            var configs = _settingsService.Printers?.Where(p => p.IsEnabled);
+            if (configs != null)
             {
-                var printer = new EscPosPrinterService(config.ConnectionType, config.ConnectionString,
-                    EscPosCodePages.Resolve(config.CodePageId));
-                printer.StatusChanged += OnPrinterStatusChanged;
-                rebuilt.Add(printer);
+                foreach (var config in configs)
+                {
+                    var printer = new EscPosPrinterService(config.ConnectionType, config.ConnectionString,
+                        EscPosCodePages.Resolve(config.CodePageId));
+                    printer.StatusChanged += OnPrinterStatusChanged;
+                    rebuilt.Add(printer);
+                }
+            }
+
+            _printers = rebuilt;
+
+            // Отписка ПОСЛЕ публикации: иначе печать, стартовавшая между отпиской и
+            // присваиванием, получает прежний список с уже сорванными подписками —
+            // окно глухоты шире, чем «упала после подмены».
+            foreach (var printer in previous)
+            {
+                printer.StatusChanged -= OnPrinterStatusChanged;
             }
         }
-
-        _printers = rebuilt;
 
         UpdateOverallStatus();
     }

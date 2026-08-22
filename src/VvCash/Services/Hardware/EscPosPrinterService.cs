@@ -265,6 +265,12 @@ public class EscPosPrinterService : IPrinterService
                 await SendViaUsb(data);
                 break;
             default:
+                // CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight
+                // строит принтер с ConnectionType вне диапазона enum именно затем,
+                // чтобы попасть сюда и получить мгновенный возврат без единого байта
+                // ввода-вывода — так гонка ловится без сетевой задержки. Заставь эту
+                // ветку бросать или подключись к транспорту — и тест сломается с
+                // непонятным исключением вместо понятного сигнала «смотри сюда».
                 await Task.CompletedTask;
                 break;
         }

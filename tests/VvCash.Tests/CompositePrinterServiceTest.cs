@@ -34,7 +34,10 @@ public class CompositePrinterServiceTest
 
     /// <summary>Печатает мгновенно: ConnectionType нарочно вне диапазона enum, поэтому
     /// SendAsync уходит в свою ветку default: и возвращается без единого байта
-    /// ввода-вывода. Почему это оправдано именно здесь — в комментарии теста ниже.</summary>
+    /// ввода-вывода — адрес в этой ветке не читается вовсе. address существует не
+    /// ради маршрута, а чтобы разные поколения принтеров были различимы под
+    /// отладчиком. Почему сам приём с ConnectionType оправдан здесь — в комментарии
+    /// теста ниже.</summary>
     private static PrinterConfig Fast(string address) => new()
     {
         Name = address,
@@ -46,27 +49,17 @@ public class CompositePrinterServiceTest
     [Fact]
     public async Task PrintingSurvivesASettingsChangeMidFlight()
     {
-        // Транспорт здесь намеренно не сетевой. Первая редакция этого теста печатала
-        // на закрытый порт loopback и не воспроизвела гонку ни разу за три прогона по
-        // 6m46s/6m47s/6m48s: TcpClient.Connect на этой машине отказывает не сразу, а
-        // примерно за 2.2 секунды (замерено отдельно, напрямую), и цикл перенастройки
-        // успевал отработать все 200 итераций Clear()/Add(), пока цикл печати ещё
-        // стоял на первом же await ConnectAsync. Окно перекрытия, от которого зависел
-        // тест, схлопывалось в ноль что до фикса, что после — тест был зелёным при
-        // любом порядке дел, три раза из трёх, и не поймал бы регресс никогда.
-        //
-        // (PrinterConnectionType)99 — нарочно вне диапазона enum, чтобы SendAsync ушёл
-        // в собственную ветку default: и вернулся без единого байта ввода-вывода.
-        // Предмет теста — подмена списка _printers, а не транспорт; гонять здесь
-        // настоящий сокет так же не по адресу, как гонять настоящий принтер.
-        //
-        // Без сети гонка ловится с первой попытки за десятки миллисекунд. Симптом на
-        // .NET 10 — не классический InvalidOperationException: Collection was
-        // modified, а NullReferenceException из ListSelectIterator.Fill: быстрый путь
-        // List<T>.Select().ToList() читает внутренний массив по индексу напрямую, без
-        // версии и без MoveNext(), и конкурентный Clear() успевает обнулить элемент
-        // между двумя чтениями. Корень тот же самый — другое исключение здесь не
-        // значит, что тест сгнил.
+        // Транспорт не сетевой — намеренно. Печать на закрытый порт loopback здесь
+        // отказывает не сразу, а за ~2.2с, и цикл перенастройки успевает отработать
+        // всё, пока печать стоит на первой попытке: окно перекрытия схлопывается в
+        // ноль, и первая редакция была зелёной что до фикса, что после.
+        // (PrinterConnectionType)99 нарочно вне диапазона enum — уводит SendAsync в
+        // default: без единого байта ввода-вывода, и гонка ловится с первой попытки
+        // за десятки миллисекунд. Симптом на .NET 10 — не классический
+        // InvalidOperationException, а NullReferenceException из ListSelectIterator.Fill
+        // (Clear() успевает обнулить элемент внутреннего массива между чтениями
+        // List<T>.Select()); корень тот же — другое исключение тут не значит, что
+        // тест сгнил.
         var settings = new FakeSettings { Printers = { Fast("x1") } };
         var composite = new CompositePrinterService(settings);
 
@@ -115,6 +108,9 @@ public class CompositePrinterServiceTest
 
         var composite = new CompositePrinterService(settings);
 
+        // Индексы 0/1 совпадают с порядком конфигурации только потому, что
+        // Where(IsEnabled) сохраняет исходный порядок; отключённый принтер между
+        // ними сдвинул бы их.
         Assert.Same(EscPosCodePages.Cp1251, composite.Printers[0].CodePage);
         Assert.Same(EscPosCodePages.Default, composite.Printers[1].CodePage);
     }
