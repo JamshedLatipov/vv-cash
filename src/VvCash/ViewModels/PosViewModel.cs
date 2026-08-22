@@ -894,7 +894,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IsMixedPaymentEnabled = features.IsEnabled(CashFeatureCodes.MixedPayment);
         IsCustomerRegistrationEnabled = features.IsEnabled(CashFeatureCodes.CustomerRegistration);
         IsSellerSwitchEnabled = features.IsEnabled(CashFeatureCodes.SellerSwitch);
-        IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
+        // The one flag that does not get the benefit of the doubt. Every other flag here
+        // reads as enabled until proven otherwise, which is right on a shop floor. This one
+        // faces a paying customer: showing a display the store switched off is worse than
+        // briefly showing nothing, so it stays hidden until the real map has actually
+        // loaded (see ICashFeatureService.HasLoaded).
+        IsCustomerDisplayEnabled = _features.HasLoaded && features.IsEnabled(CashFeatureCodes.CustomerDisplay);
         IsDiscountEnabled = features.IsEnabled(CashFeatureCodes.Discount);
         IsCouponsEnabled = features.IsEnabled(CashFeatureCodes.Coupons);
 

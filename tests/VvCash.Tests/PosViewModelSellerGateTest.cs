@@ -471,6 +471,13 @@ public class PosViewModelSellerGateTest
     {
         public CashFeatures Current { get; } = CashFeatures.Default;
 
+        // Tracked for real, unlike the other fakes in this file: PendingRefresh below
+        // exists specifically to model the gap between PosViewModel's optimistic
+        // constructor read and the real map landing, and HasLoaded is what that gap is
+        // about. Starts false; RefreshAsync flips it once it actually completes — mirroring
+        // CashFeatureService.HasLoaded in production, not just handing out a constant.
+        public bool HasLoaded { get; private set; }
+
         public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
 
         /// <summary>When set, RefreshAsync awaits this before returning instead of
@@ -496,6 +503,7 @@ public class PosViewModelSellerGateTest
         {
             if (PendingRefresh != null) await PendingRefresh.Task;
             foreach (var (code, enabled) in _afterRefresh) Current.Flags[code] = enabled;
+            HasLoaded = true;
         }
     }
 
@@ -2628,43 +2636,80 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void CustomerDisplay_FlagDisabledAfterRefresh_ResetsAlreadyFedDisplayToIdle()
+    public void CustomerDisplay_FlagDisabledAfterRefresh_StaysHiddenBeforeAndAfterTheRealMapLands()
     {
-        // Proves the actual mechanism OnIsCustomerDisplayEnabledChanged exists for: not
-        // "a flag disabled from the start blocks pushing" (the test above already covers
-        // that), but "a display that was fed on the constructor's optimistic first pass
-        // gets pulled back to idle once the real, disabled value lands". PendingRefresh
+        // This used to prove "a display fed on the constructor's optimistic first pass
+        // gets pulled back to idle once the real, disabled value lands" — that mechanism
+        // no longer exists. IsCustomerDisplayEnabled now stays false for as long as
+        // _features.HasLoaded is false (see ApplyFeatures' remarks), so there is no
+        // optimistic pass to feed the display from in the first place. PendingRefresh
         // holds InitializeAsync's RefreshAsync/ApplyFeatures pass open past construction,
-        // so IsCustomerDisplayEnabled is still true (the default) when CustomerDisplayViewModel
-        // is assigned and the cart is fed — exactly the window ApplyFeatures' own remarks
-        // describe. Completing PendingRefresh below is what stands in for "the register's
-        // storage becomes ready and the real fetch resolves".
+        // standing in for "the register's storage has not finished loading yet"; what this
+        // now demonstrates is that the display stays dark for that whole stretch, and stays
+        // dark once the real map lands, because the store disabled it — never a flash of
+        // "enabled" in between.
         var pending = new TaskCompletionSource<bool>();
         using var vm = CreateViewModel(out var deps, d =>
         {
             d.Features.PendingRefresh = pending;
             d.Features.SetAfterRefresh(CashFeatureCodes.CustomerDisplay, false);
         });
-        Assert.True(vm.IsCustomerDisplayEnabled); // still the optimistic default; real value hasn't landed
+        Assert.False(vm.IsCustomerDisplayEnabled); // unknown until the real map lands, not optimistic
 
         var display = new CustomerDisplayViewModel();
         vm.CustomerDisplayViewModel = display;
         vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
 
-        // Fed while the flag still (optimistically) reads as enabled.
-        Assert.False(display.IsIdle);
-        Assert.NotEmpty(display.Items);
+        // Disabled for the whole time the display has existed, so nothing was ever pushed.
+        Assert.True(display.IsIdle);
+        Assert.Empty(display.Items);
 
-        // The real fetch resolves: RefreshAsync applies the queued disabled value and
-        // InitializeAsync's own ApplyFeatures call re-snapshots it. TaskCompletionSource's
-        // default (not RunContinuationsAsynchronously) behaviour runs the awaiting
-        // continuation synchronously on this thread when nothing captured a
-        // SynchronizationContext — there is none in this test host — so this line
+        // The real fetch resolves: RefreshAsync applies the queued disabled value and sets
+        // HasLoaded, and InitializeAsync's own ApplyFeatures call re-snapshots the flag.
+        // TaskCompletionSource's default (not RunContinuationsAsynchronously) behaviour
+        // runs the awaiting continuation synchronously on this thread when nothing captured
+        // a SynchronizationContext — there is none in this test host — so this line
         // deterministically drives ApplyFeatures to completion; no delay, no polling.
         pending.SetResult(true);
 
         Assert.False(vm.IsCustomerDisplayEnabled);
-        Assert.True(display.IsIdle); // pulled back to idle, not left showing a stale cart
+        Assert.True(display.IsIdle); // still dark: never enabled, so never fed, so nothing to reset
+        Assert.Empty(display.Items);
+    }
+
+    [Fact]
+    public void CustomerDisplay_StaysHiddenUntilTheRealFlagMapLoads_ThenAppearsWhenEnabled()
+    {
+        // The cold-start flash this exists to prevent. CashFeatures.Default reports every
+        // feature enabled, so the constructor's optimistic ApplyFeatures pass would
+        // otherwise show a customer-facing window before anyone has read the store's real
+        // settings — and on a register where the store switched the display off, the
+        // customer would see it flash. Hidden until known is the only safe default here.
+        var pending = new TaskCompletionSource<bool>();
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.Features.PendingRefresh = pending;
+            d.Features.SetAfterRefresh(CashFeatureCodes.CustomerDisplay, true);
+        });
+        var seen = new List<bool>();
+        vm.SubscribeCustomerDisplayVisibility((s, visible) => seen.Add(visible));
+
+        // Nothing has loaded yet: a host subscribing right now must be told to stay hidden.
+        Assert.False(vm.IsCustomerDisplayEnabled);
+        Assert.Equal(new[] { false }, seen);
+
+        // No await/yield needed: TaskCompletionSource's default (not
+        // RunContinuationsAsynchronously) behaviour runs the awaiting continuation
+        // synchronously on this thread when nothing captured a SynchronizationContext —
+        // there is none in this test host — exactly as the sibling PendingRefresh tests
+        // above (CustomerDisplay_FlagDisabledAfterRefresh_StaysHiddenBeforeAndAfterTheRealMapLands,
+        // IsExchangeVisible_FlagArrivesDisabled_HidesTheButtonOnTheOpenScreen) already rely
+        // on. This line alone deterministically drives RefreshAsync and the following
+        // ApplyFeatures to completion.
+        pending.SetResult(true);
+
+        Assert.True(vm.IsCustomerDisplayEnabled);
+        Assert.Equal(new[] { false, true }, seen);
     }
 
     // ---------------------------------------------------------------------------------

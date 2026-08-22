@@ -42,6 +42,7 @@ public class SettingsViewModelTest
     private sealed class FakeFeatures : ICashFeatureService
     {
         public CashFeatures Current => CashFeatures.Default;
+        public bool HasLoaded => true;
         public Task RefreshAsync() => Task.CompletedTask;
     }
 

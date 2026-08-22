@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
@@ -37,6 +38,13 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // The register exits when its main window closes, full stop. The default is
+            // OnLastWindowClose, and the customer display is deliberately hidden rather
+            // than closed when it is not wanted (see NavigateToPos) — under the default
+            // that hidden-but-open window would keep the process alive after the cashier
+            // closed the register, background sync loop and all, with nothing on screen.
+            desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
+
             // The view model asks; the host decides how. Shutdown() rather than
             // MainWindow.Close() because the installer is already running and every
             // window has to go, not just the main one.
@@ -59,6 +67,14 @@ public partial class App : Application
             // (to keep CanSignOut live — see its own remarks), so it needs the exact same
             // dispose-before-replace treatment as activePosVm above, for the same reason.
             SellerSwitchViewModel? activeSellerSwitchVm = null;
+            // One window for the whole run. It is NOT created here: Screens.All only reports
+            // the real layout once MainWindow has actually opened — which is exactly why the
+            // remembered-session path below defers NavigateToPos to MainWindow.Opened — so
+            // the first NavigateToPos is the earliest moment this can be decided. Built on
+            // demand there, reused afterwards, never rebuilt: it used to be constructed
+            // fresh on every navigation with nothing holding the previous one, so a
+            // logout->login cycle left another window on the customer's screen every time.
+            CustomerDisplayWindow? customerWindow = null;
             void NavigateToPos()
             {
                 activePosVm?.Dispose();
@@ -136,25 +152,71 @@ public partial class App : Application
                 // previous failed login attempt rather than leaving it showing.
                 posVm.LogoutRequested += (s, explanation) =>
                 {
+                    // The customer's screen must not keep showing the finished cart while
+                    // the next cashier types their password.
+                    customerWindow?.Hide();
                     loginVm.ErrorMessage = explanation;
                     mainVm.NavigateTo(loginVm);
                 };
 
-                var screens = desktop.MainWindow?.Screens.All;
-                if (screens != null && screens.Count > 1)
+                // No LINQ: this file does not use it, and one loop is clearer than a cast
+                // dance around a possibly-null Screens.All.
+                var screenBounds = new List<PixelRect>();
+                var allScreens = desktop.MainWindow?.Screens.All;
+                if (allScreens != null)
                 {
-                    var secondScreen = screens[1];
+                    foreach (var screen in allScreens) screenBounds.Add(screen.Bounds);
+                }
+
+                var placement = CustomerDisplayPlacementSelector.Select(
+                    Environment.GetEnvironmentVariable(CustomerDisplayPlacementSelector.OverrideVariable),
+                    screenBounds);
+
+                if (placement != null)
+                {
+                    if (customerWindow == null)
+                    {
+                        customerWindow = new CustomerDisplayWindow
+                        {
+                            WindowStartupLocation = WindowStartupLocation.Manual,
+                            Position = placement.Position,
+                        };
+
+                        // Single-monitor debugging only. MainWindow is full-screen and
+                        // Topmost, so a customer window merely placed beside it on the same
+                        // screen would sit behind it and never be seen. Never true in
+                        // production — see CustomerDisplayPlacementSelector.
+                        if (placement.ForcedOnSingleScreen)
+                        {
+                            // CustomerDisplayWindow.axaml sets WindowState="FullScreen", and
+                            // Avalonia ignores an explicit Width/Height while that is in
+                            // force — without resetting it here, this branch would still
+                            // produce a full-screen window instead of the modest overlay
+                            // this comment promises.
+                            customerWindow.WindowState = WindowState.Normal;
+                            customerWindow.Topmost = true;
+                            customerWindow.Width = 640;
+                            customerWindow.Height = 400;
+                        }
+                    }
+
+                    // The window survives; only what it shows is replaced. CustomerDisplayViewModel
+                    // is transient, like PosViewModel itself, so each navigation brings a fresh one.
                     var customerVm = Services.GetRequiredService<CustomerDisplayViewModel>();
                     posVm.CustomerDisplayViewModel = customerVm;
-                    posVm.NavigationRequest = mainVm.NavigateTo;
+                    customerWindow.DataContext = customerVm;
 
-                    var customerWindow = new CustomerDisplayWindow
+                    // SubscribeCustomerDisplayVisibility, not +=. The generated
+                    // OnIsCustomerDisplayEnabledChanged fires only on a CHANGE, and
+                    // ICashFeatureService is a singleton that survives logout->login — so the
+                    // flag may already hold its final value by now and never raise anything at
+                    // all. That method subscribes AND calls the handler with the current value,
+                    // so the initial sync cannot be forgotten here.
+                    var window = customerWindow;
+                    posVm.SubscribeCustomerDisplayVisibility((s, visible) =>
                     {
-                        DataContext = customerVm,
-                        WindowStartupLocation = WindowStartupLocation.Manual,
-                        Position = new PixelPoint(secondScreen.Bounds.X, secondScreen.Bounds.Y)
-                    };
-                    customerWindow.Show();
+                        if (visible) window.Show(); else window.Hide();
+                    });
                 }
 
                 mainVm.CurrentViewModel = posVm;
