@@ -599,7 +599,7 @@ together. Insert before the final `}` of each file (add a comma to the previous 
 `src/VvCash/Assets/i18n/tg.json`:
 
 ```json
-  "ShiftAccessDenied": "Сервер сессияи ин хазинаро рад кард — бастро кушода намешавад. Бароед ва аз нав ворид шавед. Агар кӯмак накунад, токени хазина ва ҳуқуқи фурӯшандаро санҷед."
+  "ShiftAccessDenied": "Сервер сессияи ин кассаро рад кард — сменаро кушода намешавад. Бароед ва аз нав ворид шавед. Агар кӯмак накунад, токени касса ва ҳуқуқи фурӯшандаро санҷед."
 ```
 
 `src/VvCash/Assets/i18n/uz.json`:
@@ -633,8 +633,9 @@ with:
                          the server answered a shift operation with 403 — an explanation of
                          why the button below cannot work and what to do about it. This has
                          to live inside the modal: the IsSessionRevoked banner at the top of
-                         this screen is completely covered by this overlay (RowSpan 3,
-                         ZIndex 1000), so a cashier blocked here would never see it. -->
+                         this screen is left dimmed under this overlay's translucent scrim
+                         (RowSpan 3, ZIndex 1000), and a dimmed line behind a modal that is
+                         demanding a decision is easy to miss entirely. -->
                     <TextBlock Text="{Binding [Pleasestartyourshift], Source={x:Static services:I18nService.Instance}}"
                              FontSize="14"
                              Foreground="{StaticResource Slate600Brush}"
