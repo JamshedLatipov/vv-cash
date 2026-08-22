@@ -1638,6 +1638,17 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 
 Expected: five `ok` lines, `Build succeeded`, then 708 passed, 0 failed.
 
+> **Review outcome:** the state machine passed — a reviewer broke `CancelConfirm`'s
+> null-out and the right test caught it, and proved with a gated fake that a double tap on
+> Confirm is already blocked by `[RelayCommand]`'s default `AllowConcurrentExecutions =
+> false` rather than by the clear-before-await ordering the comment credited. Four changes
+> followed: the Uzbek and Tajik confirm strings named categories with a different word than
+> the button that opens them (`toifalar`/`гурӯҳҳо` instead of `kategoriyalar`/`категорияҳо`);
+> the overlay adopted PosView's real destructive-confirm treatment (`#990f172a`, ZIndex 2000,
+> 480 wide, shadow, stretched buttons) instead of the lighter Start Shift modal it had been
+> copied from; a failed wipe now surfaces through this screen's existing error banner via a
+> new `ClearFailed` key rather than vanishing; and the misleading comment was corrected.
+
 - [ ] **Step 9: Commit**
 
 ```bash
