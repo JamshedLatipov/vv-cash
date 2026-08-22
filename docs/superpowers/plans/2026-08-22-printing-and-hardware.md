@@ -2300,7 +2300,11 @@ public class ConfiguredCustomerDisplayService : ICustomerDisplayService
     private readonly ISettingsService _settingsService;
 
     /// <summary>volatile по той же причине, что _printers у композита: присваивание
-    /// ссылки атомарно, но атомарность — не видимость.</summary>
+    /// ссылки атомарно, но атомарность — не видимость.
+    ///
+    /// Замок вокруг Rebuild, который есть у композита, здесь не нужен: там он
+    /// защищает шаг отписки от прежнего состава, а у дисплея отписываться не от
+    /// чего — Rebuild просто заменяет одну ссылку.</summary>
     private volatile ICustomerDisplayService _inner = new NullCustomerDisplayService();
 
     public ConfiguredCustomerDisplayService(ISettingsService settingsService)
@@ -2349,7 +2353,7 @@ public class ConfiguredCustomerDisplayService : ICustomerDisplayService
         public string CustomerDisplayCodePageId { get; set; } = string.Empty;
 ```
 
-Полный список (16 классов в 15 файлах):
+Полный список (**17 классов в 16 файлах** — семнадцатый завёл Task 7):
 
 ```
 tests/VvCash.Tests/AuthServiceTest.cs                    FakeSettings
@@ -2368,6 +2372,7 @@ tests/VvCash.Tests/SellerRosterServiceTest.cs            ThrowingBackendUrlSetti
 tests/VvCash.Tests/SettingsViewModelTest.cs              FakeSettings
 tests/VvCash.Tests/ShiftServiceTest.cs                   FakeSettings
 tests/VvCash.Tests/SyncServiceTest.cs                    FakeSettings
+tests/VvCash.Tests/CompositePrinterServiceTest.cs        FakeSettings
 ```
 
 Проверить, что никого не пропустили:
@@ -2505,6 +2510,10 @@ for f in src/VvCash/Assets/i18n/*.json; do python -c "import json,sys; d=json.lo
         vm.AddPrinterCommand.Execute(null);
         vm.Printers[0].ConnectionType = PrinterConnectionType.LAN;
         vm.Printers[0].ConnectionString = "127.0.0.1:9199";
+        // Сокет здесь осознанный: тест именно про то, что причина отказа
+        // транспорта доезжает до баннера. Цена — один отказ в соединении, а на
+        // этой машине это ~2.2 секунды (см. Task 7, Step 2). Один такой тест
+        // терпим; цикла из них здесь быть не должно.
 
         await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
 
@@ -2775,6 +2784,62 @@ dotnet run --project src/VvCash/VvCash.csproj -c Debug
 ```bash
 git add src/VvCash/ViewModels/SettingsViewModel.cs src/VvCash/Views/SettingsView.axaml src/VvCash/Assets/i18n tests/VvCash.Tests/SettingsViewModelTest.cs
 git commit -m "feat(settings): add test print and display check buttons"
+```
+
+---
+
+## Task 13: Неизвестный тип соединения перестаёт молча «печатать»
+
+**Files:**
+- Modify: `src/VvCash/Services/Hardware/EscPosPrinterService.cs` (`SendAsync`, ветка `default:`)
+- Modify: `tests/VvCash.Tests/CompositePrinterServiceTest.cs` (тест из Task 7 опирается на нынешнее поведение)
+- Modify: `tests/VvCash.Tests/EscPosUnitTest.cs`
+
+**Найдено в ревью Task 7, тот же класс, что находка #4.** `PrinterConnectionType` — это `{ USB, COM, LAN }`, без `None`. Настройки читаются голым `JsonSerializer` без `JsonStringEnumConverter`, то есть enum лежит числом, а `System.Text.Json` при обратном чтении диапазон **не проверяет**. Правленный руками или испорченный миграцией `settings.json` с `"ConnectionType": 7` даёт принтер, у которого каждая печать уходит в `default:`, возвращается без единого байта, зовёт `SetStatus(Ready)` и отдаёт `true`.
+
+Касса рапортует о напечатанном чеке продажи. Из принтера не вышло ничего. Ровно то, ради чего затеян весь батч, — только вход не через USB-заглушку, а через одну цифру в файле настроек.
+
+- [ ] **Step 1: Написать падающий тест**
+
+```csharp
+    [Fact]
+    public async Task UnknownConnectionType_ReportsFailureRatherThanSilentSuccess()
+    {
+        // Число вне диапазона попадает в settings.json от правки руками или
+        // неудачной миграции: System.Text.Json диапазон enum не проверяет.
+        var printer = new EscPosPrinterService(
+            (PrinterConnectionType)99, "whatever", EscPosCodePages.Default);
+
+        Assert.False(await printer.PrintPreReceiptAsync(Array.Empty<CartItem>(), 0m));
+    }
+```
+
+- [ ] **Step 2: Заставить `default:` бросать**
+
+```csharp
+            default:
+                throw new NotSupportedException(
+                    $"Unknown printer connection type {(int)_connectionType}. " +
+                    "Check ConnectionType in settings.json.");
+```
+
+Существующие `catch` превратят это в `PrinterStatus.Error` и `false` — как и всякий другой отказ транспорта.
+
+- [ ] **Step 3: Починить тест из Task 7**
+
+`CompositePrinterServiceTest` использует `(PrinterConnectionType)99` именно ради того, что эта ветка возвращается молча и без ввода-вывода. После Step 2 она бросит — печать честно провалится, но тест на гонку по-прежнему пройдёт: он проверяет, что метод **не падает на изменившейся коллекции**, а не результат печати. Убедиться, что это так, и поправить комментарий `Fast`, который сейчас обещает тихий возврат.
+
+Если тест всё же сломается — это сигнал, что он проверял не то, что заявлено. Разобраться, а не подгонять.
+
+- [ ] **Step 4: Прогнать и закоммитить**
+
+```bash
+& ./run-tests.ps1
+```
+
+```bash
+git add src/VvCash/Services/Hardware/EscPosPrinterService.cs tests/VvCash.Tests/CompositePrinterServiceTest.cs tests/VvCash.Tests/EscPosUnitTest.cs
+git commit -m "fix(printing): refuse an unknown connection type instead of reporting success"
 ```
 
 ---
