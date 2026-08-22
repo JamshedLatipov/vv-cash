@@ -1122,6 +1122,10 @@ git commit -m "fix(printing): encode receipts in the printer's code page"
         var vm = Build(out var settings);
         vm.AddPrinterCommand.Execute(null);
         vm.Printers[0].SelectedCodePage = EscPosCodePages.Cp1251;
+        // Save отказывается на пустом BackendUrl и выходит первой же строкой —
+        // без этого тест не доходит до проверяемого кода. Так же поступают все
+        // соседние тесты, вызывающие SaveCommand.
+        vm.BackendUrl = "https://api.example.test/v1/";
 
         vm.SaveCommand.Execute(null);
 
@@ -1217,8 +1221,15 @@ public class PrinterConfig
             ConnectionType = p.ConnectionType,
             ConnectionString = p.ConnectionString,
             IsEnabled = p.IsEnabled,
-            // Пустой выбор — это не «страницу сбросили»: тот же приём, что у
-            // SelectedPhoneFormat и категорий платежа выше.
+            // Здесь ?? Default, а не пропуск записи, как у SelectedPhoneFormat и
+            // категорий платежа выше. Причина не в том, что каталог всегда полон —
+            // PhoneFormats тоже статичен и сети не требует. Причин три другие:
+            // Printers пересобирается списком целиком, поэтому «пропустить и
+            // сохранить прежнее» потребовало бы сопоставлять каждую строку с её
+            // прежним PrinterConfig, а у только что добавленной строки прежнего нет;
+            // и цена промаха здесь несравнима — откат на CP866 это ровно то, что
+            // Resolve и так отдаёт ненастроенному принтеру, тогда как пустой формат
+            // телефона молча применил бы чужой код страны к настоящим номерам.
             CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id
         }).ToList();
 ```
@@ -2574,6 +2585,11 @@ for f in src/VvCash/Assets/i18n/*.json; do python -c "import json,sys; d=json.lo
 
     [ObservableProperty]
     private EscPosCodePage? _selectedDisplayCodePage = EscPosCodePages.Default;
+```
+
+**Здесь риск из Task 6 становится настоящим.** До этой задачи `SelectedCodePage` и `SelectedDisplayCodePage` никуда не были привязаны, то есть занулить их было некому. Теперь ComboBox привязан, а `SelectingItemsControl` приводит `SelectedItem` к `null` и пишет его обратно через TwoWay, если присвоенного значения не нашлось в `ItemsSource` по ссылке. Сегодня находится всегда — `Resolve` возвращает экземпляры из `All`, — но ровно на этот незаписанный инвариант комментарий у `SelectedPhoneFormat` просит не опираться. `?? EscPosCodePages.Default` в `Save` это и покрывает: откат на CP866 совпадает с тем, что `Resolve` отдаёт ненастроенному принтеру.
+
+```csharp
 
     /// <summary>COM-порты машины. Тот же источник, что у принтеров на COM.</summary>
     public ObservableCollection<string> AvailableDisplayPorts { get; } = new();
