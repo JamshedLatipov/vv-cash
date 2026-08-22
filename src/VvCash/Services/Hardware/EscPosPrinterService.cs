@@ -106,6 +106,9 @@ public class EscPosPrinterService : IPrinterService
         {
             await SendAsync(BuildSaleReceipt(items, subtotal, discount, total, discountName,
                 documentNumber, warehouseName, sellerName, saleDate));
+            // Обратный переход: без него первый же отказ красит индикатор
+            // навсегда, потому что SetStatus нигде не вызывался с Ready.
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
         catch (Exception ex)
@@ -136,10 +139,12 @@ public class EscPosPrinterService : IPrinterService
             Write(ms, CmdLineFeed);
             Write(ms, CmdCut);
             await SendAsync(ms.ToArray());
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Pre-receipt print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -276,10 +281,12 @@ public class EscPosPrinterService : IPrinterService
         try
         {
             await SendAsync(BuildReturnReceipt(lines, totalRefund, documentNumber, warehouseName, sellerName, saleDate));
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Return receipt print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -290,10 +297,12 @@ public class EscPosPrinterService : IPrinterService
         try
         {
             await SendAsync(CmdDrawerKick);
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Cash drawer error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -353,10 +362,12 @@ public class EscPosPrinterService : IPrinterService
         try
         {
             await SendAsync(BuildExchangeReceipt(returned, issued, difference, documentNumber, warehouseName, sellerName, saleDate));
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Exchange receipt print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
