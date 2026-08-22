@@ -2404,6 +2404,64 @@ public class PosViewModelSellerGateTest
     }
 
     // ---------------------------------------------------------------------------------
+    // Access denied (403): the code this backend really sends for a rejected session.
+    // Unlike the 401 path above, this must NOT sign the cashier out — most of the things
+    // that make this backend answer 403 are transient or configuration faults. It raises
+    // an explanation inside the shift modal instead, and unlike IsSessionRevoked it clears
+    // itself once a shift id actually comes back.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ShiftServiceAccessDenied_SetsIsShiftAccessDenied_OnUiThread_WithoutSigningOut()
+    {
+        using var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        var logoutCount = 0;
+        vm.LogoutRequested += (s, e) => logoutCount++;
+        Assert.False(vm.IsShiftAccessDenied);
+
+        deps.ShiftService.RaiseAccessDenied();
+
+        // Not yet: the handler posts rather than mutating inline, same marshalling proof
+        // as the 401 tests above.
+        Assert.False(vm.IsShiftAccessDenied);
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.True(vm.IsShiftAccessDenied);
+        Assert.Equal(0, logoutCount);
+        Assert.Equal(0, deps.AuthService.ClearSessionCallCount);
+    }
+
+    [Fact]
+    public async Task IsShiftAccessDenied_ClearsOnceAShiftIdComesBack()
+    {
+        // A 403 from a tenant-database blip passes on its own. Leaving the warning up over
+        // a register that has since opened its shift would be a lie.
+        using var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        deps.ShiftService.RaiseAccessDenied();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.IsShiftAccessDenied);
+
+        deps.ShiftService.OpenShiftResult = "shift-9";
+        await vm.OpenShiftCommand.ExecuteAsync(null);
+
+        Assert.Equal("shift-9", vm.CurrentShiftId);
+        Assert.False(vm.IsShiftAccessDenied);
+    }
+
+    [Fact]
+    public void Dispose_UnsubscribesFromShiftServiceAccessDenied()
+    {
+        var vm = CreateViewModel(out var deps, d => d.ShiftService.GetShiftStateResult = null);
+        vm.Dispose();
+
+        deps.ShiftService.RaiseAccessDenied();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.False(vm.IsShiftAccessDenied);
+    }
+
+    // ---------------------------------------------------------------------------------
     // Feature-flag gates (Task 13): disabled entry points hide rather than grey out, and
     // turning off seller switching must take its permission gates with it. Every flag
     // below is set on Deps.Features BEFORE CreateViewModel runs — InitializeAsync's own

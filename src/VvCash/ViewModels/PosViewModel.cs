@@ -320,6 +320,41 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// simply this instance going away.</summary>
     [ObservableProperty] private bool _isSessionRevoked;
 
+    /// <summary>Set when ShiftService reports HTTP 403 on a shift operation — the code this
+    /// backend actually sends for a rejected session.
+    ///
+    /// Unlike <see cref="IsSessionRevoked"/> this is NOT permanent, and the difference is
+    /// the whole point. A 401 means the token is dead and a dead token does not heal. A 403
+    /// here is ambiguous: an expired JWT, a bad cash token, a tenant-database blip and
+    /// several configuration faults all produce the identical body (see
+    /// <see cref="VvCash.Services.Api.IShiftService.AccessDenied"/> for the full list), and
+    /// only some of them mean the session is over. So this clears the moment a shift id
+    /// actually comes back — see <see cref="OnCurrentShiftIdChanged"/> — rather than
+    /// leaving a red warning over a register that has since opened its shift.
+    ///
+    /// Drives the explanation inside the shift modal rather than the top banner:
+    /// PosView.axaml's Start Shift Modal Overlay is Grid.RowSpan="3" at ZIndex 1000 and
+    /// covers that banner completely.</summary>
+    [ObservableProperty] private bool _isShiftAccessDenied;
+
+    /// <summary>A shift id in hand proves the server accepted this session after all, so a
+    /// 403 raised earlier must stop showing. Hooked here rather than at the two assignment
+    /// sites (InitializeAsync's GetShiftStateAsync and the OpenShift command) so neither can
+    /// be added to later without the reset coming along. DoCloseShiftAsync assigns null on a
+    /// successful close, which correctly does not clear anything.
+    ///
+    /// Note the trap for whoever adds background shift-state polling next (StartBackgroundSync
+    /// already has a loop to hang it on): CommunityToolkit only invokes this hook when the new
+    /// value actually differs from the old one, so a recheck that comes back with the *same*
+    /// shift id we already hold — e.g. a plain `CurrentShiftId = await
+    /// _shiftService.GetShiftStateAsync();` — will not fire it and will not clear a stale
+    /// true here. Anything that re-reads shift state without necessarily changing it must
+    /// clear <see cref="IsShiftAccessDenied"/> itself.</summary>
+    partial void OnCurrentShiftIdChanged(string? value)
+    {
+        if (!string.IsNullOrEmpty(value)) IsShiftAccessDenied = false;
+    }
+
     /// <summary>Raised to ask the host (App.axaml.cs) to return to the login screen — the
     /// escape hatch this class otherwise has no way to reach on its own, since the
     /// LoginViewModel instance the host needs to navigate to (with its LoginSuccessful
@@ -932,6 +967,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
         _shiftService.SessionRevoked += OnShiftSessionRevoked;
+        _shiftService.AccessDenied += OnShiftAccessDenied;
 
         _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
@@ -1302,6 +1338,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             () => PerformSignOut(I18nService.Instance["SessionExpiredSignInAgain"]));
     }
 
+    /// <summary>Reaction to a 403 on a shift operation. Deliberately does everything
+    /// <see cref="OnShiftSessionRevoked"/> does not: no sign-out, no navigation, no touching
+    /// of credentials. Most of the things that make this backend answer 403 say nothing
+    /// about the session (see <see cref="VvCash.Services.Api.IShiftService.AccessDenied"/>),
+    /// so the register explains itself and leaves the decision to the cashier, who already
+    /// has a sign-out button on the very modal this message appears in. Marshals to the UI
+    /// thread for the same reason every other handler here does — ShiftService posts the
+    /// event rather than invoking it inline.</summary>
+    private void OnShiftAccessDenied(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => IsShiftAccessDenied = true);
+    }
+
     private void OnParkedSaleCountChanged(object? sender, int count)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
@@ -1347,6 +1396,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
         _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
         _shiftService.SessionRevoked -= OnShiftSessionRevoked;
+        _shiftService.AccessDenied -= OnShiftAccessDenied;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
