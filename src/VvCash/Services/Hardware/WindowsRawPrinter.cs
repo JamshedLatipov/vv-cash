@@ -97,20 +97,20 @@ internal static class WindowsRawPrinter
                     $"WritePrinter accepted {written} of {data.Length} bytes.");
             }
 
-            if (!EndPagePrinter(handle)) throw Failure("EndPagePrinter");
             pageStarted = false;
+            if (!EndPagePrinter(handle)) throw Failure("EndPagePrinter");
 
-            if (!EndDocPrinter(handle)) throw Failure("EndDocPrinter");
             docStarted = false;
+            if (!EndDocPrinter(handle)) throw Failure("EndDocPrinter");
         }
         finally
         {
             if (buffer != IntPtr.Zero) Marshal.FreeCoTaskMem(buffer);
-            // Взведёнными флаги доходят сюда только при раскрутке исключения.
-            // Здесь отказы игнорируются сознательно: бросок из finally затёр бы
-            // исходное исключение, то есть настоящую причину. На успешном пути
-            // оба End* уже вызваны выше и проверены — иначе незафиксированное
-            // задание молча возвращало бы успех.
+            // Флаг сброшен перед своим End*-вызовом, а не после: сюда он доходит
+            // взведённым только если до вызова дело не дошло вовсе. Повтор уже
+            // отказавшего вызова — не уборка, а шум.
+            // Отказы здесь игнорируются сознательно: бросок из finally затёр бы
+            // исходное исключение, то есть настоящую причину.
             if (pageStarted) EndPagePrinter(handle);
             if (docStarted) EndDocPrinter(handle);
             // ClosePrinter игнорируется всегда: его отказ уже ничего не отменяет.
