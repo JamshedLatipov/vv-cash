@@ -236,5 +236,9 @@
   "PhoneRequired": "Telefon raqamini kiriting",
   "ScanReturnItem": "Mahsulotni skanerlang",
   "BarcodeNotFoundInReceipt": "Ushbu chekda bu shtrix-kodli mahsulot topilmadi",
-  "ShiftAccessDenied": "Server ushbu kassa seansini rad etdi — smenani ochib bo'lmaydi. Chiqing va qaytadan kiring. Yordam bermasa, kassa tokeni va sotuvchi huquqlarini tekshiring."
+  "ShiftAccessDenied": "Server ushbu kassa seansini rad etdi — smenani ochib bo'lmaydi. Chiqing va qaytadan kiring. Yordam bermasa, kassa tokeni va sotuvchi huquqlarini tekshiring.",
+  "ConfirmClearProducts": "Ushbu kassadan butun mahsulot katalogi o'chirilsinmi? Keyingi sinxronizatsiyagacha sotadigan narsa qolmaydi.",
+  "ConfirmClearCategories": "Ushbu kassadan barcha kategoriyalar o'chirilsinmi? Keyingi sinxronizatsiyagacha katalog bo'sh bo'ladi.",
+  "ConfirmDelete": "O'chirish",
+  "ClearFailed": "Kassaning mahalliy ma'lumotlarini tozalab bo'lmadi:"
 }

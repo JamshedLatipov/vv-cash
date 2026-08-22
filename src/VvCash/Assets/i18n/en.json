@@ -236,5 +236,9 @@
   "PhoneRequired": "Enter a phone number",
   "ScanReturnItem": "Scan item",
   "BarcodeNotFoundInReceipt": "No item with this barcode in this receipt",
-  "ShiftAccessDenied": "The server rejected this register's session, so the shift cannot be opened. Sign out and sign in again. If that does not help, check the cash token and the seller's permissions."
+  "ShiftAccessDenied": "The server rejected this register's session, so the shift cannot be opened. Sign out and sign in again. If that does not help, check the cash token and the seller's permissions.",
+  "ConfirmClearProducts": "Delete the entire product catalog from this register? Until the next sync completes there will be nothing to sell.",
+  "ConfirmClearCategories": "Delete all categories from this register? Until the next sync completes the catalog will be empty.",
+  "ConfirmDelete": "Delete",
+  "ClearFailed": "Could not clear the local data:"
 }
