@@ -47,6 +47,18 @@ public interface ISettingsService
     /// кассы ничего не меняет.</summary>
     string PhoneFormatId { get; set; }
 
+    /// <summary>COM-порт дисплея покупателя. Пусто — VFD на этой кассе нет, и это
+    /// нормальное состояние, а не незаконченная настройка.</summary>
+    string CustomerDisplayPort { get; set; }
+
+    /// <summary>Скорость порта. Своя настройка, потому что 9600 было зашито, а VFD
+    /// встречаются на 2400 и 19200.</summary>
+    int CustomerDisplayBaudRate { get; set; }
+
+    /// <summary>Id записи из EscPosCodePages — своя, отдельная от принтерной:
+    /// дисплей и принтер это разные железки с разными таблицами.</summary>
+    string CustomerDisplayCodePageId { get; set; }
+
     event EventHandler? SettingsChanged;
 
     void Save();

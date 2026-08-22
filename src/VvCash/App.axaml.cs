@@ -390,7 +390,7 @@ public partial class App : Application
 
         // Hardware Services
         services.AddSingleton<IPrinterService, CompositePrinterService>();
-        services.AddSingleton<ICustomerDisplayService, NullCustomerDisplayService>();
+        services.AddSingleton<ICustomerDisplayService, ConfiguredCustomerDisplayService>();
 
         // ViewModels
         services.AddTransient<LoginViewModel>();

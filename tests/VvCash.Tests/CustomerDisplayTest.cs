@@ -1,4 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
+using VvCash.Models;
+using VvCash.Services;
 using VvCash.Services.Hardware;
 using Xunit;
 
@@ -54,5 +58,50 @@ public class CustomerDisplayTest
 
         Assert.Equal(40, frame.Length);
         Assert.StartsWith("Молоко" + new string(' ', 14), frame);
+    }
+
+    private sealed class FakeSettings : ISettingsService
+    {
+        public string BackendUrl { get; set; } = "https://example.test/api/v1/";
+        public string CashRegisterToken { get; set; } = "";
+        public string AuthToken { get; set; } = "";
+        public DateTime? AuthTokenExpiresAt { get; set; }
+        public int SyncIntervalMinutes { get; set; } = 10;
+        public string Language { get; set; } = "ru";
+        public List<PrinterConfig> Printers { get; set; } = new();
+        public bool ReturnOpenCashDrawer { get; set; } = true;
+        public bool ReturnPrintReceipt { get; set; } = true;
+        public string ExchangePayoutCategoryId { get; set; } = string.Empty;
+        public string ReturnPayoutCategoryId { get; set; } = string.Empty;
+        public string PhoneFormatId { get; set; } = string.Empty;
+        public string CustomerDisplayPort { get; set; } = string.Empty;
+        public int CustomerDisplayBaudRate { get; set; } = 9600;
+        public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+        public event EventHandler? SettingsChanged;
+        public void Save() => SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    [Fact]
+    public async Task ConfiguredDisplay_WithNoPortSet_IsSilentAndSucceeds()
+    {
+        var settings = new FakeSettings { CustomerDisplayPort = string.Empty };
+        var display = new ConfiguredCustomerDisplayService(settings);
+
+        Assert.True(await display.ShowTotalAsync(10m));
+    }
+
+    [Fact]
+    public async Task ConfiguredDisplay_PicksUpANewPortWithoutARestart()
+    {
+        // Иначе после настройки порта кассу пришлось бы перезапускать — тот же
+        // приём, что у CompositePrinterService.
+        var settings = new FakeSettings { CustomerDisplayPort = string.Empty };
+        var display = new ConfiguredCustomerDisplayService(settings);
+        Assert.True(await display.ShowTotalAsync(10m));
+
+        settings.CustomerDisplayPort = "COM-does-not-exist";
+        settings.Save();
+
+        Assert.False(await display.ShowTotalAsync(10m));
     }
 }

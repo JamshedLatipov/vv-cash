@@ -52,30 +52,46 @@ public class VfdDisplayService : ICustomerDisplayService
     private static string Money(decimal value)
         => value.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
 
-    private async Task<bool> SendAsync(string text)
+    /// <summary>Тело целиком — внутри Task.Run, а не только запись. SendAsync
+    /// объявлен async, но конструктор SerialPort и Open() отрабатывают синхронно до
+    /// первого await и без обёртки достались бы потоку вызывающего — а вызывают
+    /// отсюда AddToCart и пересчёт суммы, то есть UI-поток, на каждом сканировании
+    /// товара. Отсутствующий порт дёшев (0.2–2.3мс), но открытие живого COM-порта на
+    /// Windows — уже десятки миллисекунд.</summary>
+    private Task<bool> SendAsync(string text)
     {
-        try
+        return Task.Run(async () =>
         {
-            using var port = new SerialPort(_portName, _baudRate);
-            port.Open();
+            try
+            {
+                // WriteTimeout: по умолчанию бесконечен, а порт может открыться и
+                // при этом никогда не вычитать буфер — мёртвый, но ещё
+                // перечисленный VFD, либо аппаратное управление потоком. Без этой
+                // строки WriteAsync висит вечно, using port так и не отрабатывает,
+                // дескриптор утекает на каждое сканирование, а бросить нечего —
+                // catch тут не помощник. 40 байт на 9600 бод — это ~42мс на
+                // проводе, 500мс — с большим запасом.
+                using var port = new SerialPort(_portName, _baudRate) { WriteTimeout = 500 };
+                port.Open();
 
-            // ESC @, затем ESC t n. Без инициализации дисплей копит мусор от
-            // предыдущей строки; без кодовой страницы кириллица уходит в ASCII и
-            // превращается в вопросительные знаки.
-            var prologue = new byte[] { 0x1B, 0x40, 0x1B, 0x74, _codePage.EscTSelector };
-            await port.BaseStream.WriteAsync(prologue, 0, prologue.Length);
+                // ESC @, затем ESC t n. Без инициализации дисплей копит мусор от
+                // предыдущей строки; без кодовой страницы кириллица уходит в ASCII и
+                // превращается в вопросительные знаки.
+                var prologue = new byte[] { 0x1B, 0x40, 0x1B, 0x74, _codePage.EscTSelector };
+                await port.BaseStream.WriteAsync(prologue, 0, prologue.Length);
 
-            var bytes = _codePage.Encoding.GetBytes(text);
-            await port.BaseStream.WriteAsync(bytes, 0, bytes.Length);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            // Логируется, но не глотается: возвращённый false — единственное, по
-            // чему кнопка проверки отличит рабочий дисплей от мёртвого порта.
-            Console.WriteLine($"VFD error: {ex.Message}");
-            return false;
-        }
+                var bytes = _codePage.Encoding.GetBytes(text);
+                await port.BaseStream.WriteAsync(bytes, 0, bytes.Length);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Логируется, но не глотается: возвращённый false — единственное, по
+                // чему кнопка проверки отличит рабочий дисплей от мёртвого порта.
+                Console.WriteLine($"VFD error: {ex.Message}");
+                return false;
+            }
+        });
     }
 
     private static string Pad(string text)
