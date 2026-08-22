@@ -30,16 +30,22 @@ public class VfdDisplayService : ICustomerDisplayService
     /// можно проверить, не открывая порт.</summary>
     public static string BuildFrame(string line1, string line2) => Pad(line1) + Pad(line2);
 
+    // Без валюты: символ был зашит в "$" на кассах, которые долларов не берут —
+    // ровно то же, что уже чинили на чеке.
+    /// <summary>Кадр целиком, вместе с форматированием суммы. Отдельно от
+    /// BuildFrame, потому что доллар жил именно здесь — в форматировании денег,
+    /// а не в набивке колонок: BuildFrame по устройству не может подставить
+    /// валюту, что бы Money ни делал, и тест против него ничего не сторожил бы.</summary>
+    public static string BuildItemFrame(string name, decimal price) => BuildFrame(name, Money(price));
+
+    public static string BuildTotalFrame(decimal total) => BuildFrame("TOTAL", Money(total));
+
     public Task<bool> ShowLineAsync(string line1, string line2)
         => SendAsync(BuildFrame(line1, line2));
 
-    // Без валюты: символ был зашит в "$" на кассах, которые долларов не берут —
-    // ровно то же, что уже чинили на чеке.
-    public Task<bool> ShowItemAsync(string name, decimal price)
-        => ShowLineAsync(name, Money(price));
+    public Task<bool> ShowItemAsync(string name, decimal price) => SendAsync(BuildItemFrame(name, price));
 
-    public Task<bool> ShowTotalAsync(decimal total)
-        => ShowLineAsync("TOTAL", Money(total));
+    public Task<bool> ShowTotalAsync(decimal total) => SendAsync(BuildTotalFrame(total));
 
     public Task<bool> ClearAsync() => SendAsync(new string(' ', Columns * 2));
 

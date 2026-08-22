@@ -32,16 +32,16 @@ public class CustomerDisplayTest
     }
 
     [Fact]
-    public void Vfd_DoesNotPrintADollarSign()
+    public void Vfd_DoesNotPrintACurrencySymbol()
     {
-        // Магазины не берут доллары; на чеке это уже чинили. Money() отсюда не видна —
-        // она private в VfdDisplayService, — поэтому сумма ниже отформатирована так же,
-        // как её отдал бы Money(100m): F2, инвариантная культура, без "$". Проверяем,
-        // что BuildFrame эту сумму не портит и символ не добавляет.
-        var frame = VfdDisplayService.BuildFrame("TOTAL", 100m.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+        // Магазины не берут доллары; на чеке это уже чинили. Проверять надо
+        // Build*Frame, а не BuildFrame: символ жил в форматировании суммы, и
+        // набивка колонок его подставить не может в принципе.
+        Assert.DoesNotContain("$", VfdDisplayService.BuildTotalFrame(100m));
+        Assert.Contains("100.00", VfdDisplayService.BuildTotalFrame(100m));
 
-        Assert.DoesNotContain("$", frame);
-        Assert.Contains("100.00", frame);
+        Assert.DoesNotContain("$", VfdDisplayService.BuildItemFrame("Молоко", 50m));
+        Assert.Contains("50.00", VfdDisplayService.BuildItemFrame("Молоко", 50m));
     }
 
     [Fact]
