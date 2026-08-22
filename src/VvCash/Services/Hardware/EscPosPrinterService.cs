@@ -5,7 +5,6 @@ using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
-using System.Text;
 using System.Threading.Tasks;
 using VvCash.Models;
 
@@ -21,7 +20,13 @@ public class EscPosPrinterService : IPrinterService
     public PrinterStatus Status => _status;
     public event EventHandler<PrinterStatus>? StatusChanged;
 
+    /// <summary>Какая таблица реально применена к этому принтеру. Существует ради
+    /// теста: строка, которая доносит настройку до боевой кассы, иначе не
+    /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
+    public EscPosCodePage CodePage => _codePage;
+
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
+    private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
     private static readonly byte[] CmdAlignLeft = { 0x1B, 0x61, 0x00 };
     private static readonly byte[] CmdAlignCenter = { 0x1B, 0x61, 0x01 };
     private static readonly byte[] CmdAlignRight = { 0x1B, 0x61, 0x02 };
@@ -154,8 +159,6 @@ public class EscPosPrinterService : IPrinterService
         {
             await SendAsync(BuildSaleReceipt(_codePage, items, subtotal, discount, total, discountName,
                 documentNumber, warehouseName, sellerName, saleDate));
-            // Обратный переход: без него первый же отказ красит индикатор
-            // навсегда, потому что SetStatus нигде не вызывался с Ready.
             SetStatus(PrinterStatus.Ready);
             return true;
         }
@@ -167,26 +170,35 @@ public class EscPosPrinterService : IPrinterService
         }
     }
 
+    /// <summary>Builds the pre-receipt bytes. Static and separate from sending,
+    /// exactly as BuildSaleReceipt is — this used to be assembled inline inside
+    /// PrintPreReceiptAsync, the one of the four ESC @ sites WriteInit guards
+    /// against drift that had no test of its own.</summary>
+    public static byte[] BuildPreReceipt(EscPosCodePage codePage, IEnumerable<CartItem> items, decimal total)
+    {
+        using var ms = new MemoryStream();
+        WriteInit(ms, codePage);
+        Write(ms, CmdAlignCenter);
+        WriteLine(ms, "PRE-RECEIPT", codePage);
+        WriteLine(ms, "----------------------------", codePage);
+        Write(ms, CmdAlignLeft);
+        foreach (var item in items)
+        {
+            WriteLine(ms, $"  {item.Product.Name} x{item.QuantityDisplay}", codePage);
+            if (item.Product.HasSecondaryUnit)
+                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
+        }
+        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
     public async Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total)
     {
         try
         {
-            using var ms = new MemoryStream();
-            WriteInit(ms, _codePage);
-            Write(ms, CmdAlignCenter);
-            WriteLine(ms, "PRE-RECEIPT", _codePage);
-            WriteLine(ms, "----------------------------", _codePage);
-            Write(ms, CmdAlignLeft);
-            foreach (var item in items)
-            {
-                WriteLine(ms, $"  {item.Product.Name} x{item.QuantityDisplay}", _codePage);
-                if (item.Product.HasSecondaryUnit)
-                    WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", _codePage);
-            }
-            WriteLine(ms, PadLine("TOTAL:", Money(total), 32), _codePage);
-            Write(ms, CmdLineFeed);
-            Write(ms, CmdCut);
-            await SendAsync(ms.ToArray());
+            await SendAsync(BuildPreReceipt(_codePage, items, total));
             SetStatus(PrinterStatus.Ready);
             return true;
         }
@@ -201,17 +213,15 @@ public class EscPosPrinterService : IPrinterService
     private static void Write(MemoryStream ms, byte[] data) => ms.Write(data, 0, data.Length);
 
     /// <summary>ESC @ и следом ESC t n. Одним методом, а не двумя командами по
-    /// месту: CmdInit пишется в четырёх местах — три билдера и PrintPreReceiptAsync,
-    /// который собирает буфер мимо них, — и дописывать выбор таблицы руками рядом с
-    /// каждым значит однажды пропустить четвёртый. Пречек за смену печатается чаще
-    /// всех прочих чеков вместе взятых, и его молчаливый откат на дефолтную таблицу
-    /// выглядел бы как «иногда печатает мусор».</summary>
+    /// месту: CmdInit пишется в каждом билдере, и дописывать выбор таблицы руками
+    /// рядом с каждым значит однажды пропустить один из них. Пречек за смену
+    /// печатается чаще всех прочих чеков вместе взятых, и его молчаливый откат на
+    /// дефолтную таблицу выглядел бы как «иногда печатает мусор».</summary>
     private static void WriteInit(MemoryStream ms, EscPosCodePage codePage)
     {
         Write(ms, CmdInit);
-        ms.WriteByte(0x1B);
-        ms.WriteByte(0x74);
-        ms.WriteByte(codePage.EscTSelector);
+        Write(ms, CmdSelectCodeTable);
+        ms.WriteByte(codePage.EscTSelector);   // единственное, что действительно рантайм
     }
 
     private static void WriteLine(MemoryStream ms, string text, EscPosCodePage codePage)
@@ -301,10 +311,25 @@ public class EscPosPrinterService : IPrinterService
     private static Task SendViaSpoolerAsync(string queueName, byte[] data)
         => Task.Run(() => WindowsRawPrinter.Send(queueName, data));
 
+    /// <summary>Исключение подписчика проглатывается намеренно. Вызовы стоят внутри
+    /// try методов печати, а Invoke синхронный: без этого упавший обработчик
+    /// поймался бы catch'ем печати, и чек, который физически вышел из принтера,
+    /// отчитался бы как «Print failed» — кассир напечатал бы дубль.
+    ///
+    /// Обратный переход в Ready живёт в успешных ветках всех пяти методов печати:
+    /// без него первый же отказ красил индикатор навсегда, потому что с Ready
+    /// SetStatus не вызывался нигде.</summary>
     private void SetStatus(PrinterStatus status)
     {
         _status = status;
-        StatusChanged?.Invoke(this, status);
+        try
+        {
+            StatusChanged?.Invoke(this, status);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Printer status subscriber failed: {ex.Message}");
+        }
     }
 
     public static byte[] BuildReturnReceipt(

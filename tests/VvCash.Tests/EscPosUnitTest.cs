@@ -138,6 +138,16 @@ public class EscPosUnitTest
     }
 
     [Fact]
+    public void PreReceipt_SelectsTheCodePage()
+    {
+        var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 1m };
+
+        var bytes = EscPosPrinterService.BuildPreReceipt(EscPosCodePages.Cp866, new[] { line }, total: 10m);
+
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
+    }
+
+    [Fact]
     public void ReturnReceipt_SelectsTheCodePage()
     {
         var bytes = EscPosPrinterService.BuildReturnReceipt(
