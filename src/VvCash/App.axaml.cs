@@ -198,6 +198,20 @@ public partial class App : Application
                             customerWindow.Width = 640;
                             customerWindow.Height = 400;
                         }
+
+                        // This window is built once and reused for the whole run, so it must
+                        // never actually close: Avalonia disposes a closed window's
+                        // PlatformImpl irreversibly, and the next login's first Show() would
+                        // throw "Cannot re-show a closed window" — with no unhandled-exception
+                        // hook anywhere in this app, that takes the whole register down, not
+                        // just the display. Reachable both ways: the title-bar X in the forced
+                        // single-screen debug mode, and Alt+F4 on the ordinary full-screen one.
+                        // Hiding is what every other caller here means by "make it go away".
+                        customerWindow.Closing += (s, e) =>
+                        {
+                            e.Cancel = true;
+                            ((Window)s!).Hide();
+                        };
                     }
 
                     // The window survives; only what it shows is replaced. CustomerDisplayViewModel
