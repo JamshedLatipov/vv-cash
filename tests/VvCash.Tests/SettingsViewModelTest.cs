@@ -250,20 +250,26 @@ public class SettingsViewModelTest
         Assert.Equal("CP1251", settings.Printers[0].CodePageId);
     }
 
-    [Fact]
-    public void Load_ResolvesAnUnknownCodePageToTheDefault()
+    [Theory]
+    [InlineData("CP1251", false)]
+    [InlineData("CP-gone", true)]
+    public void Load_ResolvesTheStoredCodePage(string stored, bool expectDefault)
     {
+        // Известный id обязателен: на одном лишь неизвестном тест зелёный и без
+        // загрузки — инициализатор поля даёт ровно ту же ссылку, что и Resolve.
         var settings = new FakeSettings
         {
             Printers = new List<PrinterConfig>
             {
                 new() { Name = "P", ConnectionType = PrinterConnectionType.LAN,
-                        ConnectionString = "10.0.0.1:9100", CodePageId = "CP-gone" }
+                        ConnectionString = "10.0.0.1:9100", CodePageId = stored }
             }
         };
 
         var vm = BuildWith(settings);
 
-        Assert.Same(EscPosCodePages.Default, vm.Printers[0].SelectedCodePage);
+        Assert.Same(
+            expectDefault ? EscPosCodePages.Default : EscPosCodePages.Cp1251,
+            vm.Printers[0].SelectedCodePage);
     }
 }

@@ -392,8 +392,15 @@ public partial class SettingsViewModel : ViewModelBase
             ConnectionType = p.ConnectionType,
             ConnectionString = p.ConnectionString,
             IsEnabled = p.IsEnabled,
-            // Пустой выбор — это не «страницу сбросили»: тот же приём, что у
-            // SelectedPhoneFormat и категорий платежа выше.
+            // Здесь ?? Default, а не пропуск записи, как у SelectedPhoneFormat и
+            // категорий платежа выше. Причина не в том, что каталог всегда полон —
+            // PhoneFormats тоже статичен и сети не требует. Причин три другие:
+            // Printers пересобирается списком целиком, поэтому «пропустить и
+            // сохранить прежнее» потребовало бы сопоставлять каждую строку с её
+            // прежним PrinterConfig, а у только что добавленной строки прежнего нет;
+            // и цена промаха здесь несравнима — откат на CP866 это ровно то, что
+            // Resolve и так отдаёт ненастроенному принтеру, тогда как пустой формат
+            // телефона молча применил бы чужой код страны к настоящим номерам.
             CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id
         }).ToList();
 
