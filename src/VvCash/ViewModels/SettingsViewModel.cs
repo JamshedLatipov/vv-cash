@@ -107,6 +107,16 @@ public partial class SettingsViewModel : ViewModelBase
 
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
+    /// <summary>Результат кнопок проверки, когда он не отказ. Отдельно от
+    /// ErrorMessage: тот красный, с иконкой предупреждения, и «Пробный чек
+    /// отправлен» в такой рамке читается как отказ. Пустеет при каждой новой
+    /// проверке, чтобы прошлый успех не висел над свежей ошибкой.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasStatus))]
+    private string _statusMessage = string.Empty;
+
+    public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
+
     [ObservableProperty]
     private string _cashRegisterToken = string.Empty;
 
@@ -137,6 +147,22 @@ public partial class SettingsViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _returnPrintReceipt = true;
+
+    [ObservableProperty]
+    private string _customerDisplayPort = string.Empty;
+
+    /// <summary>Строкой, а не int: то же, что SyncIntervalText рядом — TextBox с
+    /// частично набранным числом не должен ронять привязку.</summary>
+    [ObservableProperty]
+    private string _customerDisplayBaudRateText = "9600";
+
+    [ObservableProperty]
+    private EscPosCodePage? _selectedDisplayCodePage = EscPosCodePages.Default;
+
+    /// <summary>COM-порты машины. Тот же источник, что у принтеров на COM.</summary>
+    public ObservableCollection<string> AvailableDisplayPorts { get; } = new();
+
+    public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
 
     /// <summary>Payment categories offered for the exchange payout, loaded from
     /// GET /documents/payment/categories/. Empty when the register is offline or the
@@ -201,6 +227,12 @@ public partial class SettingsViewModel : ViewModelBase
         ReturnOpenCashDrawer = _settingsService.ReturnOpenCashDrawer;
         ReturnPrintReceipt = _settingsService.ReturnPrintReceipt;
 
+        CustomerDisplayPort = _settingsService.CustomerDisplayPort;
+        CustomerDisplayBaudRateText = _settingsService.CustomerDisplayBaudRate.ToString();
+        SelectedDisplayCodePage = EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId);
+        foreach (var port in PrinterDiscoveryService.GetComPorts())
+            AvailableDisplayPorts.Add(port);
+
         foreach (var printer in _settingsService.Printers)
         {
             var vm = new PrinterConfigViewModel
@@ -252,6 +284,65 @@ public partial class SettingsViewModel : ViewModelBase
         {
             Printers.Remove(printer);
         }
+    }
+
+    /// <summary>Печатает образец на том, что сейчас на экране, а НЕ на сохранённых
+    /// настройках. Иначе связка «поменял кодовую страницу → напечатал → посмотрел»
+    /// требовала бы сохранения и выхода с экрана, то есть перестала бы быть
+    /// проверкой этого выбора.
+    ///
+    /// Команда живёт на SettingsViewModel, а не на строке принтера, ровно как
+    /// RemovePrinter рядом: строка не знает про баннеры, а привязка
+    /// $parent[UserControl].DataContext с CommandParameter="{Binding}" на этом
+    /// экране уже работает.</summary>
+    [RelayCommand]
+    private async Task TestPrint(PrinterConfigViewModel? printer)
+    {
+        if (printer == null) return;
+
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        var service = new EscPosPrinterService(
+            printer.ConnectionType,
+            printer.ConnectionString,
+            printer.SelectedCodePage ?? EscPosCodePages.Default);
+
+        try
+        {
+            await service.PrintTestReceiptAsync();
+            StatusMessage = I18nService.Instance["TestPrintSent"];
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"{I18nService.Instance["TestPrintFailed"]} {ex.Message}";
+        }
+    }
+
+    /// <summary>Строит дисплей из того, что сейчас в полях, по той же причине.
+    /// Одна кнопка, а не по одной на запись: дисплей на кассе один.</summary>
+    [RelayCommand]
+    private async Task CheckDisplay()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        ICustomerDisplayService display = string.IsNullOrWhiteSpace(CustomerDisplayPort)
+            ? new NullCustomerDisplayService()
+            : new VfdDisplayService(
+                CustomerDisplayPort,
+                int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : 9600,
+                SelectedDisplayCodePage ?? EscPosCodePages.Default);
+
+        // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
+        // таймаута нет и SerialPort его не предлагает: зависший драйвер
+        // USB-serial держит открытие сколько угодно. Без этого кнопка не
+        // отчитается, а повиснет — то есть не сделает того, ради чего заведена.
+        var send = display.ShowLineAsync("VV CASH", "Проверка / Test");
+        var ok = await Task.WhenAny(send, Task.Delay(3000)) == send && send.Result;
+
+        if (ok) StatusMessage = I18nService.Instance["DisplayCheckOk"];
+        else ErrorMessage = I18nService.Instance["DisplayCheckFailed"];
     }
 
     /// <summary>Confirmation overlay state. This screen is reachable from the login screen,
@@ -355,6 +446,7 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
         ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
 
         _settingsService.BackendUrl = BackendUrl;
         _settingsService.CashRegisterToken = CashRegisterToken;
@@ -377,6 +469,12 @@ public partial class SettingsViewModel : ViewModelBase
 
         _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
         _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;
+
+        _settingsService.CustomerDisplayPort = CustomerDisplayPort;
+        if (int.TryParse(CustomerDisplayBaudRateText, out var displayBaud) && displayBaud > 0)
+            _settingsService.CustomerDisplayBaudRate = displayBaud;
+        if (SelectedDisplayCodePage != null)
+            _settingsService.CustomerDisplayCodePageId = SelectedDisplayCodePage.Id;
 
         // Only when the list actually loaded: an offline settings visit shows an empty
         // dropdown and a null selection, and writing that through would silently

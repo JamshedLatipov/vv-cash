@@ -275,4 +275,38 @@ public class SettingsViewModelTest
             expectDefault ? EscPosCodePages.Default : EscPosCodePages.Cp1251,
             vm.Printers[0].SelectedCodePage);
     }
+
+    [Fact]
+    public async Task TestPrint_OnAnUnreachablePrinter_ReportsTheReasonRatherThanStayingSilent()
+    {
+        // Точка проверяет кодовую страницу этой кнопкой, поэтому молчащий отказ
+        // означает звонок разработчику — то есть кнопка не сделала того, ради
+        // чего заведена.
+        //
+        // Сокет здесь осознанный: тест именно про то, что причина отказа
+        // транспорта доезжает до баннера. Цена — один отказ в соединении, а на
+        // этой машине это ~2.2 секунды. Один такой тест терпим; цикла из них
+        // здесь быть не должно.
+        var vm = Build(out _);
+        vm.AddPrinterCommand.Execute(null);
+        vm.Printers[0].ConnectionType = PrinterConnectionType.LAN;
+        vm.Printers[0].ConnectionString = "127.0.0.1:9199";
+
+        await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
+
+        Assert.True(vm.HasError);
+        Assert.Empty(vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task CheckDisplay_WithNoPortConfigured_ReportsSuccess()
+    {
+        // Касса без VFD — не отказ.
+        var vm = BuildWith(new FakeSettings { CustomerDisplayPort = string.Empty });
+
+        await vm.CheckDisplayCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasError);
+        Assert.NotEmpty(vm.StatusMessage);
+    }
 }
