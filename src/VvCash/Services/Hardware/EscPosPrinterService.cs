@@ -207,9 +207,17 @@ public class EscPosPrinterService : IPrinterService
 
     private Task SendViaUsb(byte[] data)
     {
-        // For USB raw printing, integrating with Windows Spooler API via PInvoke is required.
-        // As a fallback/stub for now, we just output to console to avoid crashing and to allow compilation.
-        Console.WriteLine($"[USB Printer '{_connectionString}'] Outputting {data.Length} bytes.");
+        // Проект таргетит net10.0, не net10.0-windows, поэтому платформенная
+        // проверка обязательна. OperatingSystem.IsWindows(), а не
+        // RuntimeInformation: CA1416 распознаёт её как platform guard
+        // гарантированно.
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "USB printing goes through the Windows spooler and is unavailable on this OS.");
+        }
+
+        WindowsRawPrinter.Send(_connectionString, data);
         return Task.CompletedTask;
     }
 
