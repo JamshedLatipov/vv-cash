@@ -9,11 +9,20 @@ namespace VvCash.Services.Hardware;
 public class CompositePrinterService : IPrinterService
 {
     private readonly ISettingsService _settingsService;
-    private List<EscPosPrinterService> _printers = new();
+
+    /// <summary>volatile, а не просто ссылка: присваивание ссылки атомарно (ECMA-335),
+    /// но атомарность — не то же самое, что видимость. Атомарности хватает, чтобы не
+    /// увидеть полусобранный список; чтобы гарантированно увидеть новый — нет.</summary>
+    private volatile IReadOnlyList<EscPosPrinterService> _printers = Array.Empty<EscPosPrinterService>();
     private PrinterStatus _overallStatus = PrinterStatus.Ready;
 
     public PrinterStatus Status => _overallStatus;
     public event EventHandler<PrinterStatus>? StatusChanged;
+
+    /// <summary>Снимок текущего состава — только для чтения и только для тестов.
+    /// Строка, которая доносит кодовую страницу из настроек до принтера, иначе не
+    /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
+    internal IReadOnlyList<EscPosPrinterService> Printers => _printers;
 
     public CompositePrinterService(ISettingsService settingsService)
     {
@@ -27,17 +36,26 @@ public class CompositePrinterService : IPrinterService
         InitializePrinters();
     }
 
+    /// <summary>Собирает новый список и присваивает его одним движением, вместо того
+    /// чтобы править существующий на месте. Без блокировки: методы печати await-ят
+    /// сетевой и последовательный ввод-вывод, и держать на нём мьютекс — значит
+    /// подвесить экран настроек на время печати.
+    ///
+    /// Печать, начатая до смены настроек, доводится до конца на прежнем составе.
+    /// Если она упадёт ПОСЛЕ подмены, её StatusChanged уже некому услышать и общий
+    /// Status останется Ready — возвращаемый bool при этом честный, расходится
+    /// только индикатор. Принято сознательно: держать подписки на выброшенных
+    /// принтерах до конца их последней задачи стоит заметно больше механики, чем
+    /// расхождение индикатора на одну печать.</summary>
     private void InitializePrinters()
     {
-        // Unsubscribe from existing printers
         foreach (var printer in _printers)
         {
             printer.StatusChanged -= OnPrinterStatusChanged;
         }
 
-        _printers.Clear();
-
-        var configs = _settingsService.Printers?.Where(p => p.IsEnabled).ToList();
+        var rebuilt = new List<EscPosPrinterService>();
+        var configs = _settingsService.Printers?.Where(p => p.IsEnabled);
         if (configs != null)
         {
             foreach (var config in configs)
@@ -45,9 +63,11 @@ public class CompositePrinterService : IPrinterService
                 var printer = new EscPosPrinterService(config.ConnectionType, config.ConnectionString,
                     EscPosCodePages.Resolve(config.CodePageId));
                 printer.StatusChanged += OnPrinterStatusChanged;
-                _printers.Add(printer);
+                rebuilt.Add(printer);
             }
         }
+
+        _printers = rebuilt;
 
         UpdateOverallStatus();
     }
@@ -59,7 +79,8 @@ public class CompositePrinterService : IPrinterService
 
     private void UpdateOverallStatus()
     {
-        if (!_printers.Any())
+        var printers = _printers;
+        if (printers.Count == 0)
         {
             SetStatus(PrinterStatus.Ready);
             return;
@@ -67,15 +88,15 @@ public class CompositePrinterService : IPrinterService
 
         // If any printer is in error, report error. If any is out of paper, report no paper.
         // Otherwise, report ready.
-        if (_printers.Any(p => p.Status == PrinterStatus.Error))
+        if (printers.Any(p => p.Status == PrinterStatus.Error))
         {
             SetStatus(PrinterStatus.Error);
         }
-        else if (_printers.Any(p => p.Status == PrinterStatus.NoPaper))
+        else if (printers.Any(p => p.Status == PrinterStatus.NoPaper))
         {
             SetStatus(PrinterStatus.NoPaper);
         }
-        else if (_printers.Any(p => p.Status == PrinterStatus.Offline))
+        else if (printers.Any(p => p.Status == PrinterStatus.Offline))
         {
             SetStatus(PrinterStatus.Offline);
         }
@@ -97,12 +118,13 @@ public class CompositePrinterService : IPrinterService
     public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
         string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        if (!_printers.Any())
+        var printers = _printers;
+        if (printers.Count == 0)
         {
             return false; // Or true if we consider "no printers configured" as success?
         }
 
-        var tasks = _printers.Select(p => p.PrintReceiptAsync(items, subtotal, discount, total, coupons, discountName,
+        var tasks = printers.Select(p => p.PrintReceiptAsync(items, subtotal, discount, total, coupons, discountName,
             documentNumber, warehouseName, sellerName, saleDate)).ToList();
         await Task.WhenAll(tasks);
 
@@ -112,12 +134,13 @@ public class CompositePrinterService : IPrinterService
 
     public async Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total)
     {
-        if (!_printers.Any())
+        var printers = _printers;
+        if (printers.Count == 0)
         {
             return false;
         }
 
-        var tasks = _printers.Select(p => p.PrintPreReceiptAsync(items, total)).ToList();
+        var tasks = printers.Select(p => p.PrintPreReceiptAsync(items, total)).ToList();
         await Task.WhenAll(tasks);
 
         return tasks.Any(t => t.Result);
@@ -125,8 +148,9 @@ public class CompositePrinterService : IPrinterService
 
     public async Task<bool> OpenCashDrawerAsync()
     {
-        if (!_printers.Any()) return false;
-        var tasks = _printers.Select(p => p.OpenCashDrawerAsync()).ToList();
+        var printers = _printers;
+        if (printers.Count == 0) return false;
+        var tasks = printers.Select(p => p.OpenCashDrawerAsync()).ToList();
         await Task.WhenAll(tasks);
         return tasks.Any(t => t.Result);
     }
@@ -135,9 +159,10 @@ public class CompositePrinterService : IPrinterService
         IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        if (!_printers.Any()) return false;
+        var printers = _printers;
+        if (printers.Count == 0) return false;
         var list = lines.ToList();
-        var tasks = _printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber, warehouseName, sellerName, saleDate)).ToList();
+        var tasks = printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber, warehouseName, sellerName, saleDate)).ToList();
         await Task.WhenAll(tasks);
         return tasks.Any(t => t.Result);
     }
@@ -148,10 +173,11 @@ public class CompositePrinterService : IPrinterService
         decimal difference, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        if (!_printers.Any()) return false;
+        var printers = _printers;
+        if (printers.Count == 0) return false;
         var returnedList = returned.ToList();
         var issuedList = issued.ToList();
-        var tasks = _printers.Select(p => p.PrintExchangeReceiptAsync(returnedList, issuedList, difference, documentNumber, warehouseName, sellerName, saleDate)).ToList();
+        var tasks = printers.Select(p => p.PrintExchangeReceiptAsync(returnedList, issuedList, difference, documentNumber, warehouseName, sellerName, saleDate)).ToList();
         await Task.WhenAll(tasks);
         return tasks.Any(t => t.Result);
     }

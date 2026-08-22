@@ -43,4 +43,13 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Lets VvCash.Tests reach CompositePrinterService.Printers, the read-only
+         snapshot that lets a test see which EscPosCodePage each printer actually
+         got. Internal rather than public: nothing in production should be able
+         to reach past the composite to an individual printer. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>VvCash.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>
