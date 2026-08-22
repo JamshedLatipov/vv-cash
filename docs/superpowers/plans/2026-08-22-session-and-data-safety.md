@@ -1695,14 +1695,26 @@ Check, in order:
 2. Adding a product to the cart updates that window's total.
 3. Sign out through the exit menu's "hand the register over" — the customer window **hides**, and the login screen appears.
 4. Log in again — exactly **one** customer window is on screen, not two.
-5. Close the app.
+5. Close the customer window by its title-bar X, then sign out and log in again. The window
+   must come back and the register must keep running. This is the branch review's Critical
+   finding: keeping one window for the whole run made an ordinary close fatal, because
+   Avalonia cannot re-show a closed window and this app has no unhandled-exception hook.
+   Repeat with Alt+F4 rather than the X.
+6. Close the app, and confirm the process actually terminates — `Get-Process VvCash` should
+   return nothing. A hidden-but-open window used to be able to keep it alive; `ShutdownMode`
+   is now `OnMainWindowClose`, and this is where that is verified.
 
 - [ ] **Step 3: Customer display, feature flag off**
 
 With `cash_customer_display_enabled` switched off for this register on the backend, launch
-again with `VVCASH_CUSTOMER_DISPLAY=force`. The customer window must **not** be visible
-once `InitializeAsync` has refreshed the flags (a brief appearance before the first refresh
-is expected and correct — the flag defaults to enabled until the cached map is read).
+again with `VVCASH_CUSTOMER_DISPLAY=force`. The customer window must **never** be visible —
+not even for a moment during startup.
+
+This step was originally written expecting a brief flash, on the reasoning that the flag
+defaults to enabled until the cached map is read. That flash is exactly what
+`ICashFeatureService.HasLoaded` was added to prevent (see Task 6's review outcome), and
+`CustomerDisplay_StaysHiddenUntilTheRealFlagMapLoads_ThenAppearsWhenEnabled` pins it. If you
+see a flash now, that is a regression, not the expected behaviour.
 
 - [ ] **Step 4: Customer display, override off**
 
