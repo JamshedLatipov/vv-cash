@@ -355,6 +355,7 @@ git commit -m "feat(printing): add the ESC/POS code page catalog"
 
 ```csharp
 using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -385,6 +386,9 @@ internal static class WindowsRawPrinter
     [DllImport("winspool.drv", EntryPoint = "ClosePrinter", SetLastError = true)]
     private static extern bool ClosePrinter(IntPtr handle);
 
+    // Возвращает DWORD — идентификатор задания, не BOOL. Ненулевой при успехе,
+    // ноль при отказе, поэтому маршалинг в bool корректен; так же объявлено в
+    // образце RawPrinterHelper у Microsoft.
     [DllImport("winspool.drv", EntryPoint = "StartDocPrinterW", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern bool StartDocPrinter(IntPtr handle, int level, ref DocInfo1 info);
 
@@ -404,6 +408,12 @@ internal static class WindowsRawPrinter
     /// ловит и выставляет PrinterStatus.Error.</summary>
     public static void Send(string printerName, byte[] data)
     {
+        // Пустое задание встало бы в очередь и отчиталось успехом: WritePrinter
+        // пишет ноль байт без ошибки, и проверка короткой записи даёт 0 != 0.
+        // Сегодня недостижимо — любой построитель шлёт минимум ESC @, — но
+        // опираться на это молча не стоит.
+        if (data.Length == 0) throw new ArgumentException("Nothing to print.", nameof(data));
+
         if (!OpenPrinter(printerName, out var handle, IntPtr.Zero))
         {
             throw Failure($"OpenPrinter('{printerName}')");
@@ -433,23 +443,47 @@ internal static class WindowsRawPrinter
 
             // Короткая запись не считается отказом на уровне API, но чек при ней
             // выходит обрезанным — а обрезанный чек это тот же молчаливый успех.
+            // Обрезанное задание при этом всё равно зафиксируется в очереди: из
+            // принтера выйдет половина чека, а кассир прочитает отказ. Это
+            // сознательный размен — потерять половину чека лучше, чем считать
+            // напечатанным то, что напечаталось не полностью.
             if (written != data.Length)
             {
                 throw new InvalidOperationException(
                     $"WritePrinter accepted {written} of {data.Length} bytes.");
             }
+
+            if (!EndPagePrinter(handle)) throw Failure("EndPagePrinter");
+            pageStarted = false;
+
+            if (!EndDocPrinter(handle)) throw Failure("EndDocPrinter");
+            docStarted = false;
         }
         finally
         {
             if (buffer != IntPtr.Zero) Marshal.FreeCoTaskMem(buffer);
+            // Взведёнными флаги доходят сюда только при раскрутке исключения.
+            // Здесь отказы игнорируются сознательно: бросок из finally затёр бы
+            // исходное исключение, то есть настоящую причину. На успешном пути
+            // оба End* уже вызваны выше и проверены — иначе незафиксированное
+            // задание молча возвращало бы успех, ровно тот баг, ради которого
+            // написан этот файл.
             if (pageStarted) EndPagePrinter(handle);
             if (docStarted) EndDocPrinter(handle);
+            // ClosePrinter игнорируется всегда: его отказ уже ничего не отменяет.
             ClosePrinter(handle);
         }
     }
 
     private static InvalidOperationException Failure(string call)
-        => new($"{call} failed: Win32 error {Marshal.GetLastWin32Error()}.");
+    {
+        // Снимается до создания Win32Exception: её конструктор сам может
+        // затереть последнюю ошибку потока. Текст, а не голый номер, потому что
+        // кнопка пробной печати (Task 12) кладёт эту строку на экран кассиру.
+        var code = Marshal.GetLastWin32Error();
+        return new InvalidOperationException(
+            $"{call} failed: {new Win32Exception(code).Message} (Win32 {code}).");
+    }
 }
 ```
 
@@ -470,12 +504,26 @@ internal static class WindowsRawPrinter
                 "USB printing goes through the Windows spooler and is unavailable on this OS.");
         }
 
-        WindowsRawPrinter.Send(_connectionString, data);
-        return Task.CompletedTask;
+        return SendViaSpoolerAsync(_connectionString, data);
     }
+
+    /// <summary>Отдельным методом с атрибутом, а не лямбдой на месте: guard из
+    /// SendViaUsb не протекает в тело лямбды, и CA1416 сработал бы на ней.
+    ///
+    /// Task.Run, а не синхронный вызов: OpenPrinter и StartDocPrinter — это RPC
+    /// в spoolsv.exe, и на зависшем спулере они блокируются на секунды. Без него
+    /// весь цикл проходил бы на UI-потоке — SendViaUsb никогда не уступает поток,
+    /// а CompositePrinterService строит список задач энергичным Select, то есть
+    /// до Task.WhenAll дело дошло бы уже после печати. Касса замерзала бы ровно в
+    /// момент закрытия продажи. Соседние COM и LAN поток уступают честно.</summary>
+    [SupportedOSPlatform("windows")]
+    private static Task SendViaSpoolerAsync(string queueName, byte[] data)
+        => Task.Run(() => WindowsRawPrinter.Send(queueName, data));
 ```
 
-`using System;` в файле уже есть (строка 1). Ничего добавлять не нужно.
+`using System;` в файле уже есть (строка 1). Добавить нужно `using System.Runtime.Versioning;`.
+
+**Не заменять ручной `AllocCoTaskMem`/`Copy`/`FreeCoTaskMem` на маршалинг `byte[]`.** Вариант рассматривался и отклонён: семантика та же, форма чище, но два независимых ревью уже проверили нынешнюю на отсутствие утечек и парность аллокаторов, а это самый рискованный непокрываемый тестами код батча. Менять работающий интероп ради изящества — ровно то место, где новый баг заводится без теста, который его поймает.
 
 - [ ] **Step 3: Сборка должна быть зелёной и без CA1416**
 
@@ -555,12 +603,18 @@ git commit -m "fix(printing): read spooler printer names as UTF-8"
 
 ---
 
-## Task 4: Все пять catch сохраняют причину
+## Task 4: Все пять catch сохраняют причину, и статус возвращается в Ready
 
 **Files:**
-- Modify: `src/VvCash/Services/Hardware/EscPosPrinterService.cs` (строки 140, 262, 275, 338)
+- Modify: `src/VvCash/Services/Hardware/EscPosPrinterService.cs` (четыре `catch` на строках 140, 262, 275, 338; и пять успешных веток)
 
-Из пяти `catch` текст исключения сегодня сохраняет только `PrintReceiptAsync`. Новый код Win32 испарился бы ровно на том пути, куда придёт кнопка пробной печати.
+Из пяти `catch` текст исключения сегодня сохраняет только `PrintReceiptAsync`.
+
+**Честно о том, чего эта задача НЕ даёт.** `OutputType` проекта — `WinExe`, а логирования в проекте нет никакого: 15 файлов пишут в `Console.WriteLine`, и всё. То есть в бою у приложения нет консоли, и ни одна из этих строк никуда не приезжает. Кассиру причина попадает не отсюда, а из Task 12: кнопка пробной печати зовёт `PrintTestReceiptAsync` напрямую, минуя эти `catch`, и кладёт `ex.Message` в баннер на экране.
+
+Задача всё равно нужна, но по более скромной причине: четыре голых `catch` теряют исключение целиком, поэтому оно недоступно даже при запуске из консоли или под отладчиком — а это единственный способ разобраться в отказе спулера на месте. Приведение к одному виду стоит две строки на метод.
+
+**Вне скоупа, но записано:** отсутствие долговременного лога — настоящая дыра этого приложения, и она шире батча. Отдельная задача.
 
 - [ ] **Step 1: `PrintPreReceiptAsync`**
 
@@ -660,7 +714,26 @@ git commit -m "fix(printing): read spooler printer names as UTF-8"
             Console.WriteLine($"Exchange receipt print error: {ex.Message}");
 ```
 
-- [ ] **Step 5: Проверить, что голых catch не осталось**
+- [ ] **Step 5: Статус возвращается в `Ready` после удачной печати**
+
+`SetStatus` во всём файле вызывается только с `Error` — обратного перехода нет ни одного. До Task 2 это было недостижимо для USB-касс: путь был заглушкой и не бросал никогда. Теперь первый же сбой печати навсегда красит индикатор готовности принтера (`IsPrinterReady`, зелёная точка в [PosView.axaml:634](src/VvCash/Views/PosView.axaml:634)) до перезапуска кассы или смены настроек — даже когда печать давно восстановилась.
+
+Для батча, чья тема — «интерфейс не должен врать про принтер», это то же враньё, только в другую сторону. Task 2 сделал ветку достижимой, значит чинит её этот батч.
+
+В каждом из пяти методов (`PrintReceiptAsync`, `PrintPreReceiptAsync`, `PrintReturnReceiptAsync`, `PrintExchangeReceiptAsync`, `OpenCashDrawerAsync`) успешная ветка получает `SetStatus` перед `return true`. Например:
+
+```csharp
+            await SendAsync(BuildSaleReceipt(items, subtotal, discount, total, discountName,
+                documentNumber, warehouseName, sellerName, saleDate));
+            // Обратный переход: без него первый же отказ красит индикатор
+            // навсегда, потому что SetStatus нигде не вызывался с Ready.
+            SetStatus(PrinterStatus.Ready);
+            return true;
+```
+
+`SetStatus` уже фильтрует повторы на уровне `CompositePrinterService.SetStatus`, а здесь событие поднимается на каждый вызов — это существующее поведение, менять его не нужно.
+
+- [ ] **Step 6: Проверить, что голых catch не осталось**
 
 ```bash
 grep -n "catch$" src/VvCash/Services/Hardware/EscPosPrinterService.cs
@@ -668,7 +741,7 @@ grep -n "catch$" src/VvCash/Services/Hardware/EscPosPrinterService.cs
 
 Ожидание: пусто (grep вернёт код 1 и ничего не напечатает).
 
-- [ ] **Step 6: Сборка и тесты**
+- [ ] **Step 7: Сборка и тесты**
 
 ```bash
 & ./run-tests.ps1
@@ -676,11 +749,11 @@ grep -n "catch$" src/VvCash/Services/Hardware/EscPosPrinterService.cs
 
 Ожидание: `Failed: 0`.
 
-- [ ] **Step 7: Коммит**
+- [ ] **Step 8: Коммит**
 
 ```bash
 git add src/VvCash/Services/Hardware/EscPosPrinterService.cs
-git commit -m "fix(printing): keep the reason a receipt failed to print"
+git commit -m "fix(printing): keep the reason a receipt failed, and clear the error once it prints"
 ```
 
 ---
