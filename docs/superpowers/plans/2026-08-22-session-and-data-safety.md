@@ -153,9 +153,9 @@ Append to `tests/VvCash.Tests/ShiftServiceTest.cs`, before the closing brace of 
     // -----------------------------------------------------------------------------
     // 403 — the code this backend actually sends for a rejected session
     // (middlewares/utils.go redirectToAccessDenied). Deliberately a DIFFERENT event
-    // from 401: all five backend sources of 403 share one body, and three of them
-    // (tenant-DB failure, missing is_seller, missing permission) are transient or
-    // configuration faults that must never sign a cashier out.
+    // from 401: the backend sources of 403 all share one body, and most of them
+    // (tenant-DB failure, an inactive tenant, missing is_seller, missing permission)
+    // are transient or configuration faults that must never sign a cashier out.
     // -----------------------------------------------------------------------------
 
     [Fact]
@@ -275,9 +275,10 @@ declaration, inside the interface:
     /// redirectToAccessDenied), never 401, on any authenticated route.
     ///
     /// Deliberately separate from <see cref="SessionRevoked"/> rather than folded into it.
-    /// Five backend paths produce a byte-identical 403 body — an expired JWT, an invalid
-    /// Cash-Authorization token, a tenant-database pool failure, a missing is_seller row,
-    /// and a denied permission — and only the first two mean the session is over. Treating
+    /// Several backend paths produce a byte-identical 403 body — an expired JWT, an invalid
+    /// Cash-Authorization token, a tenant-database pool failure, an inactive or deleted
+    /// tenant, a missing is_seller row, a denied permission — and only the token ones mean
+    /// the session is over. Treating
     /// 403 as a dead token would sign a cashier out over a database blip, or loop them
     /// through the login screen forever when the real fault is a misconfigured permission.
     /// PosViewModel therefore explains it inside the shift modal and leaves the decision to
@@ -383,8 +384,8 @@ ShiftService checked only 401, which this API emits nowhere except login and
 refresh; an authenticated route answers redirectToAccessDenied's 403 instead. So
 SessionRevoked never fired and the automatic recovery behind it was dead code.
 
-403 gets its own event rather than joining the 401 branch: five backend paths
-share one 403 body and three of them are transient or configuration faults, so
+403 gets its own event rather than joining the 401 branch: the backend paths that
+emit it share one body and most of them are transient or configuration faults, so
 signing out on it would eject a cashier over a tenant-DB blip.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
@@ -415,8 +416,8 @@ In the same file, append inside the class, directly after
 ```csharp
     // ---------------------------------------------------------------------------------
     // Access denied (403): the code this backend really sends for a rejected session.
-    // Unlike the 401 path above, this must NOT sign the cashier out — three of the five
-    // backend sources of 403 are transient or configuration faults. It raises an
+    // Unlike the 401 path above, this must NOT sign the cashier out — most of the things
+    // that make this backend answer 403 are transient or configuration faults. It raises an
     // explanation inside the shift modal instead, and unlike IsSessionRevoked it clears
     // itself once a shift id actually comes back.
     // ---------------------------------------------------------------------------------
