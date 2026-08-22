@@ -813,7 +813,7 @@ git commit -m "fix(printing): keep the reason a receipt failed, and clear the er
     public void ReturnReceipt_SelectsTheCodePage()
     {
         var bytes = EscPosPrinterService.BuildReturnReceipt(
-            EscPosCodePages.Cp866, new[] { new ReturnReceiptLine("Товар", 1m, 10m) },
+            EscPosCodePages.Cp866, new[] { new ReturnReceiptLine("Товар", 1, 10m) },
             totalRefund: 10m, documentNumber: "RT-1");
 
         Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
@@ -824,8 +824,8 @@ git commit -m "fix(printing): keep the reason a receipt failed, and clear the er
     {
         var bytes = EscPosPrinterService.BuildExchangeReceipt(
             EscPosCodePages.Cp866,
-            new[] { new ReturnReceiptLine("Товар", 1m, 10m) },
-            new[] { new ReturnReceiptLine("Другой", 1m, 12m) },
+            new[] { new ReturnReceiptLine("Товар", 1, 10m) },
+            new[] { new ReturnReceiptLine("Другой", 1, 12m) },
             difference: 2m, documentNumber: "EX-1");
 
         Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
