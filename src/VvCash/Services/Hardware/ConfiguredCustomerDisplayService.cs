@@ -8,8 +8,7 @@ namespace VvCash.Services.Hardware;
 /// как только их поменяли.
 ///
 /// По образцу CompositePrinterService, а не «прочитать настройки один раз при
-/// старте»: иначе после настройки порта пришлось бы перезапускать кассу, а кнопка
-/// «Проверить дисплей» проверяла бы прошлую конфигурацию.
+/// старте»: иначе после настройки порта пришлось бы перезапускать кассу.
 ///
 /// Не «Composite»: дисплей на кассе один, складывать нечего. Общее с принтерным
 /// композитом — только подписка на SettingsChanged и подмена внутренностей одним
@@ -25,6 +24,11 @@ public class ConfiguredCustomerDisplayService : ICustomerDisplayService
     /// защищает шаг отписки от прежнего состава, а у дисплея отписываться не от
     /// чего — Rebuild просто заменяет одну ссылку.</summary>
     private volatile ICustomerDisplayService _inner = new NullCustomerDisplayService();
+
+    /// <summary>Что сейчас собрано из настроек. Только для теста, по образцу
+    /// CompositePrinterService.Printers: иначе строка, которая доносит порт,
+    /// скорость и кодовую страницу до железа, не покрыта ничем.</summary>
+    internal ICustomerDisplayService Inner => _inner;
 
     public ConfiguredCustomerDisplayService(ISettingsService settingsService)
     {

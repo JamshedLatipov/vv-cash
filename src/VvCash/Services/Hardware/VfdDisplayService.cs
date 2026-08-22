@@ -19,6 +19,28 @@ public class VfdDisplayService : ICustomerDisplayService
     private readonly int _baudRate;
     private readonly EscPosCodePage _codePage;
 
+    /// <summary>Порт, скорость и кодовая страница этого экземпляра — только для
+    /// теста, по образцу CompositePrinterService.Printers: иначе строка, которая
+    /// доносит их из настроек до железа, не покрыта ничем, и подмена конструктора
+    /// на захардкоженные значения прошла бы мимо всех тестов незамеченной.</summary>
+    internal string PortName => _portName;
+    internal int BaudRate => _baudRate;
+    internal EscPosCodePage CodePage => _codePage;
+
+    /// <summary>Отправки выстраиваются в цепочку, а не идут параллельно. Task.Run
+    /// снял блокировку UI-потока — и вместе с ней неявную сериализацию, на которой
+    /// держались пять неожидаемых вызовов: одно нажатие «очистить корзину» поднимает
+    /// CartChanged дважды, ClearCustomerDiscount третий раз, плюс ClearAsync — четыре
+    /// одновременные отправки в один COM-порт. Второй поток получил бы
+    /// UnauthorizedAccessException на Open(), кадр молча потерялся бы, и какой именно
+    /// уцелеет — было бы неопределено.
+    ///
+    /// Цепочкой, а не семафором: у двухстрочного дисплея важен порядок кадров —
+    /// «товар, затем итог» и «итог, затем спасибо» читаются покупателем как
+    /// последовательность, а семафор такой гарантии не даёт.</summary>
+    private readonly object _queueGate = new();
+    private Task<bool> _tail = Task.FromResult(true);
+
     public VfdDisplayService(string portName, int baudRate, EscPosCodePage codePage)
     {
         _portName = portName;
@@ -52,46 +74,63 @@ public class VfdDisplayService : ICustomerDisplayService
     private static string Money(decimal value)
         => value.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
 
-    /// <summary>Тело целиком — внутри Task.Run, а не только запись. SendAsync
-    /// объявлен async, но конструктор SerialPort и Open() отрабатывают синхронно до
-    /// первого await и без обёртки достались бы потоку вызывающего — а вызывают
-    /// отсюда AddToCart и пересчёт суммы, то есть UI-поток, на каждом сканировании
-    /// товара. Отсутствующий порт дёшев (0.2–2.3мс), но открытие живого COM-порта на
-    /// Windows — уже десятки миллисекунд.</summary>
+    /// <summary>Ставит отправку в хвост очереди и возвращает её задачу, не дожидаясь
+    /// её здесь. Лок защищает только само связывание с хвостом — ни одного await
+    /// внутри него, компилятор бы и не разрешил, — а ContinueWith на
+    /// TaskScheduler.Default сам уводит SendNowAsync с потока вызывающего, даже
+    /// когда _tail уже завершён к моменту вызова: без ExecuteSynchronously
+    /// продолжение всегда планируется через переданный планировщик, а не
+    /// выполняется на месте. Поэтому отдельный Task.Run больше не нужен.
+    ///
+    /// SendNowAsync никогда не бросает — см. её catch — поэтому _tail всегда
+    /// оказывается в состоянии RanToCompletion, и упавшая отправка не может
+    /// застрять сама и подвесить очередь для всех, кто встанет за ней.</summary>
     private Task<bool> SendAsync(string text)
     {
-        return Task.Run(async () =>
+        lock (_queueGate)
         {
-            try
-            {
-                // WriteTimeout: по умолчанию бесконечен, а порт может открыться и
-                // при этом никогда не вычитать буфер — мёртвый, но ещё
-                // перечисленный VFD, либо аппаратное управление потоком. Без этой
-                // строки WriteAsync висит вечно, using port так и не отрабатывает,
-                // дескриптор утекает на каждое сканирование, а бросить нечего —
-                // catch тут не помощник. 40 байт на 9600 бод — это ~42мс на
-                // проводе, 500мс — с большим запасом.
-                using var port = new SerialPort(_portName, _baudRate) { WriteTimeout = 500 };
-                port.Open();
+            var queued = _tail.ContinueWith(
+                _ => SendNowAsync(text),
+                TaskScheduler.Default).Unwrap();
 
-                // ESC @, затем ESC t n. Без инициализации дисплей копит мусор от
-                // предыдущей строки; без кодовой страницы кириллица уходит в ASCII и
-                // превращается в вопросительные знаки.
-                var prologue = new byte[] { 0x1B, 0x40, 0x1B, 0x74, _codePage.EscTSelector };
-                await port.BaseStream.WriteAsync(prologue, 0, prologue.Length);
+            _tail = queued;
+            return queued;
+        }
+    }
 
-                var bytes = _codePage.Encoding.GetBytes(text);
-                await port.BaseStream.WriteAsync(bytes, 0, bytes.Length);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                // Логируется, но не глотается: возвращённый false — единственное, по
-                // чему кнопка проверки отличит рабочий дисплей от мёртвого порта.
-                Console.WriteLine($"VFD error: {ex.Message}");
-                return false;
-            }
-        });
+    private async Task<bool> SendNowAsync(string text)
+    {
+        try
+        {
+            // WriteTimeout: по умолчанию бесконечен, а порт может открыться и
+            // при этом никогда не вычитать буфер — мёртвый, но ещё
+            // перечисленный VFD, либо аппаратное управление потоком. Без этой
+            // строки WriteAsync висит вечно, using port так и не отрабатывает,
+            // дескриптор утекает на каждое сканирование, а бросить нечего —
+            // catch тут не помощник. 40 байт на 9600 бод — это ~42мс на
+            // проводе, 500мс — с большим запасом.
+            using var port = new SerialPort(_portName, _baudRate) { WriteTimeout = 500 };
+            port.Open();
+
+            // ESC @, затем ESC t n. Без инициализации дисплей копит мусор от
+            // предыдущей строки; без кодовой страницы кириллица уходит в ASCII и
+            // превращается в вопросительные знаки.
+            var prologue = new byte[] { 0x1B, 0x40, 0x1B, 0x74, _codePage.EscTSelector };
+            await port.BaseStream.WriteAsync(prologue, 0, prologue.Length);
+
+            var bytes = _codePage.Encoding.GetBytes(text);
+            await port.BaseStream.WriteAsync(bytes, 0, bytes.Length);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Логируется, но не глотается: возвращённый false — единственное, по
+            // чему кнопка проверки отличит рабочий дисплей от мёртвого порта. Это
+            // же catch — единственное, что держит _tail в RanToCompletion и не
+            // даёт упавшему звену подвесить очередь.
+            Console.WriteLine($"VFD error: {ex.Message}");
+            return false;
+        }
     }
 
     private static string Pad(string text)
