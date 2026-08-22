@@ -985,7 +985,7 @@ Then replace the body of `OnIsCustomerDisplayEnabledChanged` with:
 & ./run-tests.ps1
 ```
 
-Expected: 702 passed, 0 failed.
+Expected: 703 passed, 0 failed.
 
 - [ ] **Step 5: Commit**
 
@@ -1005,6 +1005,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/VvCash/App.axaml.cs`
+- Modify: `src/VvCash/Services/ICashFeatureService.cs`, `src/VvCash/Services/CashFeatureService.cs`, `src/VvCash/ViewModels/PosViewModel.cs` (the `HasLoaded` gate — see the review outcome below)
+- Test: `tests/VvCash.Tests/PosViewModelSellerGateTest.cs` (plus the `HasLoaded` member on three other fakes)
 
 **Root cause:** `NavigateToPos` built `new CustomerDisplayWindow(...).Show()` on every call,
 kept no reference and closed nothing, so each logout/login cycle stacked another window on
@@ -1150,7 +1152,21 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: `Build succeeded`, then 702 passed, 0 failed.
+Expected: `Build succeeded`, then 703 passed, 0 failed.
+
+> **Review outcome:** three defects were found by reading, since nothing here is
+> automatically testable. (1) The window flashed on cold start even where the store had
+> disabled it: `CashFeatures.Default` reports everything enabled, so the constructor's
+> optimistic `ApplyFeatures` pass showed the window before the real map was read. Fixed by
+> `ICashFeatureService.HasLoaded` — the one flag that does not get the benefit of the doubt,
+> because guessing wrong puts a screen in front of a paying customer that the store switched
+> off. (2) The `ForcedOnSingleScreen` branch set `Width`/`Height` but left the XAML's
+> `WindowState="FullScreen"` in place, which Avalonia honours over an explicit size — the
+> debug overlay covered the whole screen, defeating the tool the manual pass depends on.
+> (3) `ShutdownMode` defaults to `OnLastWindowClose` and `Hide()` leaves a window open, so a
+> hidden customer display could keep the process alive after the cashier closed the register;
+> now set to `OnMainWindowClose`. The `HasLoaded` gate is pinned by two tests, verified by
+> reverting it and watching exactly those two fail.
 
 - [ ] **Step 6: Commit**
 
@@ -1281,7 +1297,7 @@ Expected: no matches at all.
 & ./run-tests.ps1
 ```
 
-Expected: 702 passed, 0 failed.
+Expected: 703 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1620,7 +1636,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 & ./run-tests.ps1
 ```
 
-Expected: five `ok` lines, `Build succeeded`, then 707 passed, 0 failed.
+Expected: five `ok` lines, `Build succeeded`, then 708 passed, 0 failed.
 
 - [ ] **Step 9: Commit**
 
@@ -1652,7 +1668,7 @@ at compile time.
 & ./run-tests.ps1
 ```
 
-Expected: 707 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
+Expected: 708 passed, 0 failed. Task 0 removed the dispatcher race, so any failure here is
 a real one. Run it twice: a result that differs between runs means something reintroduced
 parallel access to `Dispatcher.UIThread`.
 
@@ -1718,7 +1734,7 @@ fix before considering batch A done — do not open batch B on top of an unverif
 ## Done when
 
 - All ten tasks (0 through 9) are checked off.
-- `& ./run-tests.ps1` reports 707 passed and 0 failed, twice in a row.
+- `& ./run-tests.ps1` reports 708 passed and 0 failed, twice in a row.
 - Task 9's manual checklist passed on a real run of the app.
 - Findings 1, 2 and 5 from the code review are closed. Findings 3, 4, 6–18 remain open and
   belong to batches B, C and D.
