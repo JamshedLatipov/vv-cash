@@ -821,16 +821,6 @@ public class OfflineStorageService : IOfflineStorageService
         await command.ExecuteNonQueryAsync();
     }
 
-    public async Task ClearUnsyncedDocumentsAsync()
-    {
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM UnsyncedDocuments";
-        await command.ExecuteNonQueryAsync();
-    }
-
     public async Task SaveParkedSaleAsync(ParkedSale sale)
     {
         using var connection = new SqliteConnection(_connectionString);

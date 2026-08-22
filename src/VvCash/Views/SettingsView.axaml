@@ -288,22 +288,6 @@
                                 </Button>
                             </Grid>
                         </Border>
-
-                        <!-- Clear Unsynced Documents (unsold products) -->
-                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="10" Padding="16,12">
-                            <Grid ColumnDefinitions="*, Auto">
-                                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
-                                    <TextBlock Text="{Binding [ClearUnsyncedDocs], Source={x:Static services:I18nService.Instance}}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Slate800Brush}"/>
-                                    <TextBlock Text="{Binding [ClearUnsyncedDocsDesc], Source={x:Static services:I18nService.Instance}}" FontSize="12" Foreground="{StaticResource Slate500Brush}"/>
-                                </StackPanel>
-                                <Button Grid.Column="1" Classes="DangerButton" Command="{Binding ClearUnsyncedDocumentsCommand}" HorizontalAlignment="Right">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <material:MaterialIcon Kind="TrashCan" Width="18" Height="18"/>
-                                        <TextBlock Text="{Binding [ClearUnsyncedDocs], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Button>
-                            </Grid>
-                        </Border>
                     </StackPanel>
                 </Border>
 

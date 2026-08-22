@@ -54,7 +54,6 @@ public interface IOfflineStorageService
 
     Task ClearCategoriesAsync();
     Task ClearProductsAsync();
-    Task ClearUnsyncedDocumentsAsync();
 
     // Parked sales (отложенные чеки)
     Task SaveParkedSaleAsync(ParkedSale sale);

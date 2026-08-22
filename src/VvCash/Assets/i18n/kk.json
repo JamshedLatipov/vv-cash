@@ -152,8 +152,6 @@
   "ClearCategoriesDesc": "Жергілікті дереққордан барлық санаттарды жою",
   "ClearProducts": "Тауарларды тазалау",
   "ClearProductsDesc": "Жергілікті дереққордан барлық тауарларды жою",
-  "ClearUnsyncedDocs": "Сатылмаған тауарларды тазалау",
-  "ClearUnsyncedDocsDesc": "Синхрондалмаған сату құжаттарын жою",
   "Returns": "Қайтарулар",
   "ReturnAction": "Қайтару",
   "Returnable": "Қайтаруға болады",

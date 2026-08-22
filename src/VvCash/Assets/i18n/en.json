@@ -152,8 +152,6 @@
   "ClearCategoriesDesc": "Remove all categories from local DB",
   "ClearProducts": "Clear products",
   "ClearProductsDesc": "Remove all products from local DB",
-  "ClearUnsyncedDocs": "Clear unsold products",
-  "ClearUnsyncedDocsDesc": "Delete unsynced sales documents",
   "Returns": "Returns",
   "ReturnAction": "Return",
   "Returnable": "Returnable",

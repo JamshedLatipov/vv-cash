@@ -257,12 +257,6 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private async Task ClearUnsyncedDocuments()
-    {
-        await _offlineStorageService.ClearUnsyncedDocumentsAsync();
-    }
-
-    [RelayCommand]
     private void GoBack()    {
         NavigationRequest?.Invoke(_previousViewModel);
     }
