@@ -22,15 +22,24 @@
 - **Проверка предупреждений требует `--no-incremental`.** Без него первая сборка после правки инкрементальная и честно показывает ноль. Базовая линия — **одно** предупреждение, унаследованный CS8601 в `PosViewModel.cs:2266`.
 - **BOM в этом репозитории — по файлу, а не по правилу.** Измерено 2026-08-23, а не предположено:
 
-  | Файл | BOM | Концы строк |
-  |---|---|---|
-  | `Services/Data/OfflineStorageService.cs` | **нет** | CRLF |
-  | `Services/Data/SyncService.cs` | **есть** | CRLF |
-  | `Services/CartService.cs` | нет | CRLF |
-  | `Models/CartItem.cs` | нет | CRLF |
-  | `ViewModels/MixedPaymentViewModel.cs` | нет | CRLF |
-  | `Views/PosView.axaml` | нет | CRLF |
-  | `Assets/i18n/*.json` (все пять) | **есть** | CRLF |
+  Из 201 файла `.cs` и `.axaml` в `src` и `tests` BOM несут **десять**. Перечислены полностью, потому что обобщать тут уже дважды выходило боком:
+
+  | Файл | BOM |
+  |---|---|
+  | `src/VvCash/Services/Data/SyncService.cs` | **есть** |
+  | `src/VvCash/Services/Api/ExpenseDocumentService.cs` | **есть** |
+  | `src/VvCash/Services/Api/ProductService.cs` | **есть** |
+  | `src/VvCash/Services/Api/ShiftService.cs` | **есть** |
+  | `src/VvCash/Services/Hardware/CompositePrinterService.cs` | **есть** |
+  | `src/VvCash/Services/Hardware/EscPosPrinterService.cs` | **есть** |
+  | `tests/VvCash.Tests/EscPosUnitTest.cs` | **есть** |
+  | `tests/VvCash.Tests/ExchangeViewModelTest.cs` | **есть** |
+  | `tests/VvCash.Tests/PosViewModelSellerGateTest.cs` | **есть** |
+  | `tests/VvCash.Tests/ReturnsViewModelTest.cs` | **есть** |
+  | `Assets/i18n/*.json` (все пять) | **есть** |
+  | **все остальные 191** | нет |
+
+  Концы строк — CRLF везде, одиночных LF нет нигде. Из задач этого батча BOM касаются `SyncService.cs` (Task 4) и `PosViewModelSellerGateTest.cs` (задет в Task 3 как одна из шести заглушек).
 
   Правка, снявшая BOM с локали, ломает её загрузку молча. Правка, **добавившая** BOM туда, где его не было, — лишний шум в диффе. Снимать байтовый слепок до и после каждой правки:
 
@@ -893,7 +902,11 @@ grep -rln "IOfflineStorageService" tests/VvCash.Tests/ --include="*.cs"
 - [ ] **Step 10: Коммит**
 
 ```bash
-git add src/VvCash/Models/Product.cs src/VvCash/Services/Data/OfflineStorageService.cs src/VvCash/Services/Data/IOfflineStorageService.cs tests/VvCash.Tests/OfflineStorageServiceTest.cs
+git add src/VvCash/Models/Product.cs src/VvCash/Services/Data/OfflineStorageService.cs src/VvCash/Services/Data/IOfflineStorageService.cs \
+        tests/VvCash.Tests/OfflineStorageServiceTest.cs \
+        tests/VvCash.Tests/CashFeatureServiceTest.cs tests/VvCash.Tests/ExpenseDocumentServiceTest.cs \
+        tests/VvCash.Tests/PosViewModelSellerGateTest.cs tests/VvCash.Tests/SellerRosterServiceTest.cs \
+        tests/VvCash.Tests/SettingsViewModelTest.cs tests/VvCash.Tests/SyncServiceTest.cs
 git commit -m "feat(storage): let the catalogue carry stock and drop what the warehouse no longer has"
 ```
 
