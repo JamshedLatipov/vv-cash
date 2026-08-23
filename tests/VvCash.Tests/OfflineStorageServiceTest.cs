@@ -15,7 +15,7 @@ namespace VvCash.Tests;
 // SQLite file — every other test that needs IOfflineStorageService substitutes a
 // hand-written in-memory fake (see SyncServiceTest.FakeStorage). That's fine for
 // testing callers, but it means the SQLite read/write code itself — the decimal
-// <-> REAL conversion, NULL vs. empty-string handling, the delete-then-insert
+// <-> TEXT conversion, NULL vs. empty-string handling, the delete-then-insert
 // replace semantics — has never actually been run. A temp-file SQLite database is
 // workable here: Microsoft.Data.Sqlite is already a transitive package reference
 // via the ProjectReference to VvCash.csproj, and OfflineStorageService opens a
@@ -84,7 +84,7 @@ public class OfflineStorageServiceTest : IDisposable
     }
 
     [Fact]
-    public async Task SaveAndGetSellers_DecimalMaxDiscountRoundTripsExactlyThroughRealColumn()
+    public async Task SaveAndGetSellers_DecimalMaxDiscountRoundTripsExactly()
     {
         await _service.InitializeAsync();
         await _service.SaveSellersAsync(new[] { MakeSeller(maxDiscount: 12.5m) });
@@ -342,8 +342,9 @@ public class OfflineStorageServiceTest : IDisposable
     }
 
     /// <summary>Builds a database in the pre-migration shape and checks that
-    /// InitializeAsync rebuilds it: declared types become TEXT, the row survives, the
-    /// indices come back, and the new StockQuantity column is there.
+    /// InitializeAsync rebuilds Products: declared types become TEXT, the row survives,
+    /// the indices come back, and the new StockQuantity column is there. The other two
+    /// rebuilds run on the same seeded database and are asserted separately below.
     ///
     /// The indices matter and are easy to lose: they are created in the schema block
     /// that runs earlier in the same InitializeAsync, and DROP TABLE takes them with
@@ -354,23 +355,7 @@ public class OfflineStorageServiceTest : IDisposable
         var dbPath = Path.Combine(Path.GetTempPath(), $"vvcash-migrate-{Guid.NewGuid()}.db");
         try
         {
-            using (var seed = new SqliteConnection($"Data Source={dbPath}"))
-            {
-                await seed.OpenAsync();
-                using var cmd = seed.CreateCommand();
-                cmd.CommandText = @"
-                    CREATE TABLE Products (
-                        Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
-                        Price REAL NOT NULL, OriginalPrice REAL, DiscountPercent REAL,
-                        ImagePath TEXT, Barcode TEXT, Tags TEXT,
-                        UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor REAL,
-                        IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT
-                    );
-                    INSERT INTO Products (Id, Name, Price, UnitFactor, SearchText)
-                    VALUES ('p-1', 'Товар', 19.99, 2.5, 'товар');
-                ";
-                await cmd.ExecuteNonQueryAsync();
-            }
+            await SeedPreMigrationDatabaseAsync(dbPath);
 
             await new OfflineStorageService(dbPath).InitializeAsync();
 
@@ -419,12 +404,156 @@ public class OfflineStorageServiceTest : IDisposable
         return (await cmd.ExecuteScalarAsync()) as string ?? string.Empty;
     }
 
+    /// <summary>A parked sale's Payload is the only record of what a cashier is holding:
+    /// no sync restores it, so the rebuild has to hand it back byte for byte. Deliberately
+    /// awkward content — Cyrillic, quotes, a percent sign — so a rebuild that mangles
+    /// encoding or quoting shows up here and not on a shop floor.</summary>
+    private const string ParkedSalePayload =
+        @"{""items"":[{""name"":""Товар «А»"",""qty"":2.5}],""note"":""скидка 50%""}";
+
+    /// <summary>Creates all three money-carrying tables in the shape that shipped before
+    /// this migration, one row each.
+    ///
+    /// All three and not just Products, because each rebuild sits behind its own probe and
+    /// CREATE TABLE IF NOT EXISTS creates whatever is missing already declared TEXT. Seed
+    /// Products alone and the ParkedSales and Sellers branches are not merely untested —
+    /// they never execute at all.</summary>
+    private static async Task SeedPreMigrationDatabaseAsync(string dbPath)
+    {
+        using var seed = new SqliteConnection($"Data Source={dbPath}");
+        await seed.OpenAsync();
+
+        using (var cmd = seed.CreateCommand())
+        {
+            cmd.CommandText = @"
+                CREATE TABLE Products (
+                    Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
+                    Price REAL NOT NULL, OriginalPrice REAL, DiscountPercent REAL,
+                    ImagePath TEXT, Barcode TEXT, Tags TEXT,
+                    UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor REAL,
+                    IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT
+                );
+                CREATE TABLE ParkedSales (
+                    Id TEXT PRIMARY KEY, Label TEXT, CustomerName TEXT,
+                    Total REAL NOT NULL, ItemCount REAL NOT NULL,
+                    CreatedAt TEXT NOT NULL, Payload TEXT NOT NULL
+                );
+                CREATE TABLE Sellers (
+                    Id TEXT PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT,
+                    PinHash TEXT, CanSell INTEGER NOT NULL DEFAULT 1,
+                    CanRefund INTEGER NOT NULL DEFAULT 0,
+                    CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                    MaxDiscount REAL NOT NULL DEFAULT 0
+                );
+                INSERT INTO Products (Id, Name, Price, UnitFactor, SearchText)
+                VALUES ('p-1', 'Товар', 19.99, 2.5, 'товар');
+                INSERT INTO Sellers (Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount)
+                VALUES ('s-1', 'Анна', 'Иванова', 'pin-hash', 1, 0, 1, 12.5);
+            ";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Parameterised rather than inlined: the payload carries quotes on purpose, and
+        // this must not turn into a test of SQL string-escaping.
+        using (var parked = seed.CreateCommand())
+        {
+            parked.CommandText = @"
+                INSERT INTO ParkedSales (Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload)
+                VALUES ('k-1', 'Касса 1', 'Пётр', 1234.56, 2.5, '2026-08-23T10:00:00Z', $Payload);
+            ";
+            parked.Parameters.AddWithValue("$Payload", ParkedSalePayload);
+            await parked.ExecuteNonQueryAsync();
+        }
+    }
+
+    /// <summary>ParkedSales is the one table here that no sync can rebuild. Products and
+    /// Sellers are caches: lose a row and the next sync puts it back. A parked sale is a
+    /// receipt a cashier is holding and Payload is the only copy of it anywhere, so a
+    /// rebuild that drops or mangles a row destroys it for good.</summary>
+    [Fact]
+    public async Task InitializeAsync_UpgradingFromRealColumns_KeepsParkedSaleRowsIntact()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"vvcash-migrate-parked-{Guid.NewGuid()}.db");
+        try
+        {
+            await SeedPreMigrationDatabaseAsync(dbPath);
+
+            await new OfflineStorageService(dbPath).InitializeAsync();
+
+            using var check = new SqliteConnection($"Data Source={dbPath}");
+            await check.OpenAsync();
+
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "ParkedSales", "Total"));
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "ParkedSales", "ItemCount"));
+
+            using var cmd = check.CreateCommand();
+            cmd.CommandText =
+                "SELECT Label, CustomerName, Total, ItemCount, CreatedAt, Payload "
+                + "FROM ParkedSales WHERE Id = 'k-1';";
+            using var rd = await cmd.ExecuteReaderAsync();
+            Assert.True(await rd.ReadAsync());
+            Assert.Equal("Касса 1", rd.GetString(0));
+            Assert.Equal("Пётр", rd.GetString(1));
+            Assert.Equal(1234.56m, rd.GetDecimal(2));
+            Assert.Equal(2.5m, rd.GetDecimal(3));
+            Assert.Equal("2026-08-23T10:00:00Z", rd.GetString(4));
+            Assert.Equal(ParkedSalePayload, rd.GetString(5));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(dbPath + suffix)) File.Delete(dbPath + suffix);
+        }
+    }
+
+    /// <summary>The Sellers rebuild redeclares MaxDiscount and restates its DEFAULT as a
+    /// quoted '0'. The capability flags ride along in the same copy, and they are what the
+    /// register gates refunds and shift-close on until the next sync — so a seller who
+    /// could close a shift before the upgrade must still be able to after it.</summary>
+    [Fact]
+    public async Task InitializeAsync_UpgradingFromRealColumns_KeepsSellerRowsIntact()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"vvcash-migrate-sellers-{Guid.NewGuid()}.db");
+        try
+        {
+            await SeedPreMigrationDatabaseAsync(dbPath);
+
+            await new OfflineStorageService(dbPath).InitializeAsync();
+
+            using var check = new SqliteConnection($"Data Source={dbPath}");
+            await check.OpenAsync();
+
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Sellers", "MaxDiscount"));
+
+            using var cmd = check.CreateCommand();
+            cmd.CommandText =
+                "SELECT FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount "
+                + "FROM Sellers WHERE Id = 's-1';";
+            using var rd = await cmd.ExecuteReaderAsync();
+            Assert.True(await rd.ReadAsync());
+            Assert.Equal("Анна", rd.GetString(0));
+            Assert.Equal("Иванова", rd.GetString(1));
+            Assert.Equal("pin-hash", rd.GetString(2));
+            Assert.True(rd.GetBoolean(3));
+            Assert.False(rd.GetBoolean(4));
+            Assert.True(rd.GetBoolean(5));
+            Assert.Equal(12.5m, rd.GetDecimal(6));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(dbPath + suffix)) File.Delete(dbPath + suffix);
+        }
+    }
+
     /// <summary>The value matters more than the assertion. 19.99 or 1234.56 round-trip
     /// through REAL without loss, so a test using one of those would pass before and
     /// after the migration — a green test guarding nothing. These two were measured to
     /// break under REAL: 1.000000000000001 reads back as 1.0, and 12345678901234.56 as
-    /// 12345678901234.6. Reverting either column to REAL turns this test red, which is
-    /// the whole point of it.</summary>
+    /// 12345678901234.561. Reverting either column to REAL turns this test red, which
+    /// is the whole point of it.</summary>
     [Fact]
     public async Task SaveProductsAsync_ValuesThatDoNotSurviveDouble_RoundTripExactly()
     {

@@ -203,7 +203,11 @@ public class OfflineStorageService : IOfflineStorageService
             "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
             "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
             "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
-            "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
+            // TEXT, like the schema block above declares it. A database old enough to
+            // be missing this column also has Price REAL, so the rebuild below fires
+            // moments later and would redeclare it TEXT anyway — this just stops the
+            // line reading as a leftover REAL that somebody should "fix" back.
+            "ALTER TABLE Products ADD COLUMN UnitFactor TEXT;",
             "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
             "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
             "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
