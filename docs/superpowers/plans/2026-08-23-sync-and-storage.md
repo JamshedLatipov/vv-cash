@@ -1708,8 +1708,23 @@ git commit -m "fix(payment): stop lending past the customer's credit limit"
 
 ```csharp
             }, IsMixedPaymentEnabled, hasCustomer: SelectedCustomer != null,
-               creditLimit: SelectedCustomer?.CreditLimit,
-               currentBalance: SelectedCustomer?.CurrentBalance);
+               creditTerms: SelectedCustomer is { } c
+                   ? new MixedPaymentViewModel.CreditTerms(c.CreditLimit ?? 0m, c.CurrentBalance ?? 0m)
+                   : null);
+
+**Сигнатура изменилась по итогам ревью качества Task 8, и не косметически.** Раньше это были
+два необязательных `decimal?`, и из них опасен был ровно один: забыть `creditLimit` значило
+отказать в кредите — шумно и безопасно, а забыть `currentBalance` значило **открыть гейт**,
+потому что весь существующий долг клиента читался как ноль. Измерено на долге 400 и лимите
+500: с обоими параметрами продажа блокируется, без `currentBalance` — проходит.
+
+Этот вызов — то самое место, где такое и теряется: хвостовые аргументы стоят примерно в сотне
+строк от имени конструктора, за встроенной лямбдой. Поэтому пара переехала в один
+`MixedPaymentViewModel.CreditTerms(Limit, Balance)`, половину которого пропустить нельзя.
+`null` целиком означает «клиента нет» и читается как лимит ноль, то есть отказ.
+
+`?? 0m` на обеих сторонах не случайность: `COALESCE(c.credit_limit, 0)` на бэкенде уже так
+делает, и `null` здесь значит «кредит запрещён», а не «без ограничения».
 ```
 
 - [ ] **Step 2: Добавить ключи во все пять локалей**
