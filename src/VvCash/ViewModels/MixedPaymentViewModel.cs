@@ -54,11 +54,14 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// <summary>Whether the debt fits inside the ceiling. A balance is negative when the
     /// customer owes us, so the ceiling is -limit and the test is "not below it".
     ///
-    /// Short-circuits on a zero (or already-overpaid) debt: a receipt that is not
-    /// borrowing anything must clear regardless of the limit, even for a customer whose
-    /// pre-existing balance already sits below -limit for unrelated reasons. Confirmed
-    /// design decision, not an inferred edge case — see the "zero debt" row of the
-    /// Problem 4 test table in docs/superpowers/specs/2026-08-23-sync-and-storage-design.md.
+    /// A fully tendered receipt lends nothing, so the ceiling has nothing to say about
+    /// it — that is what the CreditDebt <= 0 short-circuit below is for. Without it, a
+    /// customer whose pre-existing balance already sits below -limit for unrelated
+    /// reasons would be blocked from paying in full, even though nothing new is being
+    /// lent. It reads as a redundant guard in isolation; it is not one.
+    ///
+    /// Confirmed design decision, not an inferred edge case — see the "zero debt" row of
+    /// the Problem 4 test table in docs/superpowers/specs/2026-08-23-sync-and-storage-design.md.
     ///
     /// Nothing on the server enforces this: credit_limit is stored and serialised and
     /// never compared, in documents/ or anywhere else. If this does not stop the sale,

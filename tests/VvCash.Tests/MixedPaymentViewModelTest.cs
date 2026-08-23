@@ -238,4 +238,21 @@ public class MixedPaymentViewModelTest
 
         Assert.True(vm.SellOnCreditCommand.CanExecute(null));
     }
+
+    /// <summary>The rule depends on amounts the cashier is typing, and a bound button
+    /// only re-queries CanExecute when CanExecuteChanged fires. Calling CanExecute
+    /// directly — as the sibling test above does — re-evaluates the predicate fresh
+    /// every time and so cannot tell whether the notification was ever raised, which is
+    /// why this test subscribes to the event instead.</summary>
+    [Fact]
+    public void SellOnCredit_RaisesCanExecuteChanged_WhenAmountsChange()
+    {
+        var vm = Credit(200m, limit: 100m, balance: 0m);
+        var raised = 0;
+        vm.SellOnCreditCommand.CanExecuteChanged += (_, _) => raised++;
+
+        vm.CashAmount = 150m;
+
+        Assert.True(raised > 0, "SellOnCreditCommand never raised CanExecuteChanged");
+    }
 }
