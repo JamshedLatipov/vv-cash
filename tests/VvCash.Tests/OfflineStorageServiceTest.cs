@@ -87,11 +87,32 @@ public class OfflineStorageServiceTest : IDisposable
     public async Task SaveAndGetSellers_DecimalMaxDiscountRoundTripsExactly()
     {
         await _service.InitializeAsync();
+        // 12.5 on purpose: an ordinary discount, and one a REAL column returns unchanged.
+        // This is the common-case smoke check. It says nothing about the storage class,
+        // and is not meant to — that is the precision test directly below.
         await _service.SaveSellersAsync(new[] { MakeSeller(maxDiscount: 12.5m) });
 
         var result = (await _service.GetSellersAsync()).Single();
 
         Assert.Equal(12.5m, result.MaxDiscount);
+    }
+
+    /// <summary>Covers the seller write path's TEXT binding, which nothing else did. The
+    /// test above uses 12.5, which a REAL column hands back unchanged, so it stayed green
+    /// whether MaxDiscount was TEXT or REAL. This value does not survive REAL.
+    ///
+    /// Same caveat as the product precision test: what REAL reads it back as is not quoted
+    /// here, because it varies with the read path. Revert MaxDiscount to REAL — in the
+    /// schema block and in Sellers_new — and watch this go red.</summary>
+    [Fact]
+    public async Task SaveAndGetSellers_MaxDiscountThatDoesNotSurviveDouble_RoundTripsExactly()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveSellersAsync(new[] { MakeSeller(maxDiscount: 33.333333333333333m) });
+
+        var result = (await _service.GetSellersAsync()).Single();
+
+        Assert.Equal(33.333333333333333m, result.MaxDiscount);
     }
 
     [Fact]
@@ -548,12 +569,18 @@ public class OfflineStorageServiceTest : IDisposable
         }
     }
 
-    /// <summary>The value matters more than the assertion. 19.99 or 1234.56 round-trip
-    /// through REAL without loss, so a test using one of those would pass before and
-    /// after the migration — a green test guarding nothing. These two were measured to
-    /// break under REAL: 1.000000000000001 reads back as 1.0, and 12345678901234.56 as
-    /// 12345678901234.561. Reverting either column to REAL turns this test red, which
-    /// is the whole point of it.</summary>
+    /// <summary>The values matter more than the assertions. Ordinary prices survive a REAL
+    /// column intact — 19.99 and 1234.56 both round-trip through a double without loss — so
+    /// a test built on one of those would have been green before this migration as well as
+    /// after it, and would have guarded nothing. These two do not survive REAL, which is the
+    /// entire reason they are the values used here.
+    ///
+    /// What REAL reads them back as is deliberately not quoted. That figure is not a stable
+    /// fact: it depends on the read path, because SQLite's own text rendering keeps fifteen
+    /// significant digits while converting the double straight to decimal keeps about
+    /// seventeen. Three people measured this and got three different answers, each correct
+    /// for how they measured. To confirm this test still has teeth, revert a column to REAL
+    /// and watch it go red — do not compare against a remembered number.</summary>
     [Fact]
     public async Task SaveProductsAsync_ValuesThatDoNotSurviveDouble_RoundTripExactly()
     {
