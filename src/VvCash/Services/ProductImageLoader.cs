@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -22,7 +21,18 @@ namespace VvCash.Services;
 /// worth having at all.</summary>
 public static class ProductImageLoader
 {
-    private static readonly ConcurrentDictionary<string, Task<Bitmap?>> Cache = new();
+    /// <summary>Three hundred thumbnails. A catalogue thumbnail around 200x200 costs
+    /// roughly 160 KB decoded (width x height x 4), so the cap holds the cache near fifty
+    /// megabytes — affordable on a register, and comfortably more than one screenful of
+    /// the grid, so scrolling back and forth does not evict what was just shown.
+    ///
+    /// Bounded at all because a register runs for months without a restart and
+    /// PosViewModel.Products is replaced wholesale on every category change: after that,
+    /// the old Product objects are unreachable except through this cache, so an unbounded
+    /// one pins every bitmap the shift ever displayed.</summary>
+    private const int CacheCapacity = 300;
+
+    private static readonly LruCache<string, Task<Bitmap?>> Cache = new(CacheCapacity);
 
     /// <summary>Null for a product with no image, an unreachable backend, or a fetch that
     /// failed — every caller reads "no bitmap" as "show the placeholder icon", so a
@@ -50,7 +60,7 @@ public static class ProductImageLoader
             // being briefly offline. Caching that permanently would leave the product
             // iconless for the rest of the shift, so a later ask tries again.
             task = FetchAsync(http, url);
-            Cache[url] = task;
+            Cache.Set(url, task);
         }
         return task;
     }
