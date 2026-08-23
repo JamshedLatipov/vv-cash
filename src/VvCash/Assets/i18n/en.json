@@ -194,7 +194,7 @@
   "CHANGEDUE": "CHANGE DUE",
   "FULLYPAID": "FULLY PAID",
   "CreditLimit": "Credit limit",
-  "CurrentBalance": "Balance",
+  "Debt": "Debt",
   "CreditLimitExceeded": "Debt would exceed the limit",
   "WelcomeSignIn": "Welcome back! Sign in to open your shift and start selling.",
   "FeatureTwoTaps": "Ring up a sale in two taps",

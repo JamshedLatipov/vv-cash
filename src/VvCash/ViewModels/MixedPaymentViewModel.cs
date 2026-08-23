@@ -84,8 +84,21 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// nothing does.</summary>
     public bool IsWithinCreditLimit => IsFullyPaid || ProjectedBalance >= -_creditLimit;
 
-    public decimal CreditLimitDisplay => _creditLimit;
-    public decimal CurrentBalanceDisplay => _currentBalance;
+    public decimal CreditLimit => _creditLimit;
+
+    /// <summary>The customer's existing debt, sign-flipped for the cashier: positive
+    /// means they owe the store. The server's own balance uses the opposite convention
+    /// — negative means owed, per the comment on <see cref="IsWithinCreditLimit"/> above
+    /// — so without this flip the screen would show a balance of -400 next to a limit of
+    /// 500 and leave the cashier to work out unaided that -400 is being measured against
+    /// -500. This is the customer's standing debt, not <see cref="CreditDebt"/> — that one
+    /// is what the current receipt would add if sold on credit.
+    ///
+    /// Clamped to zero rather than shown negative for a customer in credit (a positive
+    /// balance): a negative debt is not something a cashier should have to parse, and
+    /// this screen has no job announcing store credit. Mirrors the same zero-floor
+    /// <see cref="ChangeAmount"/> already applies to <see cref="RemainingAmount"/>.</summary>
+    public decimal Debt => Math.Max(0, -_currentBalance);
     public bool IsCreditBlocked => HasCustomer && !IsWithinCreditLimit;
 
     // Quick-tender: exact remaining + round-ups (for cash payments)
@@ -134,7 +147,7 @@ public partial class MixedPaymentViewModel : ViewModelBase
     public readonly record struct CreditTerms(decimal Limit, decimal Balance);
 
     /// <summary>Plain decimals, not the CreditTerms record itself: everything downstream
-    /// (ProjectedBalance, IsWithinCreditLimit, the Display properties) reads these two
+    /// (ProjectedBalance, IsWithinCreditLimit, CreditLimit and Debt below) reads these two
     /// fields and did before CreditTerms existed. See CreditTerms above for why the two
     /// travel together on the way in.</summary>
     private readonly decimal _creditLimit;
