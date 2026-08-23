@@ -19,8 +19,10 @@ public class OfflineStorageService : IOfflineStorageService
     /// costs one uncontended WaitAsync, not a second initialisation: the flag is
     /// re-checked under the lock.
     ///
-    /// Not merely defensive since the schema rebuild landed inside InitializeAsync:
-    /// two concurrent callers would run two DROP TABLE against the same rows.</summary>
+    /// Needed today, not only in anticipation of a heavier InitializeAsync: this service
+    /// is a singleton and PosViewModel is transient, so a logout→login cycle starts a
+    /// second InitializeAsync on top of a first one that has not finished — the call is
+    /// fire-and-forget from the view model's constructor (PosViewModel.cs:874).</summary>
     private readonly SemaphoreSlim _initLock = new(1, 1);
 
     /// <summary>Creates the service against the standard per-user database file.
