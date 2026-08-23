@@ -79,7 +79,7 @@
   "DisplayBaudRate": "Tezlik",
   "CheckDisplay": "Displeyni tekshirish",
   "DisplayCheckOk": "Displeyga sinov satri yuborildi",
-  "DisplayCheckFailed": "Displeyni tekshirish bajarilmadi:",
+  "DisplayCheckFailed": "Displeyni tekshirish bajarilmadi",
   "SaveConfiguration": "Sozlamalarni saqlash",
   "Мужской": "Erkak",
   "Женский": "Ayol",

@@ -232,6 +232,15 @@ public partial class SettingsViewModel : ViewModelBase
         SelectedDisplayCodePage = EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId);
         foreach (var port in PrinterDiscoveryService.GetComPorts())
             AvailableDisplayPorts.Add(port);
+        // Сохранённый порт мог быть не переподключён к моменту открытия экрана — тот
+        // же случай, что и у ConnectionString принтера на COM (см.
+        // PrinterConfigViewModel.UpdateAvailableConnections). Не добавить его сюда —
+        // значит отдать CustomerDisplayPort на слом первой же простановке
+        // SelectedItem: SelectingItemsControl пишет null назад для значения, которого
+        // нет в ItemsSource (см. комментарий у SelectedCodePage выше), а Save ниже
+        // сохранил бы этот null поверх настроенного порта.
+        if (!string.IsNullOrWhiteSpace(CustomerDisplayPort) && !AvailableDisplayPorts.Contains(CustomerDisplayPort))
+            AvailableDisplayPorts.Add(CustomerDisplayPort);
 
         foreach (var printer in _settingsService.Printers)
         {
@@ -286,6 +295,13 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Что в последний раз построил TestPrint — только для чтения и только
+    /// для тестов. То же обоснование, что у CompositePrinterService.Printers: строка,
+    /// которая доносит кодовую страницу СО ЭКРАНА (а не из настроек) до сервиса
+    /// печати, иначе не покрывается ничем, и её подмену на CompositePrinterService,
+    /// читающий сохранённое, ловил бы только grep.</summary>
+    internal EscPosPrinterService? LastTestPrintService { get; private set; }
+
     /// <summary>Печатает образец на том, что сейчас на экране, а НЕ на сохранённых
     /// настройках. Иначе связка «поменял кодовую страницу → напечатал → посмотрел»
     /// требовала бы сохранения и выхода с экрана, то есть перестала бы быть
@@ -307,6 +323,7 @@ public partial class SettingsViewModel : ViewModelBase
             printer.ConnectionType,
             printer.ConnectionString,
             printer.SelectedCodePage ?? EscPosCodePages.Default);
+        LastTestPrintService = service;
 
         try
         {
@@ -331,7 +348,11 @@ public partial class SettingsViewModel : ViewModelBase
             ? new NullCustomerDisplayService()
             : new VfdDisplayService(
                 CustomerDisplayPort,
-                int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : 9600,
+                // Тот же откат, что у Save чуть ниже по файлу, а не свои жёсткие
+                // 9600: иначе нечитаемое поле проверяется на одной скорости и
+                // сохраняется на другой — «проверка прошла» перестаёт значить
+                // что-либо про то, на чём касса в итоге заработает.
+                int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : _settingsService.CustomerDisplayBaudRate,
                 SelectedDisplayCodePage ?? EscPosCodePages.Default);
 
         // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
@@ -470,7 +491,13 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
         _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;
 
-        _settingsService.CustomerDisplayPort = CustomerDisplayPort;
+        // Пустой порт здесь — не то же самое, что «порт стёрли»: ComboBox мог
+        // обнулить CustomerDisplayPort сам, если сохранённое значение не успело
+        // попасть в AvailableDisplayPorts (см. конструктор). Как SelectedPhoneFormat
+        // и обе категории платежа ниже — пропуск записи, а не запись пустоты поверх
+        // настроенного порта.
+        if (!string.IsNullOrWhiteSpace(CustomerDisplayPort))
+            _settingsService.CustomerDisplayPort = CustomerDisplayPort;
         if (int.TryParse(CustomerDisplayBaudRateText, out var displayBaud) && displayBaud > 0)
             _settingsService.CustomerDisplayBaudRate = displayBaud;
         if (SelectedDisplayCodePage != null)

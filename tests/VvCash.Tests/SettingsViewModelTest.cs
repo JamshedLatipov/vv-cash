@@ -296,6 +296,49 @@ public class SettingsViewModelTest
 
         Assert.True(vm.HasError);
         Assert.Empty(vm.StatusMessage);
+        // Не просто "непусто": ErrorMessage — это префикс плюс ex.Message, и тест
+        // назван про то, что причина доезжает до баннера. Замени сборку на голый
+        // префикс — предыдущие две проверки останутся зелёными, а эта поймает
+        // разницу в длине.
+        Assert.True(vm.ErrorMessage.Length > I18nService.Instance["TestPrintFailed"].Length);
+    }
+
+    [Fact]
+    public async Task TestPrint_BuildsFromTheCodePageOnScreen_NotTheSavedOne()
+    {
+        // Обе кнопки проверки оправданы тем, что строят сервис из несохранённого
+        // состояния экрана, а не из настроек — но это ничем не проверялось. Если
+        // TestPrint однажды поведут через CompositePrinterService, который читает
+        // именно сохранённое, все прочие тесты останутся зелёными, а кнопка
+        // перестанет проверять то, ради чего заведена.
+        //
+        // (PrinterConnectionType)99 — тот же приём, что в
+        // CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight:
+        // нарочно вне диапазона enum, уводит EscPosPrinterService.SendAsync в
+        // default без единого байта ввода-вывода, так что тест не платит ни
+        // сетевым таймаутом, ни настоящим портом.
+        //
+        // LastTestPrintService — seam ровно как CompositePrinterService.Printers
+        // рядом: только для чтения, только для тестов, существует затем, чтобы эту
+        // проверку вообще можно было написать.
+        var settings = new FakeSettings
+        {
+            Printers = new List<PrinterConfig>
+            {
+                new() { Name = "P", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.1:9100", CodePageId = EscPosCodePages.Cp866.Id }
+            }
+        };
+        var vm = BuildWith(settings);
+
+        // Меняем на экране и НЕ сохраняем — Printers[0].SelectedCodePage расходится
+        // с тем, что лежит в settings.Printers[0].CodePageId (CP866).
+        vm.Printers[0].SelectedCodePage = EscPosCodePages.Cp1251;
+        vm.Printers[0].ConnectionType = (PrinterConnectionType)99;
+
+        await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
+
+        Assert.Same(EscPosCodePages.Cp1251, vm.LastTestPrintService?.CodePage);
     }
 
     [Fact]

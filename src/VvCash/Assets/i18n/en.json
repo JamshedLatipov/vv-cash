@@ -79,7 +79,7 @@
   "DisplayBaudRate": "Baud rate",
   "CheckDisplay": "Check display",
   "DisplayCheckOk": "Test line sent to the display",
-  "DisplayCheckFailed": "Display check failed:",
+  "DisplayCheckFailed": "Display check failed",
   "SaveConfiguration": "Save Configuration",
   "Мужской": "Male",
   "Женский": "Female",
