@@ -255,4 +255,23 @@ public class MixedPaymentViewModelTest
 
         Assert.True(raised > 0, "SellOnCreditCommand never raised CanExecuteChanged");
     }
+
+    /// <summary>The command body re-checks the rule because RelayCommand.Execute does not
+    /// consult CanExecute. A button whose IsEnabled binding has gone stale, or any direct
+    /// Execute call, reaches this path — so the guard inside SellOnCredit is a real second
+    /// barrier and not a restatement of CanSellOnCredit. Uses the constructor directly,
+    /// not the Credit() helper, because it needs to observe the completion callback and
+    /// Credit() hardwires that to a no-op.</summary>
+    [Fact]
+    public void SellOnCredit_ExecutedDirectlyPastTheLimit_DoesNotComplete()
+    {
+        var completed = false;
+        var vm = new MixedPaymentViewModel(200m, (_, _, _) => completed = true,
+                                            allowMixed: true, hasCustomer: true,
+                                            creditLimit: 0m, currentBalance: 0m);
+
+        vm.SellOnCreditCommand.Execute(null);
+
+        Assert.False(completed, "the command body let a sale past the credit limit through");
+    }
 }
