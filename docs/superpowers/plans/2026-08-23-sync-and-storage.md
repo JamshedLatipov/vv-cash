@@ -1711,6 +1711,7 @@ git commit -m "fix(payment): stop lending past the customer's credit limit"
                creditTerms: SelectedCustomer is { } c
                    ? new MixedPaymentViewModel.CreditTerms(c.CreditLimit ?? 0m, c.CurrentBalance ?? 0m)
                    : null);
+```
 
 **Сигнатура изменилась по итогам ревью качества Task 8, и не косметически.** Раньше это были
 два необязательных `decimal?`, и из них опасен был ровно один: забыть `creditLimit` значило
@@ -1725,7 +1726,6 @@ git commit -m "fix(payment): stop lending past the customer's credit limit"
 
 `?? 0m` на обеих сторонах не случайность: `COALESCE(c.credit_limit, 0)` на бэкенде уже так
 делает, и `null` здесь значит «кредит запрещён», а не «без ограничения».
-```
 
 - [ ] **Step 2: Добавить ключи во все пять локалей**
 
