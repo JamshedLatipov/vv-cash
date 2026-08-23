@@ -291,6 +291,24 @@
 
                     <!-- confirm / sell on credit -->
                     <StackPanel Grid.Row="7" Spacing="10">
+                        <StackPanel Spacing="4" IsVisible="{Binding HasCustomer}">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Grid.Column="0" Text="{Binding [CurrentBalance], Source={x:Static services:I18nService.Instance}}"
+                                           FontSize="13" Foreground="{StaticResource Slate500Brush}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding CurrentBalanceDisplay, StringFormat='{}{0:F2}'}"
+                                           FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                            </Grid>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBlock Grid.Column="0" Text="{Binding [CreditLimit], Source={x:Static services:I18nService.Instance}}"
+                                           FontSize="13" Foreground="{StaticResource Slate500Brush}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding CreditLimitDisplay, StringFormat='{}{0:F2}'}"
+                                           FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Slate700Brush}"/>
+                            </Grid>
+                            <TextBlock IsVisible="{Binding IsCreditBlocked}"
+                                       Text="{Binding [CreditLimitExceeded], Source={x:Static services:I18nService.Instance}}"
+                                       FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
+                                       Foreground="{StaticResource Red600Brush}"/>
+                        </StackPanel>
                         <Button Classes="SecondaryButton" Height="52" CornerRadius="16" HorizontalAlignment="Stretch"
                                 HorizontalContentAlignment="Center" Padding="22,0"
                                 IsVisible="{Binding HasCustomer}"

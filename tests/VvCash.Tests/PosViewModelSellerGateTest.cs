@@ -36,7 +36,7 @@ namespace VvCash.Tests;
 /// ShowDialog returns: both need a live Avalonia Window, which this xunit host never
 /// provides — that wiring was verified by reading, and the flag's own correctness (when it
 /// does and doesn't get set) is covered by ReturnsViewModelTest / ExchangeViewModelTest
-/// instead.
+/// instead.</summary>
 public class PosViewModelSellerGateTest
 {
     // ---------------------------------------------------------------------------------
