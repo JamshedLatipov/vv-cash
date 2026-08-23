@@ -123,9 +123,10 @@ public class MixedPaymentViewModelTest
     {
         // The remainder becomes the customer's debt — PosViewModel computes it
         // from TotalAmount minus what SellOnCredit hands back here, same as a
-        // normal ConfirmPayment.
+        // normal ConfirmPayment. Credit limit is not what this test is about, so it
+        // passes one with plenty of headroom for the 60 that goes on credit here.
         var completions = new List<(bool result, decimal cash, decimal card)>();
-        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => completions.Add((result, cash, card)), hasCustomer: true);
+        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => completions.Add((result, cash, card)), hasCustomer: true, creditLimit: 1000m);
         vm.CashAmount = 40m;
 
         Assert.False(vm.IsFullyPaid);
@@ -174,13 +175,67 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void SellOnCredit_CalledTwiceInARow_OnlyCompletesOnce()
     {
+        // Credit limit is not what this test is about, so it passes one with plenty
+        // of headroom for the 60 that goes on credit here.
         var completions = 0;
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; }, hasCustomer: true);
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; }, hasCustomer: true, creditLimit: 1000m);
         vm.CashAmount = 40m;
 
         vm.SellOnCreditCommand.Execute(null);
         vm.SellOnCreditCommand.Execute(null);
 
         Assert.Equal(1, completions);
+    }
+
+    private static MixedPaymentViewModel Credit(decimal total, decimal? limit, decimal? balance)
+        => new(total, (_, _, _) => { }, allowMixed: true, hasCustomer: true,
+               creditLimit: limit, currentBalance: balance);
+
+    [Fact]
+    public void SellOnCredit_ExactlyAtTheLimit_IsAllowed()
+    {
+        // Owes 400 already, limit 500, this sale adds 100 -> lands exactly on -500.
+        var vm = Credit(100m, limit: 500m, balance: -400m);
+        Assert.True(vm.SellOnCreditCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void SellOnCredit_OneCentOverTheLimit_IsBlocked()
+    {
+        var vm = Credit(100.01m, limit: 500m, balance: -400m);
+        Assert.False(vm.SellOnCreditCommand.CanExecute(null));
+    }
+
+    /// <summary>A null limit arrives as COALESCE(credit_limit, 0) does on the wire, and
+    /// zero means credit is not allowed for this customer — not that it is unlimited.</summary>
+    [Fact]
+    public void SellOnCredit_NoLimitSet_BlocksAnyDebt()
+    {
+        var vm = Credit(1m, limit: null, balance: 0m);
+        Assert.False(vm.SellOnCreditCommand.CanExecute(null));
+    }
+
+    /// <summary>Nothing is being lent, so the limit has nothing to say. Guards against
+    /// deriving the debt from TotalAmount instead of from what is still owed.</summary>
+    [Fact]
+    public void SellOnCredit_FullyTendered_IsAllowedRegardlessOfLimit()
+    {
+        var vm = Credit(100m, limit: 0m, balance: -9999m);
+        vm.CashAmount = 100m;
+        Assert.True(vm.SellOnCreditCommand.CanExecute(null));
+    }
+
+    /// <summary>The button has to re-evaluate as the cashier types. Without
+    /// NotifyCanExecuteChanged in NotifyDerived the rule is computed once, on a screen
+    /// whose amounts change constantly, and the block works only some of the time.</summary>
+    [Fact]
+    public void SellOnCredit_ReevaluatesAsAmountsChange()
+    {
+        var vm = Credit(200m, limit: 100m, balance: 0m);
+        Assert.False(vm.SellOnCreditCommand.CanExecute(null));
+
+        vm.CashAmount = 150m;   // debt drops to 50, inside the limit
+
+        Assert.True(vm.SellOnCreditCommand.CanExecute(null));
     }
 }

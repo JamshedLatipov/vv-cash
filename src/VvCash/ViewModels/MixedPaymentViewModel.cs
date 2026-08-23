@@ -42,6 +42,33 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// land in — see Payment in DocumentRequest.cs.</summary>
     public decimal PaidAmount => CashAmount + CardAmount;
     public decimal RemainingDue => Math.Max(0, RemainingAmount);
+
+    /// <summary>What would be lent if the cashier hit "sell on credit" right now: what is
+    /// still owed on this receipt. Derived the same way PosViewModel derives Remained, so
+    /// the two cannot disagree about the size of the debt they are booking.</summary>
+    public decimal CreditDebt => RemainingDue;
+
+    /// <summary>Where the customer's balance lands if this sale goes on credit.</summary>
+    public decimal ProjectedBalance => _currentBalance - CreditDebt;
+
+    /// <summary>Whether the debt fits inside the ceiling. A balance is negative when the
+    /// customer owes us, so the ceiling is -limit and the test is "not below it".
+    ///
+    /// Short-circuits on a zero (or already-overpaid) debt: a receipt that is not
+    /// borrowing anything must clear regardless of the limit, even for a customer whose
+    /// pre-existing balance already sits below -limit for unrelated reasons. Confirmed
+    /// design decision, not an inferred edge case — see the "zero debt" row of the
+    /// Problem 4 test table in docs/superpowers/specs/2026-08-23-sync-and-storage-design.md.
+    ///
+    /// Nothing on the server enforces this: credit_limit is stored and serialised and
+    /// never compared, in documents/ or anywhere else. If this does not stop the sale,
+    /// nothing does.</summary>
+    public bool IsWithinCreditLimit => CreditDebt <= 0 || ProjectedBalance >= -_creditLimit;
+
+    public decimal CreditLimitDisplay => _creditLimit;
+    public decimal CurrentBalanceDisplay => _currentBalance;
+    public bool IsCreditBlocked => HasCustomer && !IsWithinCreditLimit;
+
     public decimal ChangeAmount => Math.Max(0, -RemainingAmount);
     /// <summary>Under half a cent counts as settled. Totals reach this screen
     /// already rounded to the store's money scale, so normally the comparison is
@@ -88,12 +115,30 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// completion (document creation, printing) is still running.</summary>
     private bool _isSubmitting;
 
-    public MixedPaymentViewModel(decimal totalAmount, Action<bool, decimal, decimal> onCompletion, bool allowMixed = true, bool hasCustomer = false)
+    /// <summary>The customer's credit ceiling as the server reports it, and their current
+    /// balance. Passed as plain decimals rather than the CounterpartyResponse they came
+    /// from: this view model knows nothing about API models and should not start.
+    ///
+    /// Null reads as zero, which is how the server sends an unset limit anyway —
+    /// SearchCounterparties selects COALESCE(c.credit_limit, 0). Zero means credit is not
+    /// allowed for this customer.</summary>
+    private readonly decimal _creditLimit;
+    private readonly decimal _currentBalance;
+
+    public MixedPaymentViewModel(
+        decimal totalAmount,
+        Action<bool, decimal, decimal> onCompletion,
+        bool allowMixed = true,
+        bool hasCustomer = false,
+        decimal? creditLimit = null,
+        decimal? currentBalance = null)
     {
         TotalAmount = totalAmount;
         _onCompletion = onCompletion;
         _allowMixed = allowMixed;
         HasCustomer = hasCustomer;
+        _creditLimit = creditLimit ?? 0m;
+        _currentBalance = currentBalance ?? 0m;
         RecomputeQuickAmounts();
     }
 
@@ -105,7 +150,14 @@ public partial class MixedPaymentViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsFullyPaid));
         OnPropertyChanged(nameof(HasChange));
         OnPropertyChanged(nameof(ProgressPercent));
+        OnPropertyChanged(nameof(CreditDebt));
+        OnPropertyChanged(nameof(ProjectedBalance));
+        OnPropertyChanged(nameof(IsWithinCreditLimit));
+        OnPropertyChanged(nameof(IsCreditBlocked));
         ConfirmPaymentCommand.NotifyCanExecuteChanged();
+        // Not optional: the rule depends on the amounts, and this screen's amounts change
+        // with every keypress. Without this line the block works only some of the time.
+        SellOnCreditCommand.NotifyCanExecuteChanged();
         RecomputeQuickAmounts();
     }
 
@@ -158,7 +210,7 @@ public partial class MixedPaymentViewModel : ViewModelBase
         Submit();
     }
 
-    private bool CanSellOnCredit() => HasCustomer && !_isSubmitting;
+    private bool CanSellOnCredit() => HasCustomer && !_isSubmitting && IsWithinCreditLimit;
 
     /// <summary>Books the sale with whatever has been tendered so far and lets
     /// the rest ride as the selected customer's debt — PosViewModel derives the
@@ -167,7 +219,7 @@ public partial class MixedPaymentViewModel : ViewModelBase
     [RelayCommand(CanExecute = nameof(CanSellOnCredit))]
     private void SellOnCredit()
     {
-        if (!HasCustomer || _isSubmitting) return;
+        if (!HasCustomer || _isSubmitting || !IsWithinCreditLimit) return;
         Submit();
     }
 
