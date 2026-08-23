@@ -39,7 +39,7 @@
   | `Assets/i18n/*.json` (все пять) | **есть** |
   | **все остальные 191** | нет |
 
-  Концы строк — CRLF везде, одиночных LF нет нигде. Из задач этого батча BOM касаются `SyncService.cs` (Task 4) и `PosViewModelSellerGateTest.cs` (задет в Task 3 как одна из шести заглушек).
+  Концы строк — **почти** везде CRLF. Четыре файла чисто-LF, измерено: `Services/ProductImageLoader.cs`, `tests/AppVersionProviderTest.cs`, `tests/PhoneFormatTest.cs`, `tests/UpdateViewModelTest.cs`. Правя любой из них, сохранять LF, а не «чинить» на CRLF — это раздует дифф на весь файл. Первая редакция плана утверждала «одиночных LF нет нигде»; неверно, поймано исполнителем Task 12.
 
   Правка, снявшая BOM с локали, ломает её загрузку молча. Правка, **добавившая** BOM туда, где его не было, — лишний шум в диффе. Снимать байтовый слепок до и после каждой правки:
 
@@ -2236,7 +2236,11 @@ public class LruCache<TKey, TValue> where TKey : notnull
 
 - [ ] **Step 5: Мутация**
 
-1. Убрать блок `while (_map.Count > _capacity) { ... }` из `GetOrAdd`. Ожидание: первый и третий тесты красные. Вернуть.
+1. Убрать блок `while (_map.Count > _capacity) { ... }` из `GetOrAdd`. Ожидание: красные **все три** теста. Вернуть.
+
+   Первая редакция предсказывала два из трёх. Третий, `GetOrAdd_TouchingAnEntry_MakesItTheNewest`,
+   тоже краснеет: его последнее утверждение `Assert.False(cache.TryGet("b", out _))` опирается на
+   то, что вытеснение вообще произошло. Сигнал сильнее предсказанного, а не слабее.
 2. Убрать `Touch(existing)` из ветки попадания в `GetOrAdd`. Ожидание: `GetOrAdd_TouchingAnEntry_MakesItTheNewest` красный. Вернуть.
 3. Добавить `(oldest.Value.Value as IDisposable)?.Dispose();` в вытеснение. Ожидание: `Eviction_HandsBackAValueThatIsStillUsable` красный. **Вернуть обязательно** — это и есть тот баг, от которого тест сторожит.
 
@@ -2301,7 +2305,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify --no-incremental
 & ./run-tests.ps1
 ```
 
-Ожидание: **одно** предупреждение, 777 passed.
+Ожидание: **одно** предупреждение, прежний итог плюс добавленные этой задачей тесты.
 
 - [ ] **Step 8: Коммит**
 
@@ -2332,7 +2336,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify --no-incremental
 & ./run-tests.ps1
 ```
 
-Ожидание: 777 passed, три раза подряд.
+Ожидание: прежний итог плюс добавленные этой задачей тесты, три раза подряд.
 
 Если упал случайный посторонний тест — посмотреть стек. Гонка Avalonia Dispatcher известна и к этому батчу отношения не имеет. Если упал новый тест конкурентной инициализации — это уже наш флак, и его надо либо укрепить, либо удалить с записью в долг.
 
