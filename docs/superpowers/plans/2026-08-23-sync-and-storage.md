@@ -1115,8 +1115,13 @@ public class CashRemainPage
                     if (!string.IsNullOrEmpty(item.ProductId))
                         collected[item.ProductId] = item.Quantity;
 
-                // Read on every page rather than once: a page count that shrinks mid-walk
-                // still terminates, and one that grows is followed.
+                // Read on every page rather than once: a page count that shrinks
+                // mid-walk still terminates, and one that grows is followed — a
+                // catalogue can legitimately gain a page while the walk is running.
+                // Bounded by MaxPages above, because "followed" without an end means
+                // a server that increments the count on every response keeps this
+                // loop going forever, on a background thread, on a till that runs
+                // for months. Measured: it will do exactly that.
                 pageCount = parsed.PageCount > 0 ? parsed.PageCount : 1;
                 page++;
             }
@@ -1144,6 +1149,7 @@ public class CashRemainPage
 1. Заменить `while (page <= pageCount)` на `while (page <= 1)`. Ожидание: `FetchAllRemainsAsync_WalksEveryPage` красный на количестве. Вернуть.
 2. Заменить `return null;` в ветке не-2xx на `break;`. Ожидание: `FetchAllRemainsAsync_SecondPageFails_ReturnsNull` красный — вернётся карта с одной страницей вместо null. Вернуть. **Это главная мутация батча.**
 3. Заменить `return null` в `catch` на `return collected`. Ожидание: `FetchAllRemainsAsync_TransportThrows_ReturnsNull` красный. Вернуть.
+4. Убрать проверку потолка `MaxPages`. Ожидание: `FetchAllRemainsAsync_PageCountKeepsGrowing_AbandonsTheWalk` красный на счётчике запросов, а не зависание. У теста обязан быть собственный предел запросов, иначе снятие потолка вешает прогон вместо того, чтобы его уронить. Вернуть.
 
 - [ ] **Step 7: Коммит**
 
