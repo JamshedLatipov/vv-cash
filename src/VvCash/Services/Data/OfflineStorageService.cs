@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -49,144 +50,7 @@ public class OfflineStorageService : IOfflineStorageService
         {
             if (_isInitialized) return;
 
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-
-            using var command = connection.CreateCommand();
-
-            command.CommandText = @"
-                CREATE TABLE IF NOT EXISTS Settings (
-                    Key TEXT PRIMARY KEY,
-                    Value TEXT
-                );
-
-                -- RejectedAt/RejectedReason are NULL for a document still waiting its turn.
-                -- A non-null RejectedAt means the server answered, on the merits, that it
-                -- will not take this document: it leaves the retry rotation but stays on
-                -- disk, because it is still the only record of what the register booked.
-                CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
-                    Hash TEXT PRIMARY KEY,
-                    Payload TEXT,
-                    RejectedAt TEXT,
-                    RejectedReason TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS Categories (
-                    Id TEXT PRIMARY KEY,
-                    Name TEXT NOT NULL,
-                    IsQuickAccess INTEGER NOT NULL DEFAULT 0,
-                    ImageUrl TEXT,
-                    ParentId TEXT
-                );
-
-                CREATE TABLE IF NOT EXISTS Products (
-                    Id TEXT PRIMARY KEY,
-                    Name TEXT NOT NULL,
-                    Sku TEXT,
-                    Category TEXT,
-                    Price REAL NOT NULL,
-                    OriginalPrice REAL,
-                    DiscountPercent REAL,
-                    ImagePath TEXT,
-                    Barcode TEXT,
-                    Tags TEXT,
-                    UnitId TEXT,
-                    UnitCode TEXT,
-                    UnitShortName TEXT,
-                    UnitFactor REAL,
-                    IsDivisible INTEGER,
-                    SellInSecondaryUnit INTEGER,
-                    -- Name, Sku and Barcode joined and lowercased, for the POS search box.
-                    -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
-                    -- only: an all-caps Cyrillic query would never match its own product, and
-                    -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
-                    SearchText TEXT
-                );
-
-                -- Auto-applied promotions, stored as the raw server payload: the rules
-                -- and targets are nested lists that would need two more tables and a
-                -- join to reassemble, and nothing here ever queries into them.
-                CREATE TABLE IF NOT EXISTS Promotions (
-                    Id TEXT PRIMARY KEY,
-                    Payload TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS ParkedSales (
-                    Id TEXT PRIMARY KEY,
-                    Label TEXT,
-                    CustomerName TEXT,
-                    Total REAL NOT NULL,
-                    -- REAL, not INTEGER: a weighted line contributes a fraction of a unit.
-                    -- SQLite's dynamic typing keeps rows written under the old declaration readable.
-                    ItemCount REAL NOT NULL,
-                    CreatedAt TEXT NOT NULL,
-                    Payload TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS Sellers (
-                    Id TEXT PRIMARY KEY,
-                    FirstName TEXT NOT NULL,
-                    LastName TEXT,
-                    PinHash TEXT,
-                    CanSell INTEGER NOT NULL DEFAULT 1,
-                    CanRefund INTEGER NOT NULL DEFAULT 0,
-                    CanCloseShift INTEGER NOT NULL DEFAULT 0,
-                    MaxDiscount REAL NOT NULL DEFAULT 0
-                );
-
-                -- Create indices for performance
-                CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);
-                CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);
-            ";
-
-            await command.ExecuteNonQueryAsync();
-
-            // Ensure LastSyncVersion setting exists
-            command.CommandText = "INSERT OR IGNORE INTO Settings (Key, Value) VALUES ('LastSyncVersion', '0');";
-            await command.ExecuteNonQueryAsync();
-
-            // Migrations for a database created before a column existed. Every one of these
-            // is expected to fail on a register that already has the column, and expected to
-            // succeed exactly once on one that does not.
-            await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;");
-            await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ParentId TEXT;");
-            await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN Tags TEXT;");
-
-            // Migration: the rejected-document columns. A register upgrading with documents
-            // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
-            // which is exactly what they are.
-            foreach (var alter in new[]
-            {
-                "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedAt TEXT;",
-                "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedReason TEXT;",
-            })
-            {
-                try
-                {
-                    command.CommandText = alter;
-                    await command.ExecuteNonQueryAsync();
-                }
-                catch { /* column already exists */ }
-            }
-
-            // Migration: add the secondary-unit columns to Products if upgrading
-            // from an older DB. One ALTER per column, because a register may be
-            // upgrading from any point in this sequence.
-            foreach (var alter in new[]
-            {
-                "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
-                "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
-                "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
-                "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
-                "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
-                "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
-                "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
-            })
-            {
-                await AddColumnIfMissingAsync(command, alter);
-            }
-
-            await BackfillSearchTextAsync(connection);
+            await InitializeCoreAsync();
 
             _isInitialized = true;
         }
@@ -194,6 +58,213 @@ public class OfflineStorageService : IOfflineStorageService
         {
             _initLock.Release();
         }
+    }
+
+    /// <summary>Everything InitializeAsync does once it has decided it is the one doing
+    /// it: schema, additive column migrations, the REAL-to-TEXT table rebuilds, and the
+    /// SearchText backfill. Split out so the guard above stays readable — the same shape
+    /// UpdateService.DownloadAsync uses around DownloadCoreAsync.</summary>
+    private async Task InitializeCoreAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+
+        command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS Settings (
+                Key TEXT PRIMARY KEY,
+                Value TEXT
+            );
+
+            -- RejectedAt/RejectedReason are NULL for a document still waiting its turn.
+            -- A non-null RejectedAt means the server answered, on the merits, that it
+            -- will not take this document: it leaves the retry rotation but stays on
+            -- disk, because it is still the only record of what the register booked.
+            CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
+                Hash TEXT PRIMARY KEY,
+                Payload TEXT,
+                RejectedAt TEXT,
+                RejectedReason TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS Categories (
+                Id TEXT PRIMARY KEY,
+                Name TEXT NOT NULL,
+                IsQuickAccess INTEGER NOT NULL DEFAULT 0,
+                ImageUrl TEXT,
+                ParentId TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS Products (
+                Id TEXT PRIMARY KEY,
+                Name TEXT NOT NULL,
+                Sku TEXT,
+                Category TEXT,
+                -- TEXT, not REAL: REAL affinity converts what is written to a float,
+                -- and these are money. Microsoft.Data.Sqlite writes decimal to TEXT
+                -- culture-invariantly (measured under ru-RU), and GetDecimal reads it
+                -- back exactly. See the batch C spec for the measurement.
+                Price TEXT NOT NULL,
+                OriginalPrice TEXT,
+                DiscountPercent TEXT,
+                ImagePath TEXT,
+                Barcode TEXT,
+                Tags TEXT,
+                UnitId TEXT,
+                UnitCode TEXT,
+                UnitShortName TEXT,
+                UnitFactor TEXT,
+                IsDivisible INTEGER,
+                SellInSecondaryUnit INTEGER,
+                -- Name, Sku and Barcode joined and lowercased, for the POS search box.
+                -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
+                -- only: an all-caps Cyrillic query would never match its own product, and
+                -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
+                SearchText TEXT,
+                -- Stock for this register's warehouse as of the last complete
+                -- reconciliation walk. NULL means the walk has never completed, and the
+                -- register behaves exactly as it did before the walk existed.
+                StockQuantity TEXT
+            );
+
+            -- Auto-applied promotions, stored as the raw server payload: the rules
+            -- and targets are nested lists that would need two more tables and a
+            -- join to reassemble, and nothing here ever queries into them.
+            CREATE TABLE IF NOT EXISTS Promotions (
+                Id TEXT PRIMARY KEY,
+                Payload TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ParkedSales (
+                Id TEXT PRIMARY KEY,
+                Label TEXT,
+                CustomerName TEXT,
+                Total TEXT NOT NULL,
+                -- TEXT, and not INTEGER, for the same reason it was never INTEGER: a
+                -- weighted line contributes a fraction of a unit. TEXT rather than REAL
+                -- because a fraction is exactly what a float rounds.
+                ItemCount TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                Payload TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS Sellers (
+                Id TEXT PRIMARY KEY,
+                FirstName TEXT NOT NULL,
+                LastName TEXT,
+                PinHash TEXT,
+                CanSell INTEGER NOT NULL DEFAULT 1,
+                CanRefund INTEGER NOT NULL DEFAULT 0,
+                CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                MaxDiscount TEXT NOT NULL DEFAULT '0'
+            );
+
+            -- Create indices for performance
+            CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);
+            CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);
+        ";
+
+        await command.ExecuteNonQueryAsync();
+
+        // Ensure LastSyncVersion setting exists
+        command.CommandText = "INSERT OR IGNORE INTO Settings (Key, Value) VALUES ('LastSyncVersion', '0');";
+        await command.ExecuteNonQueryAsync();
+
+        // Migrations for a database created before a column existed. Every one of these
+        // is expected to fail on a register that already has the column, and expected to
+        // succeed exactly once on one that does not.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;");
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ParentId TEXT;");
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN Tags TEXT;");
+
+        // Migration: the rejected-document columns. A register upgrading with documents
+        // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
+        // which is exactly what they are.
+        foreach (var alter in new[]
+        {
+            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedAt TEXT;",
+            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedReason TEXT;",
+        })
+        {
+            try
+            {
+                command.CommandText = alter;
+                await command.ExecuteNonQueryAsync();
+            }
+            catch { /* column already exists */ }
+        }
+
+        // Migration: add the secondary-unit columns to Products if upgrading
+        // from an older DB. One ALTER per column, because a register may be
+        // upgrading from any point in this sequence.
+        foreach (var alter in new[]
+        {
+            "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
+            "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
+            "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
+            "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
+            "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
+            "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
+            "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
+        })
+        {
+            await AddColumnIfMissingAsync(command, alter);
+        }
+
+        // Migration: money columns move from REAL to TEXT. Runs only on a register whose
+        // Products was created before this landed — on a fresh database the schema block
+        // above already declared TEXT and the probe below is a no-op.
+        if (await DeclaredTypeAsync(connection, "Products", "Price") == "REAL")
+        {
+            await RebuildTableAsync(connection, "Products", @"
+                CREATE TABLE Products_new (
+                    Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
+                    Price TEXT NOT NULL, OriginalPrice TEXT, DiscountPercent TEXT,
+                    ImagePath TEXT, Barcode TEXT, Tags TEXT,
+                    UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor TEXT,
+                    IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT,
+                    StockQuantity TEXT
+                );",
+                // StockQuantity is deliberately absent from the copy list: the old table
+                // has no such column, and NULL is the correct starting value anyway.
+                "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, "
+                + "Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, "
+                + "SellInSecondaryUnit, SearchText",
+                "CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);",
+                "CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);");
+        }
+
+        if (await DeclaredTypeAsync(connection, "ParkedSales", "Total") == "REAL")
+        {
+            await RebuildTableAsync(connection, "ParkedSales", @"
+                CREATE TABLE ParkedSales_new (
+                    Id TEXT PRIMARY KEY, Label TEXT, CustomerName TEXT,
+                    Total TEXT NOT NULL, ItemCount TEXT NOT NULL,
+                    CreatedAt TEXT NOT NULL, Payload TEXT NOT NULL
+                );",
+                "Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload");
+        }
+
+        if (await DeclaredTypeAsync(connection, "Sellers", "MaxDiscount") == "REAL")
+        {
+            await RebuildTableAsync(connection, "Sellers", @"
+                CREATE TABLE Sellers_new (
+                    Id TEXT PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT,
+                    PinHash TEXT, CanSell INTEGER NOT NULL DEFAULT 1,
+                    CanRefund INTEGER NOT NULL DEFAULT 0,
+                    CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                    MaxDiscount TEXT NOT NULL DEFAULT '0'
+                );",
+                "Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount");
+        }
+
+        // Belt and braces for a database that already has TEXT columns but predates
+        // StockQuantity. Cannot happen from a released build — the two shipped together —
+        // but a hand-migrated register is cheap to tolerate and expensive to debug.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN StockQuantity TEXT;");
+
+        await BackfillSearchTextAsync(connection);
     }
 
     /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it is.
@@ -222,6 +293,48 @@ public class OfflineStorageService : IOfflineStorageService
             // specific error.
             Console.WriteLine($"[OfflineStorageService] Migration failed ({alter}): {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>The declared type of one column, or "" when the table or column is
+    /// absent. Declared type, not storage class: SQLite reports what CREATE TABLE said,
+    /// which is exactly the thing this migration changes.</summary>
+    private static async Task<string> DeclaredTypeAsync(SqliteConnection connection, string table, string column)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT type FROM pragma_table_info('{table}') WHERE name = $c;";
+        cmd.Parameters.AddWithValue("$c", column);
+        return (await cmd.ExecuteScalarAsync()) as string ?? string.Empty;
+    }
+
+    /// <summary>Rebuilds a table under a new column declaration, because SQLite has no
+    /// ALTER COLUMN. Rows are copied, not dropped: a register that upgrades while
+    /// offline would otherwise be left with no catalogue and nothing to sell until the
+    /// next successful sync.
+    ///
+    /// <paramref name="indexes"/> is not optional housekeeping. Indices are created in
+    /// the schema block that already ran earlier in this same InitializeAsync, and the
+    /// DROP TABLE below takes them with the table.</summary>
+    private static async Task RebuildTableAsync(
+        SqliteConnection connection, string table, string createNewSql,
+        string copiedColumns, params string[] indexes)
+    {
+        using var tx = connection.BeginTransaction();
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+
+        foreach (var sql in new[]
+        {
+            createNewSql,
+            $"INSERT INTO {table}_new ({copiedColumns}) SELECT {copiedColumns} FROM {table};",
+            $"DROP TABLE {table};",
+            $"ALTER TABLE {table}_new RENAME TO {table};",
+        }.Concat(indexes))
+        {
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await tx.CommitAsync();
     }
 
     /// <summary>Fills SearchText for rows written before the column existed. Adding the
@@ -309,16 +422,16 @@ public class OfflineStorageService : IOfflineStorageService
         var nameParam = command.Parameters.Add("$Name", SqliteType.Text);
         var skuParam = command.Parameters.Add("$Sku", SqliteType.Text);
         var categoryParam = command.Parameters.Add("$Category", SqliteType.Text);
-        var priceParam = command.Parameters.Add("$Price", SqliteType.Real);
-        var origPriceParam = command.Parameters.Add("$OriginalPrice", SqliteType.Real);
-        var discountParam = command.Parameters.Add("$DiscountPercent", SqliteType.Real);
+        var priceParam = command.Parameters.Add("$Price", SqliteType.Text);
+        var origPriceParam = command.Parameters.Add("$OriginalPrice", SqliteType.Text);
+        var discountParam = command.Parameters.Add("$DiscountPercent", SqliteType.Text);
         var imageParam = command.Parameters.Add("$ImagePath", SqliteType.Text);
         var barcodeParam = command.Parameters.Add("$Barcode", SqliteType.Text);
         var tagsParam = command.Parameters.Add("$Tags", SqliteType.Text);
         var unitIdParam = command.Parameters.Add("$UnitId", SqliteType.Text);
         var unitCodeParam = command.Parameters.Add("$UnitCode", SqliteType.Text);
         var unitShortNameParam = command.Parameters.Add("$UnitShortName", SqliteType.Text);
-        var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Real);
+        var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Text);
         var isDivisibleParam = command.Parameters.Add("$IsDivisible", SqliteType.Integer);
         var sellInUnitParam = command.Parameters.Add("$SellInSecondaryUnit", SqliteType.Integer);
         var searchTextParam = command.Parameters.Add("$SearchText", SqliteType.Text);
@@ -959,7 +1072,7 @@ public class OfflineStorageService : IOfflineStorageService
         var canSellParam = command.Parameters.Add("$CanSell", SqliteType.Integer);
         var canRefundParam = command.Parameters.Add("$CanRefund", SqliteType.Integer);
         var canCloseShiftParam = command.Parameters.Add("$CanCloseShift", SqliteType.Integer);
-        var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Real);
+        var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
         foreach (var s in sellers)
         {

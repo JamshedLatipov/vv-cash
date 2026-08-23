@@ -340,4 +340,109 @@ public class OfflineStorageServiceTest : IDisposable
 
         Assert.Empty(await _service.SearchProductsAsync("   "));
     }
+
+    /// <summary>Builds a database in the pre-migration shape and checks that
+    /// InitializeAsync rebuilds it: declared types become TEXT, the row survives, the
+    /// indices come back, and the new StockQuantity column is there.
+    ///
+    /// The indices matter and are easy to lose: they are created in the schema block
+    /// that runs earlier in the same InitializeAsync, and DROP TABLE takes them with
+    /// the table.</summary>
+    [Fact]
+    public async Task InitializeAsync_UpgradingFromRealColumns_RebuildsAsTextAndKeepsRows()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"vvcash-migrate-{Guid.NewGuid()}.db");
+        try
+        {
+            using (var seed = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                await seed.OpenAsync();
+                using var cmd = seed.CreateCommand();
+                cmd.CommandText = @"
+                    CREATE TABLE Products (
+                        Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
+                        Price REAL NOT NULL, OriginalPrice REAL, DiscountPercent REAL,
+                        ImagePath TEXT, Barcode TEXT, Tags TEXT,
+                        UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor REAL,
+                        IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT
+                    );
+                    INSERT INTO Products (Id, Name, Price, UnitFactor, SearchText)
+                    VALUES ('p-1', 'Товар', 19.99, 2.5, 'товар');
+                ";
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            await new OfflineStorageService(dbPath).InitializeAsync();
+
+            using var check = new SqliteConnection($"Data Source={dbPath}");
+            await check.OpenAsync();
+
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Products", "Price"));
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Products", "OriginalPrice"));
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Products", "DiscountPercent"));
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Products", "UnitFactor"));
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Products", "StockQuantity"));
+
+            using (var cmd = check.CreateCommand())
+            {
+                cmd.CommandText = "SELECT Name, Price, UnitFactor FROM Products WHERE Id = 'p-1';";
+                using var rd = await cmd.ExecuteReaderAsync();
+                Assert.True(await rd.ReadAsync());
+                Assert.Equal("Товар", rd.GetString(0));
+                Assert.Equal(19.99m, rd.GetDecimal(1));
+                Assert.Equal(2.5m, rd.GetDecimal(2));
+            }
+
+            using (var cmd = check.CreateCommand())
+            {
+                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='Products';";
+                var found = new List<string>();
+                using var rd = await cmd.ExecuteReaderAsync();
+                while (await rd.ReadAsync()) found.Add(rd.GetString(0));
+                Assert.Contains("IDX_Products_Category", found);
+                Assert.Contains("IDX_Products_Barcode", found);
+            }
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(dbPath + suffix)) File.Delete(dbPath + suffix);
+        }
+    }
+
+    private static async Task<string> DeclaredTypeAsync(SqliteConnection connection, string table, string column)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT type FROM pragma_table_info('{table}') WHERE name = $c;";
+        cmd.Parameters.AddWithValue("$c", column);
+        return (await cmd.ExecuteScalarAsync()) as string ?? string.Empty;
+    }
+
+    /// <summary>The value matters more than the assertion. 19.99 or 1234.56 round-trip
+    /// through REAL without loss, so a test using one of those would pass before and
+    /// after the migration — a green test guarding nothing. These two were measured to
+    /// break under REAL: 1.000000000000001 reads back as 1.0, and 12345678901234.56 as
+    /// 12345678901234.6. Reverting either column to REAL turns this test red, which is
+    /// the whole point of it.</summary>
+    [Fact]
+    public async Task SaveProductsAsync_ValuesThatDoNotSurviveDouble_RoundTripExactly()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product
+            {
+                Id = "p-precise",
+                Name = "Точность",
+                Price = 12345678901234.56m,
+                UnitFactor = 1.000000000000001m,
+            }
+        });
+
+        var loaded = (await _service.GetAllProductsAsync()).Single(p => p.Id == "p-precise");
+
+        Assert.Equal(12345678901234.56m, loaded.Price);
+        Assert.Equal(1.000000000000001m, loaded.UnitFactor);
+    }
 }
