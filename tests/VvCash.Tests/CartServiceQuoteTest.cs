@@ -221,6 +221,12 @@ public class CartServiceQuoteTest
     // the register sends, so a register whose product cache has gone stale must show
     // and charge the server's price, not its own.
 
+    /// <summary>Leaves Quantity at its 0m default, deliberately — that default is the
+    /// only thing pinning ApplyQuotedPrices's <c>line.Quantity > 0</c> guard against
+    /// division by zero, for the tests below that use this builder. Giving this a
+    /// "more realistic" quantity would silently delete the guard's only coverage while
+    /// the suite stayed green. QuoteWithDiscountedLine, further down, is the builder
+    /// for tests that need a real quantity on the line.</summary>
     private static QuoteResult QuoteWithLine(string productId, decimal unitPrice, decimal discountTotal = 0m) => new()
     {
         QuoteId = "q1",
@@ -311,16 +317,23 @@ public class CartServiceQuoteTest
     }
 
     /// <summary>The same input has to produce the same number the exchange screen
-    /// produces, because both render it as "what came off this line".</summary>
+    /// produces, because both render it as "what came off this line". The cart's
+    /// quantity (5) and the quote line's quantity (4) are deliberately different: the
+    /// requote is debounced, so between a quantity change and the replacement quote
+    /// landing the two disagree, and the arithmetic must divide by the quote line's own
+    /// quantity — not the cart's live one — or this screen and the exchange screen would
+    /// show different numbers for the same promotion at the same moment. Do not "fix"
+    /// the mismatch by making the two agree; that would silently delete the only thing
+    /// this test catches.</summary>
     [Fact]
     public void ApplyQuote_MatchesTheExchangeScreensArithmetic()
     {
         // Exactly what ExchangeViewModel.ApplyIssuedQuote computes for this line.
         var expected = 7m / 4m;
 
-        var c = CartWith(25m, 4);
+        var c = CartWith(25m, 5);      // the cart has already moved to 5
         c.ApplyQuote(QuoteWithDiscountedLine("p1", quantity: 4m, unitPrice: 25m,
-                                             discountAmount: 7m, discountPercent: 7m));
+                                             discountAmount: 7m, discountPercent: 15m));
 
         Assert.Equal(expected, c.Items[0].QuotedUnitDiscount);
     }
