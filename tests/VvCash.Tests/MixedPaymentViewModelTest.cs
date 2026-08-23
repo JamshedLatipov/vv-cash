@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using VvCash.ViewModels;
 using Xunit;
+using CreditTerms = VvCash.ViewModels.MixedPaymentViewModel.CreditTerms;
 
 namespace VvCash.Tests;
 
@@ -126,7 +127,7 @@ public class MixedPaymentViewModelTest
         // normal ConfirmPayment. Credit limit is not what this test is about, so it
         // passes one with plenty of headroom for the 60 that goes on credit here.
         var completions = new List<(bool result, decimal cash, decimal card)>();
-        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => completions.Add((result, cash, card)), hasCustomer: true, creditLimit: 1000m);
+        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => completions.Add((result, cash, card)), hasCustomer: true, creditTerms: new CreditTerms(1000m, 0m));
         vm.CashAmount = 40m;
 
         Assert.False(vm.IsFullyPaid);
@@ -178,7 +179,7 @@ public class MixedPaymentViewModelTest
         // Credit limit is not what this test is about, so it passes one with plenty
         // of headroom for the 60 that goes on credit here.
         var completions = 0;
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; }, hasCustomer: true, creditLimit: 1000m);
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; }, hasCustomer: true, creditTerms: new CreditTerms(1000m, 0m));
         vm.CashAmount = 40m;
 
         vm.SellOnCreditCommand.Execute(null);
@@ -187,9 +188,12 @@ public class MixedPaymentViewModelTest
         Assert.Equal(1, completions);
     }
 
+    // limit: null keeps creditTerms itself null (no customer credit info at all), same
+    // as omitting the constructor argument — distinct from a limit of 0, which is a
+    // real CreditTerms that forbids any debt.
     private static MixedPaymentViewModel Credit(decimal total, decimal? limit, decimal? balance)
         => new(total, (_, _, _) => { }, allowMixed: true, hasCustomer: true,
-               creditLimit: limit, currentBalance: balance);
+               creditTerms: limit is null ? null : new CreditTerms(limit.Value, balance ?? 0m));
 
     [Fact]
     public void SellOnCredit_ExactlyAtTheLimit_IsAllowed()
@@ -268,10 +272,44 @@ public class MixedPaymentViewModelTest
         var completed = false;
         var vm = new MixedPaymentViewModel(200m, (_, _, _) => completed = true,
                                             allowMixed: true, hasCustomer: true,
-                                            creditLimit: 0m, currentBalance: 0m);
+                                            creditTerms: new CreditTerms(0m, 0m));
 
         vm.SellOnCreditCommand.Execute(null);
 
         Assert.False(completed, "the command body let a sale past the credit limit through");
+    }
+
+    /// <summary>Same shape as ExactTender_SettlesATotalThatStillCarriesSubCentFractions:
+    /// paying the rounded ExactAmount against a total with a sub-cent fraction leaves a
+    /// residue inside IsFullyPaid's half-cent tolerance but strictly above zero. CreditDebt
+    /// is never negative — Math.Max(0, ...) sees to that — so that residue reads as real,
+    /// unpayable debt to a check that only ever asks "is it &lt;= 0", and blocks credit for
+    /// a customer with no room to spare at all.</summary>
+    [Fact]
+    public void SellOnCredit_SettledWithinTolerance_IsAllowedEvenAtZeroLimit()
+    {
+        var vm = new MixedPaymentViewModel(621.884m, (_, _, _) => { },
+                                            allowMixed: true, hasCustomer: true,
+                                            creditTerms: new CreditTerms(0m, 0m));
+
+        vm.SetQuickAmountCommand.Execute(vm.ExactAmount);
+
+        Assert.True(vm.IsFullyPaid);
+        Assert.True(vm.SellOnCreditCommand.CanExecute(null));
+    }
+
+    /// <summary>IsCreditBlocked is what Task 9's screen binds to show the "debt would
+    /// exceed the limit" message, and its "HasCustomer &amp;&amp;" half has no test of its own:
+    /// every SellOnCredit scenario above already has a customer. The numbers here would
+    /// trip IsWithinCreditLimit on their own; HasCustomer is what must still gate the
+    /// blocked flag when there is no customer to block.</summary>
+    [Fact]
+    public void IsCreditBlocked_WithNoCustomer_IsFalseRegardlessOfNumbers()
+    {
+        var vm = new MixedPaymentViewModel(1000m, (_, _, _) => { },
+                                            allowMixed: true, hasCustomer: false,
+                                            creditTerms: new CreditTerms(0m, -9999m));
+
+        Assert.False(vm.IsCreditBlocked);
     }
 }

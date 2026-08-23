@@ -42,6 +42,17 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// land in — see Payment in DocumentRequest.cs.</summary>
     public decimal PaidAmount => CashAmount + CardAmount;
     public decimal RemainingDue => Math.Max(0, RemainingAmount);
+    public decimal ChangeAmount => Math.Max(0, -RemainingAmount);
+    /// <summary>Under half a cent counts as settled. Totals reach this screen
+    /// already rounded to the store's money scale, so normally the comparison is
+    /// exact; the tolerance is there so that an amount which slips through
+    /// unrounded cannot deadlock the receipt, showing "remaining 0.00" next to a
+    /// confirm button that refuses to enable.</summary>
+    public bool IsFullyPaid => RemainingAmount < 0.005m;
+    public bool HasChange => ChangeAmount > 0;
+    public double ProgressPercent => TotalAmount > 0
+        ? Math.Min(100.0, (double)(PaidAmount / TotalAmount) * 100.0)
+        : 100.0;
 
     /// <summary>What would be lent if the cashier hit "sell on credit" right now: what is
     /// still owed on this receipt. Derived the same way PosViewModel derives Remained, so
@@ -54,35 +65,28 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// <summary>Whether the debt fits inside the ceiling. A balance is negative when the
     /// customer owes us, so the ceiling is -limit and the test is "not below it".
     ///
-    /// A fully tendered receipt lends nothing, so the ceiling has nothing to say about
-    /// it — that is what the CreditDebt <= 0 short-circuit below is for. Without it, a
-    /// customer whose pre-existing balance already sits below -limit for unrelated
-    /// reasons would be blocked from paying in full, even though nothing new is being
-    /// lent. It reads as a redundant guard in isolation; it is not one.
+    /// Defers to IsFullyPaid rather than testing CreditDebt &lt;= 0 directly, and
+    /// deliberately so: IsFullyPaid already carries the half-cent tolerance that keeps an
+    /// unrounded total (the 621.884-against-621.88 exact-tender case elsewhere in this
+    /// file) from deadlocking the confirm button — see the comment on IsFullyPaid. Testing
+    /// CreditDebt &lt;= 0 here instead would reintroduce that same deadlock one screen
+    /// element to the right: the confirm button enables on "remaining 0.00", but the
+    /// credit button reports blocked over a residue nobody can see or pay, for a customer
+    /// whose real debt is zero. Deferring to IsFullyPaid ties the two to one definition of
+    /// "settled" so they cannot drift apart later.
     ///
+    /// A fully tendered receipt lends nothing, so the ceiling has nothing to say about it.
     /// Confirmed design decision, not an inferred edge case — see the "zero debt" row of
     /// the Problem 4 test table in docs/superpowers/specs/2026-08-23-sync-and-storage-design.md.
     ///
     /// Nothing on the server enforces this: credit_limit is stored and serialised and
     /// never compared, in documents/ or anywhere else. If this does not stop the sale,
     /// nothing does.</summary>
-    public bool IsWithinCreditLimit => CreditDebt <= 0 || ProjectedBalance >= -_creditLimit;
+    public bool IsWithinCreditLimit => IsFullyPaid || ProjectedBalance >= -_creditLimit;
 
     public decimal CreditLimitDisplay => _creditLimit;
     public decimal CurrentBalanceDisplay => _currentBalance;
     public bool IsCreditBlocked => HasCustomer && !IsWithinCreditLimit;
-
-    public decimal ChangeAmount => Math.Max(0, -RemainingAmount);
-    /// <summary>Under half a cent counts as settled. Totals reach this screen
-    /// already rounded to the store's money scale, so normally the comparison is
-    /// exact; the tolerance is there so that an amount which slips through
-    /// unrounded cannot deadlock the receipt, showing "remaining 0.00" next to a
-    /// confirm button that refuses to enable.</summary>
-    public bool IsFullyPaid => RemainingAmount < 0.005m;
-    public bool HasChange => ChangeAmount > 0;
-    public double ProgressPercent => TotalAmount > 0
-        ? Math.Min(100.0, (double)(PaidAmount / TotalAmount) * 100.0)
-        : 100.0;
 
     // Quick-tender: exact remaining + round-ups (for cash payments)
     public decimal ExactAmount { get; private set; }
@@ -118,13 +122,21 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// completion (document creation, printing) is still running.</summary>
     private bool _isSubmitting;
 
-    /// <summary>The customer's credit ceiling as the server reports it, and their current
-    /// balance. Passed as plain decimals rather than the CounterpartyResponse they came
-    /// from: this view model knows nothing about API models and should not start.
+    /// <summary>The customer's credit ceiling and their balance, as the server reports
+    /// them. One value rather than two optional parameters because the pair is only
+    /// meaningful together: supplying a limit while forgetting the balance reads as "no
+    /// existing debt" and silently opens the gate, and the constructor's call site is a
+    /// hundred lines of lambda away from the constructor name.
     ///
-    /// Null reads as zero, which is how the server sends an unset limit anyway —
-    /// SearchCounterparties selects COALESCE(c.credit_limit, 0). Zero means credit is not
-    /// allowed for this customer.</summary>
+    /// Null throughout means no customer, or a customer the register knows nothing
+    /// about — which under the backend's COALESCE(credit_limit, 0) means credit is
+    /// forbidden, not unlimited.</summary>
+    public readonly record struct CreditTerms(decimal Limit, decimal Balance);
+
+    /// <summary>Plain decimals, not the CreditTerms record itself: everything downstream
+    /// (ProjectedBalance, IsWithinCreditLimit, the Display properties) reads these two
+    /// fields and did before CreditTerms existed. See CreditTerms above for why the two
+    /// travel together on the way in.</summary>
     private readonly decimal _creditLimit;
     private readonly decimal _currentBalance;
 
@@ -133,15 +145,14 @@ public partial class MixedPaymentViewModel : ViewModelBase
         Action<bool, decimal, decimal> onCompletion,
         bool allowMixed = true,
         bool hasCustomer = false,
-        decimal? creditLimit = null,
-        decimal? currentBalance = null)
+        CreditTerms? creditTerms = null)
     {
         TotalAmount = totalAmount;
         _onCompletion = onCompletion;
         _allowMixed = allowMixed;
         HasCustomer = hasCustomer;
-        _creditLimit = creditLimit ?? 0m;
-        _currentBalance = currentBalance ?? 0m;
+        _creditLimit = creditTerms?.Limit ?? 0m;
+        _currentBalance = creditTerms?.Balance ?? 0m;
         RecomputeQuickAmounts();
     }
 
