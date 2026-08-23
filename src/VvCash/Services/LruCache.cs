@@ -6,8 +6,9 @@ namespace VvCash.Services;
 /// <summary>A bounded most-recently-used-wins map.
 ///
 /// Dictionary plus LinkedList under a lock rather than ConcurrentDictionary: LRU needs
-/// an order, and ConcurrentDictionary does not have one. The lock costs nothing here —
-/// the only caller is image loading, which is already waiting on a socket.
+/// an order, and ConcurrentDictionary does not have one. The lock is cheap to hold: the
+/// critical section is a dictionary lookup and at most two list splices, nothing more —
+/// see GetOrAdd's own doc for what that requires of the factory you pass it.
 ///
 /// Eviction drops the reference and nothing else. It deliberately does NOT dispose the
 /// evicted value: for the image cache that value is a Bitmap which a visible row may
@@ -46,8 +47,12 @@ public class LruCache<TKey, TValue> where TKey : notnull
 
     /// <summary>The stored value for <paramref name="key"/>, calling
     /// <paramref name="factory"/> only when there is none. The factory runs under the
-    /// lock, which is fine for what this cache holds: the image loader's factory starts
-    /// a Task and returns it, it does not await one.</summary>
+    /// lock, so it must return without blocking — the image loader's factory starts a
+    /// Task and returns it, it does not await one — and it must not call back into this
+    /// same cache. C#'s lock is re-entrant, so a factory that re-enters would not
+    /// deadlock; it would run its own insert or evict while this call is still mid-insert,
+    /// orphan a node in <c>_order</c> that <c>_map</c> no longer points to, and quietly
+    /// reintroduce the unbounded growth this class exists to prevent.</summary>
     public TValue GetOrAdd(TKey key, Func<TKey, TValue> factory)
     {
         lock (_gate)

@@ -21,10 +21,14 @@ namespace VvCash.Services;
 /// worth having at all.</summary>
 public static class ProductImageLoader
 {
-    /// <summary>Three hundred thumbnails. A catalogue thumbnail around 200x200 costs
-    /// roughly 160 KB decoded (width x height x 4), so the cap holds the cache near fifty
-    /// megabytes — affordable on a register, and comfortably more than one screenful of
-    /// the grid, so scrolling back and forth does not evict what was just shown.
+    /// <summary>Three hundred thumbnails. FetchAsync decodes to 256 pixels wide rather
+    /// than native resolution (see the comment there for why that matters), so a
+    /// roughly-square product photo costs about 256x256x4 = 256 KB decoded, holding the
+    /// cache near seventy-five megabytes — affordable on a register, and comfortably
+    /// more than one screenful of the grid, so scrolling back and forth does not evict
+    /// what was just shown. Height is not independently capped: a source far taller than
+    /// it is wide would decode taller than 256px too, but ordinary product photography
+    /// does not do that.
     ///
     /// Bounded at all because a register runs for months without a restart and
     /// PosViewModel.Products is replaced wholesale on every category change: after that,
@@ -81,7 +85,12 @@ public static class ProductImageLoader
         {
             var bytes = await http.GetByteArrayAsync(url);
             using var ms = new MemoryStream(bytes);
-            return new Bitmap(ms);
+            // Decode to display width rather than native. The cap above counts entries, so
+            // it only means anything if an entry has a bounded cost — and nothing upstream
+            // bounds it: ImagePath prefers the full-size image and falls back to a thumb
+            // only when there is none, so a phone photo arrives at its original pixels. The
+            // grid draws these on a 182-wide card, so 256 is already generous.
+            return Bitmap.DecodeToWidth(ms, 256);
         }
         catch (Exception ex)
         {
