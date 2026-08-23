@@ -45,6 +45,8 @@ public class OfflineStorageService : IOfflineStorageService
         await _initLock.WaitAsync();
         try
         {
+            if (_isInitialized) return;
+
             using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
