@@ -152,9 +152,10 @@ public class EscPosUnitTest
     [Fact]
     public void PreReceipt_CarriesItsLinesAndTotal()
     {
-        // Разметка пречека до извлечения BuildPreReceipt доставалась только через
-        // сокет, поэтому не проверялась вовсе — а печатают его за смену чаще
-        // любого другого чека.
+        // До извлечения BuildPreReceipt разметка пречека доставалась только через
+        // сокет, поэтому не проверялась вовсе. PrintPreReceiptAsync сегодня не
+        // вызывается нигде в приложении — этот тест страхует готовый билдер, а не
+        // тот, что уже в деле.
         var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 2m };
 
         var text = EscPosCodePages.Cp866.Encoding.GetString(
