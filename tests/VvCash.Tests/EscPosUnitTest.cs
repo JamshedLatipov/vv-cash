@@ -243,4 +243,24 @@ public class EscPosUnitTest
 
         Assert.False(await printer.PrintPreReceiptAsync(Array.Empty<CartItem>(), 0m));
     }
+
+    [Fact]
+    public async Task UsbPrinting_OnAQueueThatDoesNotExist_ReportsFailure()
+    {
+        // Находка #4 и причина всего батча: SendViaUsb писал в Console и отдавал
+        // завершённую задачу, поэтому касса рапортовала о напечатанном чеке над
+        // принтером, который ничего не напечатал. Интероп с winspool непокрываем,
+        // но сам исход — покрываем: OpenPrinter не найдёт несуществующую очередь,
+        // Failure() бросит, и существующий catch превратит это в false.
+        //
+        // На не-Windows тот же assert проходит другим путём: SendViaUsb бросает
+        // PlatformNotSupportedException раньше, чем доходит до OpenPrinter, и её
+        // гасит тот же catch — тест осмысленен только под Windows, но нигде не
+        // ломается.
+        var printer = new EscPosPrinterService(
+            PrinterConnectionType.USB, "VvCash queue that does not exist", EscPosCodePages.Default);
+
+        Assert.False(await printer.PrintPreReceiptAsync(Array.Empty<CartItem>(), 0m));
+        Assert.Equal(PrinterStatus.Error, printer.Status);
+    }
 }
