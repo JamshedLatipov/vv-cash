@@ -56,6 +56,19 @@ public partial class Product : ObservableObject
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasSecondaryUnit => !string.IsNullOrEmpty(UnitId) && UnitFactor > 0m;
 
+    /// <summary>Stock for this register's warehouse as of the last complete
+    /// reconciliation walk, or null when no walk has completed yet.
+    ///
+    /// Null and zero are different answers and must not be collapsed: null is "nobody
+    /// has checked", zero is "checked, and there is none". Only the second one puts a
+    /// badge on the tile.</summary>
+    public decimal? StockQuantity { get; set; }
+
+    /// <summary>Whether the register knows this product to be out of stock. Deliberately
+    /// false for null — a register that has never reconciled must behave exactly as it
+    /// did before reconciliation existed.</summary>
+    public bool IsOutOfStock => StockQuantity == 0m;
+
     [ObservableProperty]
     [property: System.Text.Json.Serialization.JsonIgnore]
     private Bitmap? _imageBitmap;

@@ -277,6 +277,35 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.False(product.HasSecondaryUnit);
     }
 
+    /// <summary>The reconciliation contract in one test: products the walk did not see
+    /// at all are deleted, products it saw keep their row and gain a quantity, and a
+    /// zero quantity is a value like any other — not a reason to delete.</summary>
+    [Fact]
+    public async Task ApplyRemainsAsync_DeletesUnseenProductsAndStampsQuantities()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product { Id = "in-stock", Name = "Есть", Price = 10m },
+            new Product { Id = "zero", Name = "Ноль", Price = 20m },
+            new Product { Id = "withdrawn", Name = "Снят", Price = 30m },
+        });
+
+        await _service.ApplyRemainsAsync(new Dictionary<string, decimal>
+        {
+            ["in-stock"] = 7.5m,
+            ["zero"] = 0m,
+        });
+
+        var all = (await _service.GetAllProductsAsync()).ToList();
+
+        Assert.DoesNotContain(all, p => p.Id == "withdrawn");
+        Assert.Equal(7.5m, all.Single(p => p.Id == "in-stock").StockQuantity);
+        Assert.Equal(0m, all.Single(p => p.Id == "zero").StockQuantity);
+        Assert.True(all.Single(p => p.Id == "zero").IsOutOfStock);
+        Assert.False(all.Single(p => p.Id == "in-stock").IsOutOfStock);
+    }
+
     // ---------------------------------------------------------------------------------
     // Search. Every keystroke in the POS search box used to load the whole catalog out
     // of SQLite and filter it in memory — a full table scan plus one materialised

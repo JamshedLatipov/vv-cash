@@ -420,6 +420,13 @@ public class OfflineStorageService : IOfflineStorageService
         await transaction.CommitAsync();
     }
 
+    /// <summary>The column list every product SELECT shares, in the order ReadProduct
+    /// reads by ordinal. One constant because four copies of the same list is how the
+    /// fifth one ends up different.</summary>
+    private const string ProductColumns =
+        "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, "
+        + "UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit, StockQuantity";
+
     /// <summary>The one place the match column's contents are defined, so writes and the
     /// query below can never disagree about what is being compared.</summary>
     private static string SearchTextOf(string? name, string? sku, string? barcode)
@@ -524,6 +531,9 @@ public class OfflineStorageService : IOfflineStorageService
             UnitFactor = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
             IsDivisible = !reader.IsDBNull(14) && reader.GetBoolean(14),
             SellInSecondaryUnit = !reader.IsDBNull(15) && reader.GetBoolean(15),
+            // Ordinal 16, matching ProductColumns. NULL for a register that has never
+            // completed a reconciliation walk.
+            StockQuantity = reader.IsDBNull(16) ? null : reader.GetDecimal(16),
         };
     }
 
@@ -552,7 +562,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products";
 
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -570,7 +580,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE Category = $Category";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products WHERE Category = $Category";
         command.Parameters.AddWithValue("$Category", categoryId);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -593,7 +603,7 @@ public class OfflineStorageService : IOfflineStorageService
         using var command = connection.CreateCommand();
         // ESCAPE, because '%' and '_' are LIKE syntax and a cashier typing either means
         // the character — "50%" is a product name here, not "match everything".
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE SearchText LIKE $Query ESCAPE '\\'";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products WHERE SearchText LIKE $Query ESCAPE '\\'";
         command.Parameters.AddWithValue("$Query", $"%{EscapeLike(query.Trim().ToLowerInvariant())}%");
 
         using var reader = await command.ExecuteReaderAsync();
@@ -614,7 +624,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE Barcode = $Barcode LIMIT 1";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products WHERE Barcode = $Barcode LIMIT 1";
         command.Parameters.AddWithValue("$Barcode", barcode);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -994,6 +1004,50 @@ public class OfflineStorageService : IOfflineStorageService
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM Products";
         await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var transaction = connection.BeginTransaction();
+
+        // A temp table rather than a giant IN (...) list: the catalogue runs to
+        // thousands of rows and SQLite caps host parameters well below that.
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = "CREATE TEMP TABLE IF NOT EXISTS RemainSeen (Id TEXT PRIMARY KEY, Qty TEXT NOT NULL);"
+                            + "DELETE FROM RemainSeen;";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = "INSERT OR REPLACE INTO RemainSeen (Id, Qty) VALUES ($Id, $Qty);";
+            var idParam = cmd.Parameters.Add("$Id", SqliteType.Text);
+            var qtyParam = cmd.Parameters.Add("$Qty", SqliteType.Text);
+            foreach (var (id, qty) in remains)
+            {
+                idParam.Value = id;
+                qtyParam.Value = qty;
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = @"
+                DELETE FROM Products WHERE Id NOT IN (SELECT Id FROM RemainSeen);
+                UPDATE Products SET StockQuantity = (SELECT Qty FROM RemainSeen WHERE RemainSeen.Id = Products.Id);
+            ";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
     }
 
     public async Task SaveParkedSaleAsync(ParkedSale sale)

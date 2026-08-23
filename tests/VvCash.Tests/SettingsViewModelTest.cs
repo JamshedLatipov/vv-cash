@@ -84,6 +84,7 @@ public class SettingsViewModelTest
         public int ClearProductsCallCount { get; private set; }
         public Task ClearCategoriesAsync() { ClearCategoriesCallCount++; return Task.CompletedTask; }
         public Task ClearProductsAsync() { ClearProductsCallCount++; return Task.CompletedTask; }
+        public Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains) => Task.CompletedTask;
         public Task SaveParkedSaleAsync(ParkedSale sale) => Task.CompletedTask;
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult(Enumerable.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);

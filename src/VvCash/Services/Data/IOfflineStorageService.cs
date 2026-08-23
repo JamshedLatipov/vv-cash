@@ -55,6 +55,14 @@ public interface IOfflineStorageService
     Task ClearCategoriesAsync();
     Task ClearProductsAsync();
 
+    /// <summary>Applies one complete reconciliation walk: products absent from
+    /// <paramref name="remains"/> are deleted, the rest have their stock stamped.
+    ///
+    /// Only ever call this with the result of a walk that finished. A partial map means
+    /// a partial delete, and a partial delete of the catalogue is worse than a stale
+    /// one.</summary>
+    Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains);
+
     // Parked sales (отложенные чеки)
     Task SaveParkedSaleAsync(ParkedSale sale);
     Task<IEnumerable<ParkedSale>> GetParkedSalesAsync();
