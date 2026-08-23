@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Services.Hardware;
 using Xunit;
@@ -229,5 +231,16 @@ public class EscPosUnitTest
 
         Assert.True(Contains(bytes, EscPosCodePages.Cp866.Encoding.GetBytes("Товар")));
         Assert.False(Contains(bytes, Encoding.UTF8.GetBytes("Товар")));
+    }
+
+    [Fact]
+    public async Task UnknownConnectionType_ReportsFailureRatherThanSilentSuccess()
+    {
+        // Число вне диапазона попадает в settings.json от правки руками или
+        // неудачной миграции: System.Text.Json диапазон enum не проверяет.
+        var printer = new EscPosPrinterService(
+            (PrinterConnectionType)99, "whatever", EscPosCodePages.Default);
+
+        Assert.False(await printer.PrintPreReceiptAsync(Array.Empty<CartItem>(), 0m));
     }
 }

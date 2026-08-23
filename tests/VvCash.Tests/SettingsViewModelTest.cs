@@ -315,8 +315,12 @@ public class SettingsViewModelTest
         // (PrinterConnectionType)99 — тот же приём, что в
         // CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight:
         // нарочно вне диапазона enum, уводит EscPosPrinterService.SendAsync в
-        // default без единого байта ввода-вывода, так что тест не платит ни
-        // сетевым таймаутом, ни настоящим портом.
+        // default, который теперь бросает NotSupportedException, не тронув
+        // транспорт, — тест по-прежнему не платит ни сетевым таймаутом, ни
+        // настоящим портом. TestPrint сама ловит это исключение и пишет в
+        // ErrorMessage, но LastTestPrintService присваивается строкой раньше, до
+        // await service.PrintTestReceiptAsync(), так что assert ниже до этой ветки
+        // не достаёт вовсе.
         //
         // LastTestPrintService — seam ровно как CompositePrinterService.Printers
         // рядом: только для чтения, только для тестов, существует затем, чтобы эту

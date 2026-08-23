@@ -265,14 +265,30 @@ public class EscPosPrinterService : IPrinterService
                 await SendViaUsb(data);
                 break;
             default:
-                // CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight
-                // строит принтер с ConnectionType вне диапазона enum именно затем,
-                // чтобы попасть сюда и получить мгновенный возврат без единого байта
-                // ввода-вывода — так гонка ловится без сетевой задержки. Заставь эту
-                // ветку бросать или подключись к транспорту — и тест сломается с
-                // непонятным исключением вместо понятного сигнала «смотри сюда».
-                await Task.CompletedTask;
-                break;
+                // До фикса ветка тихо ничего не делала: возврат без единого байта
+                // ввода-вывода, который PrintPreReceiptAsync/PrintReceiptAsync и три их
+                // соседа читали как успех и красили статус в Ready. Число вне диапазона
+                // enum {USB,COM,LAN} попадает сюда из settings.json от правки руками или
+                // неудачной миграции — System.Text.Json не проверяет диапазон enum при
+                // чтении. Теперь бросает; catch всех пяти методов печати превращает это в
+                // Error и false, как любой другой отказ транспорта.
+                //
+                // Ветка по-прежнему не делает ввода-вывода до throw — это единственное,
+                // что от неё нужно двум тестам, которые нарочно строят принтер с
+                // (PrinterConnectionType)99:
+                // - CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight
+                //   (через приватный Fast) — гонке нужен мгновенный возврат без сети;
+                //   исключение отсюда ловится try/catch внутри PrintPreReceiptAsync и до
+                //   теста не доходит.
+                // - SettingsViewModelTest.TestPrint_BuildsFromTheCodePageOnScreen_NotTheSavedOne
+                //   проверяет LastTestPrintService, который сохраняется ДО await
+                //   SendAsync, так что результат самой отправки тест не видит.
+                // Верни эту ветку к тишине или подключи к реальному транспорту — и один из
+                // них сломается не про то, ради чего заведён, вместо понятного сигнала
+                // «смотри сюда».
+                throw new NotSupportedException(
+                    $"Unknown printer connection type {(int)_connectionType}. " +
+                    "Check ConnectionType in settings.json.");
         }
     }
 
