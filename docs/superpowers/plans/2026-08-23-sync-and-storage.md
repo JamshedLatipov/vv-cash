@@ -1595,7 +1595,14 @@ git commit -m "feat(pos): mark a product the warehouse says is out of stock"
     /// Nothing on the server enforces this: credit_limit is stored and serialised and
     /// never compared, in documents/ or anywhere else. If this does not stop the sale,
     /// nothing does.</summary>
-    public bool IsWithinCreditLimit => ProjectedBalance >= -_creditLimit;
+    public bool IsWithinCreditLimit => CreditDebt <= 0 || ProjectedBalance >= -_creditLimit;
+
+**Короткое замыкание на нулевом долге обязательно, и первая редакция плана его не имела.**
+Без него полностью оплаченный чек блокируется у клиента, который уже в долгу глубже лимита:
+долг равен нулю, взаймы не даётся ничего, а `ProjectedBalance >= -_creditLimit` всё равно
+ложно. Это противоречит таблице решений спеки («Долг ноль → разрешено независимо от лимита»)
+и роняет тест `SellOnCredit_FullyTendered_IsAllowedRegardlessOfLimit` из шага 1 этой же
+задачи. Поймано исполнителем на первом прогоне.
 
     public decimal CreditLimitDisplay => _creditLimit;
     public decimal CurrentBalanceDisplay => _currentBalance;
@@ -1654,7 +1661,15 @@ git commit -m "feat(pos): mark a product the warehouse says is out of stock"
 1. `ProjectedBalance >= -_creditLimit` → `> -_creditLimit`. Ожидание: `SellOnCredit_ExactlyAtTheLimit_IsAllowed` красный. Вернуть.
 2. `_creditLimit = creditLimit ?? 0m` → `?? decimal.MaxValue`. Ожидание: `SellOnCredit_NoLimitSet_BlocksAnyDebt` красный. Вернуть.
 3. `CreditDebt => RemainingDue` → `=> TotalAmount`. Ожидание: `SellOnCredit_FullyTendered_IsAllowedRegardlessOfLimit` красный. Вернуть.
-4. Убрать `SellOnCreditCommand.NotifyCanExecuteChanged();` из `NotifyDerived`. Ожидание: `SellOnCredit_ReevaluatesAsAmountsChange` красный. Вернуть.
+4. Убрать `SellOnCreditCommand.NotifyCanExecuteChanged();` из `NotifyDerived`. Ожидание: красный на тесте, **подписывающемся на `CanExecuteChanged`**. Вернуть.
+
+**Очевидный тест эту строку не сторожит.** Тест, зовущий `SellOnCreditCommand.CanExecute(null)`
+напрямую, зелёный и с ней, и без неё: сгенерированный CommunityToolkit `RelayCommand.CanExecute()`
+каждый раз заново вызывает предикат, кэша, который надо было бы инвалидировать, у него нет.
+Событие нужно только привязанной кнопке Avalonia, которая по нему перезапрашивает `CanExecute`.
+
+Первая редакция плана утверждала, что у строки уже есть свой тест. Неверно — поймано мутацией
+при исполнении. Сторожит её только подписка на `CanExecuteChanged`.
 
 Четвёртая — та самая строка, которая без своего теста ничем не защищена.
 
@@ -2305,7 +2320,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify --no-incremental
 | #9 индексы | убрать `CREATE INDEX` из перестройки | тест перестройки |
 | #16 замок | убрать `_initLock` | тест конкурентности (до 5 прогонов) |
 | #8 лимит | `>=` → `>` | `SellOnCredit_ExactlyAtTheLimit_IsAllowed` |
-| #8 переоценка | убрать `SellOnCreditCommand.NotifyCanExecuteChanged()` | `SellOnCredit_ReevaluatesAsAmountsChange` |
+| #8 переоценка | убрать `SellOnCreditCommand.NotifyCanExecuteChanged()` | тест с подпиской на `CanExecuteChanged` (не тот, что зовёт `CanExecute` напрямую) |
 | #12 деление | убрать `/ line.Quantity` | два теста `CartServiceQuoteTest` |
 | #7 вытеснение | убрать блок `while (_map.Count > _capacity)` | два теста `ProductImageCacheTest` |
 
