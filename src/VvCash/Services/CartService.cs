@@ -290,7 +290,20 @@ public class CartService : ICartService
     private void ApplyQuotedPrices(QuoteResult? result)
     {
         foreach (var item in _items)
-            item.QuotedUnitPrice = result?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id)?.UnitPrice;
+        {
+            var line = result?.Lines.FirstOrDefault(l => l.ProductId == item.Product.Id);
+            item.QuotedUnitPrice = line?.UnitPrice;
+
+            // Per unit, not per line — the same arithmetic ExchangeViewModel.ApplyIssuedQuote
+            // does, deliberately kept identical: both screens render this as "what came off
+            // this line", and two different answers to that is the defect, not a detail.
+            // Null rather than zero when nothing priced the line, so the cart falls back to
+            // "no discount" instead of "a discount of nothing".
+            item.QuotedUnitDiscount = line != null && line.Quantity > 0
+                ? line.DiscountAmount / line.Quantity
+                : null;
+            item.QuotedDiscountPercent = line?.DiscountPercent ?? 0m;
+        }
     }
 
     public void ClearCustomerDiscount()

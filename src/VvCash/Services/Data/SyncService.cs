@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Models.Api;
 using VvCash.Services.Api;
 
 namespace VvCash.Services.Data;
@@ -17,6 +18,10 @@ public interface ISyncService
     Task SyncProductsAsync();
     Task FullReinitializeAsync();
     Task<bool> CheckSystemOnlineAsync();
+
+    /// <summary>Every stock line for this register's warehouse, or null when the walk
+    /// did not complete. Null is not "empty": it means the caller must change nothing.</summary>
+    Task<IReadOnlyDictionary<string, decimal>?> FetchAllRemainsAsync();
 }
 
 public class SyncService : ISyncService
@@ -469,5 +474,118 @@ public class SyncService : ISyncService
         {
             Console.WriteLine($"[SyncService] features sync error: {ex.Message}");
         }
+    }
+
+    // Internal rather than private only so
+    // FetchAllRemainsAsync_PageCountKeepsGrowing_AbandonsTheWalk can assert against this
+    // number directly instead of duplicating it; it is not part of the public API.
+    //
+    // A server that grows page_count on every response would otherwise keep the walk
+    // below running forever. Following a growing count is deliberate — a catalogue can
+    // legitimately gain a page mid-walk — but it needs an end. Two hundred pages at two
+    // hundred rows is forty thousand products, comfortably past any real catalogue, and
+    // reaching it means the count is not to be trusted rather than that the warehouse is
+    // enormous.
+    internal const int MaxPages = 200;
+
+    /// <summary>NOT CALLED BY ANYTHING. This does not work against the deployed backend,
+    /// and that is deliberate: GET /cashes/remain/ never serialises product_id —
+    /// cashes/cash_repo.go:152 tags it `json:"-"` — so ProductId is empty on every row,
+    /// the guard below drops every row, and this returns an empty map. The "id" the
+    /// endpoint does send is the remains row id, not a product id; there is no working
+    /// substitute for product_id on the wire today. SyncServiceTest is not evidence this
+    /// works: its fixtures set product_id because they were written from the same wrong
+    /// assumption this method was, before anyone checked the struct tag. Activating this
+    /// needs the backend tag changed to `json:"product_id"` (purely additive — nothing
+    /// reads that field yet) and then re-verification against a live endpoint, not
+    /// against these fixtures, since the fixtures cannot catch this class of mistake by
+    /// construction.
+    ///
+    /// Two more things for whoever activates this, found in review but left unfixed here
+    /// because fixing them has no value while nothing calls this method:
+    /// - GetStockRemains has no ORDER BY under its LIMIT/OFFSET, and remains rows are
+    ///   updated by every sale on every register while a walk runs. A row can cross a
+    ///   page boundary mid-walk and be silently skipped — the walk still *completes*, so
+    ///   the null-on-incomplete-walk contract cannot see the gap, and Task 3's
+    ///   ApplyRemainsAsync would then delete that product. TotalItems below is the only
+    ///   client-side signal for this and is currently parsed but unused. A naive
+    ///   equality check against it would still be wrong: total_items counts remains rows
+    ///   with no join, while the row query inner-joins products, so the walk legitimately
+    ///   collects fewer rows whenever a remains row has no matching product.
+    /// - page_size=200 below equals maxPageSize in the backend's settings/config.go:13;
+    ///   the server clamps anything larger. The MaxPages arithmetic (200 pages, forty
+    ///   thousand products) depends on that page size — change one without the other and
+    ///   the ceiling no longer means what its comment says.
+    ///
+    /// Walks GET /cashes/remain/ page by page and returns product id to quantity for the
+    /// whole warehouse.
+    ///
+    /// Returns null on any incomplete walk — a non-2xx, an unparseable page, a transport
+    /// failure, being offline. The caller deletes every product this map does not
+    /// mention, so a half-finished walk is not a smaller answer, it is a wrong one. An
+    /// empty-but-non-null map is a real, distinct outcome the caller must intercept
+    /// before calling ApplyRemainsAsync, which throws on an empty map by design rather
+    /// than delete the whole catalogue.
+    ///
+    /// This endpoint answers with response.List — {body, page_count, total_items,
+    /// item_per_page} — and carries no "status" field, unlike the rest of the cash API.
+    /// page_count is what ends the loop.</summary>
+    public async Task<IReadOnlyDictionary<string, decimal>?> FetchAllRemainsAsync()
+    {
+        var baseUrl = GetBaseUrl();
+        if (string.IsNullOrEmpty(baseUrl))
+        {
+            Console.WriteLine("[SyncService] remain walk: no backend URL configured; walk abandoned");
+            return null;
+        }
+
+        var collected = new Dictionary<string, decimal>();
+        var page = 1;
+
+        try
+        {
+            var pageCount = 1;
+
+            while (page <= pageCount)
+            {
+                if (page > MaxPages)
+                {
+                    Console.WriteLine($"[SyncService] remain walk exceeded {MaxPages} pages; walk abandoned");
+                    return null;
+                }
+
+                var url = $"{baseUrl}cashes/remain/?page={page}&page_size=200";
+                var response = await _httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[SyncService] remain page {page} -> {(int)response.StatusCode}; walk abandoned");
+                    return null;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                var parsed = JsonSerializer.Deserialize<CashRemainPage>(content);
+                if (parsed == null)
+                {
+                    Console.WriteLine($"[SyncService] remain page {page} did not parse; walk abandoned");
+                    return null;
+                }
+
+                foreach (var item in parsed.Body ?? Enumerable.Empty<CashRemainItem>())
+                    if (!string.IsNullOrEmpty(item.ProductId))
+                        collected[item.ProductId] = item.Quantity;
+
+                // Read on every page rather than once: a page count that shrinks mid-walk
+                // still terminates, and one that grows is followed.
+                pageCount = parsed.PageCount > 0 ? parsed.PageCount : 1;
+                page++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncService] remain walk failed on page {page}: {ex.Message}");
+            return null;
+        }
+
+        return collected;
     }
 }

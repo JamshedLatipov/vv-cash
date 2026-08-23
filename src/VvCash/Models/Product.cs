@@ -56,6 +56,30 @@ public partial class Product : ObservableObject
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasSecondaryUnit => !string.IsNullOrEmpty(UnitId) && UnitFactor > 0m;
 
+    /// <summary>Stock for this register's warehouse as of the last complete
+    /// reconciliation walk, or null when no walk has completed yet.
+    ///
+    /// Null and zero are different answers and must not be collapsed: null is "nobody
+    /// has checked", zero is "checked, and there is none to sell". Only the second one puts a
+    /// badge on the tile.
+    ///
+    /// Ignored on the one path a Product is ever serialised: the parked-sale snapshot
+    /// (ParkedSaleService.ParkAsync/ResumeAsync). A parked sale can sit for hours, and
+    /// PosViewModel resumes it by handing the deserialised Product straight back into the
+    /// live cart with no fresh catalog lookup (see PosViewModel.ResumeParkedSale) —
+    /// so a number written here would ride back in looking current when it is only as
+    /// current as the moment the sale was parked. Left out, a resumed item reads as null,
+    /// which reads as "not reconciled" — the honest answer for a figure nothing here can
+    /// still vouch for.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public decimal? StockQuantity { get; set; }
+
+    /// <summary>Whether the register knows this product to be out of stock. Deliberately
+    /// false for null — a register that has never reconciled must behave exactly as it
+    /// did before reconciliation existed.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsOutOfStock => StockQuantity <= 0m;
+
     [ObservableProperty]
     [property: System.Text.Json.Serialization.JsonIgnore]
     private Bitmap? _imageBitmap;

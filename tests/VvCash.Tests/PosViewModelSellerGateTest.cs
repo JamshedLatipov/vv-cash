@@ -36,7 +36,7 @@ namespace VvCash.Tests;
 /// ShowDialog returns: both need a live Avalonia Window, which this xunit host never
 /// provides — that wiring was verified by reading, and the flag's own correctness (when it
 /// does and doesn't get set) is covered by ReturnsViewModelTest / ExchangeViewModelTest
-/// instead.
+/// instead.</summary>
 public class PosViewModelSellerGateTest
 {
     // ---------------------------------------------------------------------------------
@@ -319,6 +319,7 @@ public class PosViewModelSellerGateTest
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(0);
         public Task ClearCategoriesAsync() => Task.CompletedTask;
         public Task ClearProductsAsync() => Task.CompletedTask;
+        public Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains) => Task.CompletedTask;
         public Task SaveParkedSaleAsync(ParkedSale sale) => Task.CompletedTask;
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult(Enumerable.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);
@@ -335,6 +336,10 @@ public class PosViewModelSellerGateTest
         public Task SyncProductsAsync() => Task.CompletedTask;
         public Task FullReinitializeAsync() => Task.CompletedTask;
         public Task<bool> CheckSystemOnlineAsync() => Task.FromResult(true);
+
+        // Not exercised here: Task 4 only adds the walk, nothing in PosViewModel calls
+        // it yet. Stubbed solely so this fake keeps satisfying ISyncService.
+        public Task<IReadOnlyDictionary<string, decimal>?> FetchAllRemainsAsync() => Task.FromResult<IReadOnlyDictionary<string, decimal>?>(null);
 
         // Lets a test flip PosViewModel's IsSystemOnline the same way the real
         // background ping does, without waiting on an actual timer.

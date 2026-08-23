@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
 using Microsoft.Data.Sqlite;
@@ -12,6 +14,17 @@ public class OfflineStorageService : IOfflineStorageService
 {
     private readonly string _connectionString;
     private bool _isInitialized = false;
+
+    /// <summary>Serialises InitializeAsync. The fast path still reads _isInitialized
+    /// without the lock — that read is only ever false-negative, and a false negative
+    /// costs one uncontended WaitAsync, not a second initialisation: the flag is
+    /// re-checked under the lock.
+    ///
+    /// Needed today, not only in anticipation of a heavier InitializeAsync: this service
+    /// is a singleton and PosViewModel is transient, so a logout→login cycle starts a
+    /// second InitializeAsync on top of a first one that has not finished — the call is
+    /// fire-and-forget from the view model's constructor (PosViewModel.cs:874).</summary>
+    private readonly SemaphoreSlim _initLock = new(1, 1);
 
     /// <summary>Creates the service against the standard per-user database file.
     /// Pass <paramref name="dbPath"/> to point at a different file (e.g. a temp file in tests);
@@ -32,6 +45,27 @@ public class OfflineStorageService : IOfflineStorageService
     {
         if (_isInitialized) return;
 
+        await _initLock.WaitAsync();
+        try
+        {
+            if (_isInitialized) return;
+
+            await InitializeCoreAsync();
+
+            _isInitialized = true;
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+    }
+
+    /// <summary>Everything InitializeAsync does once it has decided it is the one doing
+    /// it: schema, additive column migrations, the REAL-to-TEXT table rebuilds, and the
+    /// SearchText backfill. Split out so the guard above stays readable — the same shape
+    /// UpdateService.DownloadAsync uses around DownloadCoreAsync.</summary>
+    private async Task InitializeCoreAsync()
+    {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
 
@@ -67,23 +101,31 @@ public class OfflineStorageService : IOfflineStorageService
                 Name TEXT NOT NULL,
                 Sku TEXT,
                 Category TEXT,
-                Price REAL NOT NULL,
-                OriginalPrice REAL,
-                DiscountPercent REAL,
+                -- TEXT, not REAL: REAL affinity converts what is written to a float,
+                -- and these are money. Microsoft.Data.Sqlite writes decimal to TEXT
+                -- culture-invariantly (measured under ru-RU), and GetDecimal reads it
+                -- back exactly. See the batch C spec for the measurement.
+                Price TEXT NOT NULL,
+                OriginalPrice TEXT,
+                DiscountPercent TEXT,
                 ImagePath TEXT,
                 Barcode TEXT,
                 Tags TEXT,
                 UnitId TEXT,
                 UnitCode TEXT,
                 UnitShortName TEXT,
-                UnitFactor REAL,
+                UnitFactor TEXT,
                 IsDivisible INTEGER,
                 SellInSecondaryUnit INTEGER,
                 -- Name, Sku and Barcode joined and lowercased, for the POS search box.
                 -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
                 -- only: an all-caps Cyrillic query would never match its own product, and
                 -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
-                SearchText TEXT
+                SearchText TEXT,
+                -- Stock for this register's warehouse as of the last complete
+                -- reconciliation walk. NULL means the walk has never completed, and the
+                -- register behaves exactly as it did before the walk existed.
+                StockQuantity TEXT
             );
 
             -- Auto-applied promotions, stored as the raw server payload: the rules
@@ -98,10 +140,11 @@ public class OfflineStorageService : IOfflineStorageService
                 Id TEXT PRIMARY KEY,
                 Label TEXT,
                 CustomerName TEXT,
-                Total REAL NOT NULL,
-                -- REAL, not INTEGER: a weighted line contributes a fraction of a unit.
-                -- SQLite's dynamic typing keeps rows written under the old declaration readable.
-                ItemCount REAL NOT NULL,
+                Total TEXT NOT NULL,
+                -- TEXT, and not INTEGER, for the same reason it was never INTEGER: a
+                -- weighted line contributes a fraction of a unit. TEXT rather than REAL
+                -- because a fraction is exactly what a float rounds.
+                ItemCount TEXT NOT NULL,
                 CreatedAt TEXT NOT NULL,
                 Payload TEXT NOT NULL
             );
@@ -114,7 +157,7 @@ public class OfflineStorageService : IOfflineStorageService
                 CanSell INTEGER NOT NULL DEFAULT 1,
                 CanRefund INTEGER NOT NULL DEFAULT 0,
                 CanCloseShift INTEGER NOT NULL DEFAULT 0,
-                MaxDiscount REAL NOT NULL DEFAULT 0
+                MaxDiscount TEXT NOT NULL DEFAULT '0'
             );
 
             -- Create indices for performance
@@ -160,7 +203,11 @@ public class OfflineStorageService : IOfflineStorageService
             "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
             "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
             "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
-            "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
+            // TEXT, like the schema block above declares it. A database old enough to
+            // be missing this column also has Price REAL, so the rebuild below fires
+            // moments later and would redeclare it TEXT anyway — this just stops the
+            // line reading as a leftover REAL that somebody should "fix" back.
+            "ALTER TABLE Products ADD COLUMN UnitFactor TEXT;",
             "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
             "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
             "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
@@ -169,9 +216,50 @@ public class OfflineStorageService : IOfflineStorageService
             await AddColumnIfMissingAsync(command, alter);
         }
 
-        await BackfillSearchTextAsync(connection);
+        // Migration: money columns move from REAL to TEXT. Runs only on a register whose
+        // tables were created before this landed — on a fresh database the schema block
+        // above already declared TEXT and the probes below are no-ops.
+        await RebuildIfRealAsync(connection, "Products", "Price", @"
+            CREATE TABLE Products_new (
+                Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
+                Price TEXT NOT NULL, OriginalPrice TEXT, DiscountPercent TEXT,
+                ImagePath TEXT, Barcode TEXT, Tags TEXT,
+                UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor TEXT,
+                IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT,
+                StockQuantity TEXT
+            );",
+            // StockQuantity is deliberately absent from the copy list: the old table
+            // has no such column, and NULL is the correct starting value anyway.
+            "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, "
+            + "Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, "
+            + "SellInSecondaryUnit, SearchText",
+            "CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);",
+            "CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);");
 
-        _isInitialized = true;
+        await RebuildIfRealAsync(connection, "ParkedSales", "Total", @"
+            CREATE TABLE ParkedSales_new (
+                Id TEXT PRIMARY KEY, Label TEXT, CustomerName TEXT,
+                Total TEXT NOT NULL, ItemCount TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL, Payload TEXT NOT NULL
+            );",
+            "Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload");
+
+        await RebuildIfRealAsync(connection, "Sellers", "MaxDiscount", @"
+            CREATE TABLE Sellers_new (
+                Id TEXT PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT,
+                PinHash TEXT, CanSell INTEGER NOT NULL DEFAULT 1,
+                CanRefund INTEGER NOT NULL DEFAULT 0,
+                CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                MaxDiscount TEXT NOT NULL DEFAULT '0'
+            );",
+            "Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount");
+
+        // Belt and braces for a database that already has TEXT columns but predates
+        // StockQuantity. Cannot happen from a released build — the two shipped together —
+        // but a hand-migrated register is cheap to tolerate and expensive to debug.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN StockQuantity TEXT;");
+
+        await BackfillSearchTextAsync(connection);
     }
 
     /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it is.
@@ -200,6 +288,93 @@ public class OfflineStorageService : IOfflineStorageService
             // specific error.
             Console.WriteLine($"[OfflineStorageService] Migration failed ({alter}): {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>The declared type of one column, or "" when the table or column is
+    /// absent. Declared type, not storage class: SQLite reports what CREATE TABLE said,
+    /// which is exactly the thing this migration changes.</summary>
+    private static async Task<string> DeclaredTypeAsync(SqliteConnection connection, string table, string column)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT type FROM pragma_table_info('{table}') WHERE name = $c;";
+        cmd.Parameters.AddWithValue("$c", column);
+        return (await cmd.ExecuteScalarAsync()) as string ?? string.Empty;
+    }
+
+    /// <summary>Moves one table's money columns from REAL to TEXT, if they are still REAL.
+    ///
+    /// A failure is logged and swallowed, the same way AddColumnIfMissingAsync treats a
+    /// migration it cannot run. Without that, this is the only thing in InitializeCoreAsync
+    /// that can abort initialisation outright, and nobody would see it: PosViewModel starts
+    /// the call as `_ = InitializeAsync();` and never observes the task, so a register that
+    /// threw here would come up with no catalogue, no shift, and nothing on screen saying
+    /// why.
+    ///
+    /// Degrading is genuinely safe. A table left declared REAL is still read through
+    /// GetDecimal, which reads REAL perfectly well, so the register keeps selling at the old
+    /// precision — and the probe fires again on the next launch, so the migration retries by
+    /// itself. Losing precision is a bad day; a till that will not open is a closed shop.
+    ///
+    /// The probe reads one column and infers the shape of the rest. That holds for anything
+    /// a released build can produce, because each table's money columns were declared
+    /// together and move together. It does not hold for a database somebody has half
+    /// repaired by hand — Products with Price already TEXT but OriginalPrice still REAL
+    /// satisfies the probe and is never fixed. Accepted knowingly: the alternative is
+    /// probing every money column on every launch to catch a state no release can
+    /// create.</summary>
+    private static async Task RebuildIfRealAsync(
+        SqliteConnection connection, string table, string probeColumn,
+        string createNewSql, string copiedColumns, params string[] indexes)
+    {
+        try
+        {
+            if (await DeclaredTypeAsync(connection, table, probeColumn) != "REAL") return;
+
+            await RebuildTableAsync(connection, table, createNewSql, copiedColumns, indexes);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[OfflineStorageService] Rebuild failed ({table}): {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Rebuilds a table under a new column declaration, because SQLite has no
+    /// ALTER COLUMN. Rows are copied, not dropped: a register that upgrades while
+    /// offline would otherwise be left with no catalogue and nothing to sell until the
+    /// next successful sync.
+    ///
+    /// <paramref name="indexes"/> is not optional housekeeping. Indices are created in
+    /// the schema block that already ran earlier in this same InitializeAsync, and the
+    /// DROP TABLE below takes them with the table.
+    ///
+    /// Precondition, and the helper is named generally enough that the next caller will not
+    /// guess it: the table must have no foreign keys pointing at it, and no view or trigger
+    /// referencing it. Microsoft.Data.Sqlite turns PRAGMA foreign_keys on by default, and
+    /// under it the DROP TABLE below silently deletes the rows of any ON DELETE CASCADE
+    /// child. A view or trigger over the table makes the RENAME throw instead — "error in
+    /// view v: no such table: main.P". This schema has none of the three, which is the only
+    /// reason the sequence below is safe as written.</summary>
+    private static async Task RebuildTableAsync(
+        SqliteConnection connection, string table, string createNewSql,
+        string copiedColumns, params string[] indexes)
+    {
+        using var tx = connection.BeginTransaction();
+        using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+
+        foreach (var sql in new[]
+        {
+            createNewSql,
+            $"INSERT INTO {table}_new ({copiedColumns}) SELECT {copiedColumns} FROM {table};",
+            $"DROP TABLE {table};",
+            $"ALTER TABLE {table}_new RENAME TO {table};",
+        }.Concat(indexes))
+        {
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await tx.CommitAsync();
     }
 
     /// <summary>Fills SearchText for rows written before the column existed. Adding the
@@ -287,16 +462,16 @@ public class OfflineStorageService : IOfflineStorageService
         var nameParam = command.Parameters.Add("$Name", SqliteType.Text);
         var skuParam = command.Parameters.Add("$Sku", SqliteType.Text);
         var categoryParam = command.Parameters.Add("$Category", SqliteType.Text);
-        var priceParam = command.Parameters.Add("$Price", SqliteType.Real);
-        var origPriceParam = command.Parameters.Add("$OriginalPrice", SqliteType.Real);
-        var discountParam = command.Parameters.Add("$DiscountPercent", SqliteType.Real);
+        var priceParam = command.Parameters.Add("$Price", SqliteType.Text);
+        var origPriceParam = command.Parameters.Add("$OriginalPrice", SqliteType.Text);
+        var discountParam = command.Parameters.Add("$DiscountPercent", SqliteType.Text);
         var imageParam = command.Parameters.Add("$ImagePath", SqliteType.Text);
         var barcodeParam = command.Parameters.Add("$Barcode", SqliteType.Text);
         var tagsParam = command.Parameters.Add("$Tags", SqliteType.Text);
         var unitIdParam = command.Parameters.Add("$UnitId", SqliteType.Text);
         var unitCodeParam = command.Parameters.Add("$UnitCode", SqliteType.Text);
         var unitShortNameParam = command.Parameters.Add("$UnitShortName", SqliteType.Text);
-        var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Real);
+        var unitFactorParam = command.Parameters.Add("$UnitFactor", SqliteType.Text);
         var isDivisibleParam = command.Parameters.Add("$IsDivisible", SqliteType.Integer);
         var sellInUnitParam = command.Parameters.Add("$SellInSecondaryUnit", SqliteType.Integer);
         var searchTextParam = command.Parameters.Add("$SearchText", SqliteType.Text);
@@ -327,6 +502,13 @@ public class OfflineStorageService : IOfflineStorageService
         await transaction.CommitAsync();
     }
 
+    /// <summary>The column list every product SELECT shares, in the order ReadProduct
+    /// reads by ordinal. One constant because four copies of the same list is how the
+    /// fifth one ends up different.</summary>
+    private const string ProductColumns =
+        "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, "
+        + "UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit, StockQuantity";
+
     private Product ReadProduct(SqliteDataReader reader)
     {
         return new Product
@@ -349,6 +531,9 @@ public class OfflineStorageService : IOfflineStorageService
             UnitFactor = reader.IsDBNull(13) ? 0m : reader.GetDecimal(13),
             IsDivisible = !reader.IsDBNull(14) && reader.GetBoolean(14),
             SellInSecondaryUnit = !reader.IsDBNull(15) && reader.GetBoolean(15),
+            // Ordinal 16, matching ProductColumns. NULL for a register that has never
+            // completed a reconciliation walk.
+            StockQuantity = reader.IsDBNull(16) ? null : reader.GetDecimal(16),
         };
     }
 
@@ -377,7 +562,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products";
 
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
@@ -395,7 +580,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE Category = $Category";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products WHERE Category = $Category";
         command.Parameters.AddWithValue("$Category", categoryId);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -418,7 +603,7 @@ public class OfflineStorageService : IOfflineStorageService
         using var command = connection.CreateCommand();
         // ESCAPE, because '%' and '_' are LIKE syntax and a cashier typing either means
         // the character — "50%" is a product name here, not "match everything".
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE SearchText LIKE $Query ESCAPE '\\'";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products WHERE SearchText LIKE $Query ESCAPE '\\'";
         command.Parameters.AddWithValue("$Query", $"%{EscapeLike(query.Trim().ToLowerInvariant())}%");
 
         using var reader = await command.ExecuteReaderAsync();
@@ -439,7 +624,7 @@ public class OfflineStorageService : IOfflineStorageService
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit FROM Products WHERE Barcode = $Barcode LIMIT 1";
+        command.CommandText = $"SELECT {ProductColumns} FROM Products WHERE Barcode = $Barcode LIMIT 1";
         command.Parameters.AddWithValue("$Barcode", barcode);
 
         using var reader = await command.ExecuteReaderAsync();
@@ -821,6 +1006,55 @@ public class OfflineStorageService : IOfflineStorageService
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains)
+    {
+        // Empty map: refused. See the interface doc comment on ApplyRemainsAsync for why.
+        if (remains.Count == 0)
+            throw new ArgumentException("Refusing to apply an empty reconciliation result.", nameof(remains));
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var transaction = connection.BeginTransaction();
+
+        // A temp table rather than a giant IN (...) list: the catalogue runs to
+        // thousands of rows and SQLite caps host parameters well below that.
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = "CREATE TEMP TABLE IF NOT EXISTS RemainSeen (Id TEXT PRIMARY KEY NOT NULL, Qty TEXT NOT NULL);"
+                            + "DELETE FROM RemainSeen;";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = "INSERT OR REPLACE INTO RemainSeen (Id, Qty) VALUES ($Id, $Qty);";
+            var idParam = cmd.Parameters.Add("$Id", SqliteType.Text);
+            var qtyParam = cmd.Parameters.Add("$Qty", SqliteType.Text);
+            foreach (var (id, qty) in remains)
+            {
+                idParam.Value = id;
+                qtyParam.Value = qty;
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        using (var cmd = connection.CreateCommand())
+        {
+            cmd.Transaction = transaction;
+            cmd.CommandText = @"
+                DELETE FROM Products WHERE NOT EXISTS (SELECT 1 FROM RemainSeen WHERE RemainSeen.Id = Products.Id);
+                UPDATE Products SET StockQuantity = (SELECT Qty FROM RemainSeen WHERE RemainSeen.Id = Products.Id);
+                DROP TABLE IF EXISTS temp.RemainSeen;
+            ";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
     public async Task SaveParkedSaleAsync(ParkedSale sale)
     {
         using var connection = new SqliteConnection(_connectionString);
@@ -937,7 +1171,7 @@ public class OfflineStorageService : IOfflineStorageService
         var canSellParam = command.Parameters.Add("$CanSell", SqliteType.Integer);
         var canRefundParam = command.Parameters.Add("$CanRefund", SqliteType.Integer);
         var canCloseShiftParam = command.Parameters.Add("$CanCloseShift", SqliteType.Integer);
-        var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Real);
+        var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
         foreach (var s in sellers)
         {

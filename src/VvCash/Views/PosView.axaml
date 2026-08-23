@@ -449,6 +449,10 @@
                                                         </Border>
                                                     </StackPanel>
                                                     <TextBlock Text="{Binding Product.Sku, StringFormat='SKU: {0}'}" FontSize="12" Foreground="{StaticResource Slate400Brush}" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock FontSize="11" Foreground="{StaticResource Red500Brush}"
+                                                               IsVisible="{Binding HasLineDiscount}">
+                                                        <Run Text="{Binding [Discount], Source={x:Static services:I18nService.Instance}}"/><Run Text=": −"/><Run Text="{Binding LineDiscount, StringFormat='{}{0:N2}'}"/>
+                                                    </TextBlock>
                                                     <TextBlock IsVisible="{Binding Product.HasSecondaryUnit}"
                                                                FontSize="12" Foreground="{StaticResource Slate500Brush}">
                                                         <TextBlock.Text>
@@ -477,7 +481,14 @@
                                                 </StackPanel>
 
                                                 <!-- line total -->
-                                                <TextBlock Grid.Column="3" Text="{Binding LineTotal, StringFormat='{}{0:F2}'}" FontSize="15" FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}" TextAlignment="Right" VerticalAlignment="Center"/>
+                                                <StackPanel Grid.Column="3" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding LineTotal, StringFormat='{}{0:F2}'}" FontSize="11"
+                                                               Foreground="{StaticResource Slate400Brush}" TextDecorations="Strikethrough"
+                                                               TextAlignment="Right" IsVisible="{Binding HasLineDiscount}"/>
+                                                    <TextBlock Text="{Binding LineFinalTotal, StringFormat='{}{0:F2}'}" FontSize="15"
+                                                               FontWeight="ExtraBold" Foreground="{StaticResource Slate900Brush}"
+                                                               TextAlignment="Right"/>
+                                                </StackPanel>
 
                                                 <!-- remove -->
                                                 <Button Grid.Column="4" Classes="CartIconButton" Width="30" Height="30" Padding="0" Margin="6,0,0,0"

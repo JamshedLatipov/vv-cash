@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -22,7 +21,22 @@ namespace VvCash.Services;
 /// worth having at all.</summary>
 public static class ProductImageLoader
 {
-    private static readonly ConcurrentDictionary<string, Task<Bitmap?>> Cache = new();
+    /// <summary>Three hundred thumbnails. FetchAsync decodes to 256 pixels wide rather
+    /// than native resolution (see the comment there for why that matters), so a
+    /// roughly-square product photo costs about 256x256x4 = 256 KB decoded, holding the
+    /// cache near seventy-five megabytes — affordable on a register, and comfortably
+    /// more than one screenful of the grid, so scrolling back and forth does not evict
+    /// what was just shown. Height is not independently capped: a source far taller than
+    /// it is wide would decode taller than 256px too, but ordinary product photography
+    /// does not do that.
+    ///
+    /// Bounded at all because a register runs for months without a restart and
+    /// PosViewModel.Products is replaced wholesale on every category change: after that,
+    /// the old Product objects are unreachable except through this cache, so an unbounded
+    /// one pins every bitmap the shift ever displayed.</summary>
+    private const int CacheCapacity = 300;
+
+    private static readonly LruCache<string, Task<Bitmap?>> Cache = new(CacheCapacity);
 
     /// <summary>Null for a product with no image, an unreachable backend, or a fetch that
     /// failed — every caller reads "no bitmap" as "show the placeholder icon", so a
@@ -50,7 +64,7 @@ public static class ProductImageLoader
             // being briefly offline. Caching that permanently would leave the product
             // iconless for the rest of the shift, so a later ask tries again.
             task = FetchAsync(http, url);
-            Cache[url] = task;
+            Cache.Set(url, task);
         }
         return task;
     }
@@ -71,7 +85,12 @@ public static class ProductImageLoader
         {
             var bytes = await http.GetByteArrayAsync(url);
             using var ms = new MemoryStream(bytes);
-            return new Bitmap(ms);
+            // Decode to display width rather than native. The cap above counts entries, so
+            // it only means anything if an entry has a bounded cost — and nothing upstream
+            // bounds it: ImagePath prefers the full-size image and falls back to a thumb
+            // only when there is none, so a phone photo arrives at its original pixels. The
+            // grid draws these on a 182-wide card, so 256 is already generous.
+            return Bitmap.DecodeToWidth(ms, 256);
         }
         catch (Exception ex)
         {

@@ -107,6 +107,7 @@ public class SyncServiceTest
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(LastSyncVersion);
         public Task ClearCategoriesAsync() => Task.CompletedTask;
         public Task ClearProductsAsync() => Task.CompletedTask;
+        public Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains) => Task.CompletedTask;
         public Task SaveParkedSaleAsync(ParkedSale sale) => Task.CompletedTask;
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult<IEnumerable<ParkedSale>>(Array.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);
@@ -467,5 +468,92 @@ public class SyncServiceTest
         Assert.Equal(string.Empty, product.UnitId);
         Assert.Equal(0m, product.UnitFactor);
         Assert.False(product.HasSecondaryUnit);
+    }
+
+    private const string Page1 =
+        """{"body":[{"product_id":"a","quantity":5},{"product_id":"b","quantity":0}],"page_count":2,"total_items":3}""";
+    private const string Page2 =
+        """{"body":[{"product_id":"c","quantity":2.25}],"page_count":2,"total_items":3}""";
+
+    /// <summary>The walk has to follow page_count, not stop at the first page. The
+    /// request count assertion is not decoration: with a single-page stub the loop never
+    /// iterates, and a partial-failure test written against it would be green without
+    /// exercising anything.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_WalksEveryPage()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            return (HttpStatusCode.OK, requests == 1 ? Page1 : Page2);
+        });
+
+        var result = await Build(handler, new FakeStorage()).FetchAllRemainsAsync();
+
+        Assert.True(requests >= 2, $"expected the walk to request more than one page, saw {requests}");
+        Assert.NotNull(result);
+        Assert.Equal(3, result!.Count);
+        Assert.Equal(5m, result["a"]);
+        Assert.Equal(0m, result["b"]);
+        Assert.Equal(2.25m, result["c"]);
+    }
+
+    /// <summary>The most important test in the batch. A walk that breaks partway must
+    /// return null, because the caller deletes everything the map does not mention — and
+    /// half a map means half a catalogue deleted.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_SecondPageFails_ReturnsNull()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            return requests == 1
+                ? (HttpStatusCode.OK, Page1)
+                : (HttpStatusCode.InternalServerError, "boom");
+        });
+
+        var result = await Build(handler, new FakeStorage()).FetchAllRemainsAsync();
+
+        Assert.True(requests >= 2, $"expected the walk to reach the second page, saw {requests}");
+        Assert.Null(result);
+    }
+
+    /// <summary>A transport failure is the offline case, and it is not an error worth
+    /// throwing out of a background sync loop.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_TransportThrows_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(_ => throw new HttpRequestException("no network"));
+
+        Assert.Null(await Build(handler, new FakeStorage()).FetchAllRemainsAsync());
+    }
+
+    /// <summary>A server that increments page_count on every response can never be
+    /// satisfied, so the walk must give up at SyncService.MaxPages rather than loop
+    /// forever. The stub's own exception is not the interesting assertion -- it exists
+    /// only so a regression fails fast instead of hanging the suite, and it is set well
+    /// past the ceiling so it never fires when the fix is in place. The request-count
+    /// assertion below is what actually proves the production ceiling stopped the walk,
+    /// rather than the stub's guard doing it instead.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_PageCountKeepsGrowing_AbandonsTheWalk()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            if (requests > SyncService.MaxPages + 50)
+                throw new InvalidOperationException(
+                    $"stub served {requests} requests without the walk giving up; the page-count ceiling did not fire");
+            return (HttpStatusCode.OK, $$"""{"body":[],"page_count":{{requests + 1}},"total_items":0}""");
+        });
+
+        var result = await Build(handler, new FakeStorage()).FetchAllRemainsAsync();
+
+        Assert.Null(result);
+        Assert.True(requests <= SyncService.MaxPages + 1,
+            $"expected the walk to stop at the page ceiling ({SyncService.MaxPages}), saw {requests} requests");
     }
 }

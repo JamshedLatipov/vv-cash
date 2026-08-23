@@ -2358,7 +2358,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
                 // Return to POS View
                 NavigationRequest(this);
-            }, IsMixedPaymentEnabled, hasCustomer: SelectedCustomer != null);
+            }, IsMixedPaymentEnabled, hasCustomer: SelectedCustomer != null,
+               creditTerms: SelectedCustomer is { } c
+                   ? new MixedPaymentViewModel.CreditTerms(c.CreditLimit ?? 0m, c.CurrentBalance ?? 0m)
+                   : null);
 
             NavigationRequest(mixedPaymentVm);
         }
