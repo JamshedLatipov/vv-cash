@@ -91,6 +91,9 @@ public class ReturnsViewModelTest
         /// refuses the return before the first call.</summary>
         public string ReturnPayoutCategoryId { get; set; } = "ret-cat";
         public string PhoneFormatId { get; set; } = string.Empty;
+        public string CustomerDisplayPort { get; set; } = string.Empty;
+        public int CustomerDisplayBaudRate { get; set; } = 9600;
+        public string CustomerDisplayCodePageId { get; set; } = string.Empty;
         public event System.EventHandler? SettingsChanged;
         public void Save() => SettingsChanged?.Invoke(this, System.EventArgs.Empty);
     }

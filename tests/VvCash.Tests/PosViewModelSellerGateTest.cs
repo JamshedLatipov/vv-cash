@@ -246,10 +246,10 @@ public class PosViewModelSellerGateTest
 
     private class FakeCustomerDisplayService : ICustomerDisplayService
     {
-        public Task ShowLineAsync(string line1, string line2) => Task.CompletedTask;
-        public Task ShowItemAsync(string name, decimal price) => Task.CompletedTask;
-        public Task ShowTotalAsync(decimal total) => Task.CompletedTask;
-        public Task ClearAsync() => Task.CompletedTask;
+        public Task<bool> ShowLineAsync(string line1, string line2) => Task.FromResult(true);
+        public Task<bool> ShowItemAsync(string name, decimal price) => Task.FromResult(true);
+        public Task<bool> ShowTotalAsync(decimal total) => Task.FromResult(true);
+        public Task<bool> ClearAsync() => Task.FromResult(true);
     }
 
     private class FakeShiftService : IShiftService
@@ -366,6 +366,9 @@ public class PosViewModelSellerGateTest
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public string ReturnPayoutCategoryId { get; set; } = string.Empty;
         public string PhoneFormatId { get; set; } = string.Empty;
+        public string CustomerDisplayPort { get; set; } = string.Empty;
+        public int CustomerDisplayBaudRate { get; set; } = 9600;
+        public string CustomerDisplayCodePageId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged;
         public void Save() { }
     }

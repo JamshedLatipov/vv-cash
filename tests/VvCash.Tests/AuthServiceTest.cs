@@ -28,6 +28,9 @@ public class AuthServiceTest
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public string ReturnPayoutCategoryId { get; set; } = string.Empty;
         public string PhoneFormatId { get; set; } = string.Empty;
+        public string CustomerDisplayPort { get; set; } = string.Empty;
+        public int CustomerDisplayBaudRate { get; set; } = 9600;
+        public string CustomerDisplayCodePageId { get; set; } = string.Empty;
         public int SaveCallCount { get; private set; }
         public event EventHandler? SettingsChanged;
         public void Save()

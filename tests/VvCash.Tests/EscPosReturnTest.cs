@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text;
 using VvCash.Models;
 using VvCash.Services.Hardware;
 using Xunit;
@@ -18,8 +17,8 @@ public class EscPosReturnTest
     public void ReturnReceiptBuffer_ContainsHeaderAndTotal()
     {
         var lines = new List<ReturnReceiptLine> { new("Salad", 2, 200m) };
-        var bytes = EscPosPrinterService.BuildReturnReceipt(lines, 200m, "9");
-        var text = Encoding.UTF8.GetString(bytes);
+        var bytes = EscPosPrinterService.BuildReturnReceipt(EscPosCodePages.Cp866, lines, 200m, "9");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
         Assert.Contains("RETURN", text);
         Assert.Contains("Salad", text);
         Assert.Contains("#9", text);
@@ -31,8 +30,8 @@ public class EscPosReturnTest
     {
         var lines = new List<ReturnReceiptLine> { new("Salad", 2, 200m) };
         var bytes = EscPosPrinterService.BuildReturnReceipt(
-            lines, 200m, "9", warehouseName: "Central Store", sellerName: "Ivanov I.", saleDate: "06.06.2026 17:32");
-        var text = Encoding.UTF8.GetString(bytes);
+            EscPosCodePages.Cp866, lines, 200m, "9", warehouseName: "Central Store", sellerName: "Ivanov I.", saleDate: "06.06.2026 17:32");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
 
         Assert.Contains("Central Store", text);
         Assert.Contains("Ivanov I.", text);
@@ -43,8 +42,8 @@ public class EscPosReturnTest
     public void ReturnReceiptBuffer_OmitsTheNewLines_WhenNotGiven()
     {
         var lines = new List<ReturnReceiptLine> { new("Salad", 2, 200m) };
-        var bytes = EscPosPrinterService.BuildReturnReceipt(lines, 200m, "9");
-        var text = Encoding.UTF8.GetString(bytes);
+        var bytes = EscPosPrinterService.BuildReturnReceipt(EscPosCodePages.Cp866, lines, 200m, "9");
+        var text = EscPosCodePages.Cp866.Encoding.GetString(bytes);
 
         Assert.DoesNotContain("Whse:", text);
         Assert.DoesNotContain("Seller:", text);

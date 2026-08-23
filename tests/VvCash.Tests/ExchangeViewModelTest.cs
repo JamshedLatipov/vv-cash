@@ -129,6 +129,9 @@ public class ExchangeViewModelTest
         public string ExchangePayoutCategoryId { get; set; } = "cat-1";
         public string ReturnPayoutCategoryId { get; set; } = string.Empty;
         public string PhoneFormatId { get; set; } = string.Empty;
+        public string CustomerDisplayPort { get; set; } = string.Empty;
+        public int CustomerDisplayBaudRate { get; set; } = 9600;
+        public string CustomerDisplayCodePageId { get; set; } = string.Empty;
         public event EventHandler? SettingsChanged { add { } remove { } }
         public void Save() { }
     }

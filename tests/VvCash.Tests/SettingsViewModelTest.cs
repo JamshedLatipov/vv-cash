@@ -30,6 +30,9 @@ public class SettingsViewModelTest
         public string ExchangePayoutCategoryId { get; set; } = string.Empty;
         public string ReturnPayoutCategoryId { get; set; } = string.Empty;
         public string PhoneFormatId { get; set; } = string.Empty;
+        public string CustomerDisplayPort { get; set; } = string.Empty;
+        public int CustomerDisplayBaudRate { get; set; } = 9600;
+        public string CustomerDisplayCodePageId { get; set; } = string.Empty;
         public int SaveCallCount { get; private set; }
         public event EventHandler? SettingsChanged;
         public void Save()
@@ -104,6 +107,17 @@ public class SettingsViewModelTest
             new FakeFeatures(),
             new FakePaymentCategories());
     }
+
+    /// <summary>Для тестов, которым нужна касса с уже настроенным состоянием:
+    /// Build(out …) создаёт FakeSettings сам, и заполнить их до конструктора
+    /// вью-модели нечем, а часть настроек читается именно там.</summary>
+    private static SettingsViewModel BuildWith(FakeSettings settings)
+        => new SettingsViewModel(
+            new MainViewModel(),
+            settings,
+            new FakeStorage(),
+            new FakeFeatures(),
+            new FakePaymentCategories());
 
     [Theory]
     [InlineData("http://api.example.test/v1/")]
@@ -221,5 +235,125 @@ public class SettingsViewModelTest
 
         Assert.Equal(0, storage.ClearProductsCallCount);
         Assert.Equal(1, storage.ClearCategoriesCallCount);
+    }
+
+    [Fact]
+    public void Save_WritesTheCodePagePerPrinter()
+    {
+        // На принтер, а не на кассу: в магазине могут стоять две разные железки.
+        var vm = Build(out var settings);
+        // Save() отказывает без валидного адреса (см. Save_RefusesAnAddressThatIsNotHttps);
+        // это не то, что проверяет этот тест, поэтому адрес просто предоставлен.
+        vm.BackendUrl = "https://api.example.test/v1/";
+        vm.AddPrinterCommand.Execute(null);
+        vm.Printers[0].SelectedCodePage = EscPosCodePages.Cp1251;
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal("CP1251", settings.Printers[0].CodePageId);
+    }
+
+    [Theory]
+    [InlineData("CP1251", false)]
+    [InlineData("CP-gone", true)]
+    public void Load_ResolvesTheStoredCodePage(string stored, bool expectDefault)
+    {
+        // Известный id обязателен: на одном лишь неизвестном тест зелёный и без
+        // загрузки — инициализатор поля даёт ровно ту же ссылку, что и Resolve.
+        var settings = new FakeSettings
+        {
+            Printers = new List<PrinterConfig>
+            {
+                new() { Name = "P", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.1:9100", CodePageId = stored }
+            }
+        };
+
+        var vm = BuildWith(settings);
+
+        Assert.Same(
+            expectDefault ? EscPosCodePages.Default : EscPosCodePages.Cp1251,
+            vm.Printers[0].SelectedCodePage);
+    }
+
+    [Fact]
+    public async Task TestPrint_OnAnUnreachablePrinter_ReportsTheReasonRatherThanStayingSilent()
+    {
+        // Точка проверяет кодовую страницу этой кнопкой, поэтому молчащий отказ
+        // означает звонок разработчику — то есть кнопка не сделала того, ради
+        // чего заведена.
+        //
+        // Сокет здесь осознанный: тест именно про то, что причина отказа
+        // транспорта доезжает до баннера. Цена — один отказ в соединении, а на
+        // этой машине это ~2.2 секунды. Один такой тест терпим; цикла из них
+        // здесь быть не должно.
+        var vm = Build(out _);
+        vm.AddPrinterCommand.Execute(null);
+        vm.Printers[0].ConnectionType = PrinterConnectionType.LAN;
+        vm.Printers[0].ConnectionString = "127.0.0.1:9199";
+
+        await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
+
+        Assert.True(vm.HasError);
+        Assert.Empty(vm.StatusMessage);
+        // Не просто "непусто": ErrorMessage — это префикс плюс ex.Message, и тест
+        // назван про то, что причина доезжает до баннера. Замени сборку на голый
+        // префикс — предыдущие две проверки останутся зелёными, а эта поймает
+        // разницу в длине.
+        Assert.True(vm.ErrorMessage.Length > I18nService.Instance["TestPrintFailed"].Length);
+    }
+
+    [Fact]
+    public async Task TestPrint_BuildsFromTheCodePageOnScreen_NotTheSavedOne()
+    {
+        // Обе кнопки проверки оправданы тем, что строят сервис из несохранённого
+        // состояния экрана, а не из настроек — но это ничем не проверялось. Если
+        // TestPrint однажды поведут через CompositePrinterService, который читает
+        // именно сохранённое, все прочие тесты останутся зелёными, а кнопка
+        // перестанет проверять то, ради чего заведена.
+        //
+        // (PrinterConnectionType)99 — тот же приём, что в
+        // CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight:
+        // нарочно вне диапазона enum, уводит EscPosPrinterService.SendAsync в
+        // default, который теперь бросает NotSupportedException, не тронув
+        // транспорт, — тест по-прежнему не платит ни сетевым таймаутом, ни
+        // настоящим портом. TestPrint сама ловит это исключение и пишет в
+        // ErrorMessage, но LastTestPrintService присваивается строкой раньше, до
+        // await service.PrintTestReceiptAsync(), так что assert ниже до этой ветки
+        // не достаёт вовсе.
+        //
+        // LastTestPrintService — seam ровно как CompositePrinterService.Printers
+        // рядом: только для чтения, только для тестов, существует затем, чтобы эту
+        // проверку вообще можно было написать.
+        var settings = new FakeSettings
+        {
+            Printers = new List<PrinterConfig>
+            {
+                new() { Name = "P", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.1:9100", CodePageId = EscPosCodePages.Cp866.Id }
+            }
+        };
+        var vm = BuildWith(settings);
+
+        // Меняем на экране и НЕ сохраняем — Printers[0].SelectedCodePage расходится
+        // с тем, что лежит в settings.Printers[0].CodePageId (CP866).
+        vm.Printers[0].SelectedCodePage = EscPosCodePages.Cp1251;
+        vm.Printers[0].ConnectionType = (PrinterConnectionType)99;
+
+        await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
+
+        Assert.Same(EscPosCodePages.Cp1251, vm.LastTestPrintService?.CodePage);
+    }
+
+    [Fact]
+    public async Task CheckDisplay_WithNoPortConfigured_ReportsSuccess()
+    {
+        // Касса без VFD — не отказ.
+        var vm = BuildWith(new FakeSettings { CustomerDisplayPort = string.Empty });
+
+        await vm.CheckDisplayCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasError);
+        Assert.NotEmpty(vm.StatusMessage);
     }
 }

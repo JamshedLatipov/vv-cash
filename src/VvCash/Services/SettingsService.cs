@@ -20,6 +20,9 @@ public class SettingsData
     public string ExchangePayoutCategoryId { get; set; } = string.Empty;
     public string ReturnPayoutCategoryId { get; set; } = string.Empty;
     public string PhoneFormatId { get; set; } = string.Empty;
+    public string CustomerDisplayPort { get; set; } = string.Empty;
+    public int CustomerDisplayBaudRate { get; set; } = 9600;
+    public string CustomerDisplayCodePageId { get; set; } = string.Empty;
 }
 
 public class SettingsService : ISettingsService
@@ -101,6 +104,26 @@ public class SettingsService : ISettingsService
         set => _data.PhoneFormatId = value;
     }
 
+    public string CustomerDisplayPort
+    {
+        get => _data.CustomerDisplayPort;
+        set => _data.CustomerDisplayPort = value;
+    }
+
+    /// <summary>Ноль и отрицательное читаются как 9600 — тем же приёмом, что
+    /// SyncIntervalMinutes выше: settings.json правят руками.</summary>
+    public int CustomerDisplayBaudRate
+    {
+        get => _data.CustomerDisplayBaudRate <= 0 ? 9600 : _data.CustomerDisplayBaudRate;
+        set => _data.CustomerDisplayBaudRate = value;
+    }
+
+    public string CustomerDisplayCodePageId
+    {
+        get => _data.CustomerDisplayCodePageId;
+        set => _data.CustomerDisplayCodePageId = value;
+    }
+
     /// <summary>Creates the service against the standard per-user settings file. Pass
     /// <paramref name="settingsFilePath"/> to point at a different one (e.g. a temp file
     /// in tests); left null/empty, DI and production code get the usual
@@ -150,6 +173,18 @@ public class SettingsService : ISettingsService
                 if (_data.PhoneFormatId == null)
                 {
                     _data.PhoneFormatId = string.Empty;
+                }
+                if (_data.CustomerDisplayPort == null)
+                {
+                    _data.CustomerDisplayPort = string.Empty;
+                }
+                if (_data.CustomerDisplayBaudRate <= 0)
+                {
+                    _data.CustomerDisplayBaudRate = 9600;
+                }
+                if (_data.CustomerDisplayCodePageId == null)
+                {
+                    _data.CustomerDisplayCodePageId = string.Empty;
                 }
             }
             catch (Exception ex)

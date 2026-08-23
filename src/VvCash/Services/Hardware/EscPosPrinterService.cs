@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
-using System.Text;
+using System.Runtime.Versioning;
 using System.Threading.Tasks;
 using VvCash.Models;
 
@@ -14,12 +14,19 @@ public class EscPosPrinterService : IPrinterService
 {
     private readonly PrinterConnectionType _connectionType;
     private readonly string _connectionString;
+    private readonly EscPosCodePage _codePage;
     private PrinterStatus _status = PrinterStatus.Ready;
 
     public PrinterStatus Status => _status;
     public event EventHandler<PrinterStatus>? StatusChanged;
 
+    /// <summary>Какая таблица реально применена к этому принтеру. Существует ради
+    /// теста: строка, которая доносит настройку до боевой кассы, иначе не
+    /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
+    public EscPosCodePage CodePage => _codePage;
+
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
+    private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
     private static readonly byte[] CmdAlignLeft = { 0x1B, 0x61, 0x00 };
     private static readonly byte[] CmdAlignCenter = { 0x1B, 0x61, 0x01 };
     private static readonly byte[] CmdAlignRight = { 0x1B, 0x61, 0x02 };
@@ -31,36 +38,39 @@ public class EscPosPrinterService : IPrinterService
     private static readonly byte[] CmdLineFeed = { 0x0A };
     public static readonly byte[] CmdDrawerKick = { 0x1B, 0x70, 0x00, 0x19, 0xFA };
 
-    public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString)
+    public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
+        EscPosCodePage codePage)
     {
         _connectionType = connectionType;
         _connectionString = connectionString;
+        _codePage = codePage;
     }
 
     /// <summary>Builds the sale receipt bytes. Static and separate from sending
     /// so the layout can be asserted on, exactly as BuildReturnReceipt is.</summary>
     public static byte[] BuildSaleReceipt(
+        EscPosCodePage codePage,
         IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
         string? discountName = null,
         string? documentNumber = null, string? warehouseName = null,
         string? sellerName = null, string? saleDate = null)
     {
         using var ms = new MemoryStream();
-        Write(ms, CmdInit);
+        WriteInit(ms, codePage);
         Write(ms, CmdAlignCenter);
         Write(ms, CmdDoubleSizeOn);
-        WriteLine(ms, "VV CASH POS");
+        WriteLine(ms, "VV CASH POS", codePage);
         Write(ms, CmdDoubleSizeOff);
         // The same four facts the return and exchange receipts carry, and for the same
         // reason: without them a sale receipt brought back to the till cannot be matched
         // to its document. Each is omitted when absent rather than printed empty — an
         // offline sale has no document number yet, and a register with seller switching
         // off has no seller to name.
-        if (!string.IsNullOrWhiteSpace(documentNumber)) WriteLine(ms, $"Doc #{documentNumber}");
-        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate!);
-        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}");
-        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}");
-        WriteLine(ms, "----------------------------");
+        if (!string.IsNullOrWhiteSpace(documentNumber)) WriteLine(ms, $"Doc #{documentNumber}", codePage);
+        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate!, codePage);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}", codePage);
+        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         foreach (var item in items)
         {
@@ -69,42 +79,87 @@ public class EscPosPrinterService : IPrinterService
             // every sale, in stores that do not take dollars — and the return and
             // exchange receipts next to it have always printed the bare amount.
             var price = Money(item.LineTotal);
-            WriteLine(ms, PadLine(line, price, 32));
+            WriteLine(ms, PadLine(line, price, 32), codePage);
 
             // A unit line prints both figures: the customer asked for square
             // metres and is billed for whole tiles, and showing only one of the
             // two makes the round-up look like an error.
             if (item.Product.HasSecondaryUnit)
-                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
+                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
         }
-        WriteLine(ms, "----------------------------");
-        WriteLine(ms, PadLine("Subtotal:", Money(subtotal), 32));
+        WriteLine(ms, "----------------------------", codePage);
+        WriteLine(ms, PadLine("Subtotal:", Money(subtotal), 32), codePage);
         if (discount > 0)
         {
-            WriteLine(ms, PadLine("Discount:", $"-{Money(discount)}", 32));
+            WriteLine(ms, PadLine("Discount:", $"-{Money(discount)}", 32), codePage);
             if (!string.IsNullOrWhiteSpace(discountName))
-                WriteLine(ms, Truncate(discountName!, 32));
+                WriteLine(ms, Truncate(discountName!, 32), codePage);
         }
 
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("TOTAL:", Money(total), 32));
+        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
         Write(ms, CmdBoldOff);
-        WriteLine(ms, "----------------------------");
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignCenter);
-        WriteLine(ms, "Thank you for shopping!");
+        WriteLine(ms, "Thank you for shopping!", codePage);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
         Write(ms, CmdCut);
         return ms.ToArray();
     }
 
+    /// <summary>Образец, по которому на точке решают, угадана ли таблица.
+    ///
+    /// Не «Hello world»: проверять надо ровно то, что ломалось. Русская строка —
+    /// собственно проверка; строка таджикских и казахских букв напечатается
+    /// вопросительными знаками при ЛЮБОЙ записи каталога, и это ожидаемо —
+    /// однобайтовой таблицы под них у ESC/POS нет. Она стоит здесь, чтобы это
+    /// увидели на бумаге, а не на названиях товаров через неделю. Латиница и
+    /// цифры отделяют «таблица не та» от «принтер вообще не тот». Казахская
+    /// «і» из образца намеренно убрана: она единственная из этого ряда есть в
+    /// CP1251, и на одной уцелевшей букве приёмка на точке спотыкалась бы о
+    /// собственную инструкцию «должны быть одни вопросительные знаки».</summary>
+    public static byte[] BuildTestReceipt(EscPosCodePage codePage)
+    {
+        using var ms = new MemoryStream();
+        WriteInit(ms, codePage);
+        Write(ms, CmdAlignCenter);
+        Write(ms, CmdBoldOn);
+        WriteLine(ms, "TEST / ПРОБНАЯ ПЕЧАТЬ", codePage);
+        Write(ms, CmdBoldOff);
+        WriteLine(ms, "----------------------------", codePage);
+        Write(ms, CmdAlignLeft);
+        WriteLine(ms, "RU: Ёжик съел 12 шт.", codePage);
+        WriteLine(ms, "TJ/KK: ӯ ғ қ ҳ ҷ ә ң ө ұ ү", codePage);
+        WriteLine(ms, "LAT: The quick brown fox", codePage);
+        WriteLine(ms, "NUM: 0123456789", codePage);
+        WriteLine(ms, "----------------------------", codePage);
+        // Что именно пробовали — чтобы точка могла назвать это по телефону, не
+        // залезая в настройки.
+        WriteLine(ms, $"{codePage.Id}   ESC t {codePage.EscTSelector}", codePage);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
+    /// <summary>Отправляет <see cref="BuildTestReceipt"/> и не глотает отказ:
+    /// кнопке проверки нужен не bool, а причина.
+    ///
+    /// SetStatus здесь намеренно нет, в отличие от пяти боевых методов. Служба
+    /// для проверки строится из несохранённых значений с экрана настроек, на её
+    /// StatusChanged никто не подписан — а если бы подписался, разовая
+    /// диагностика перекрашивала бы индикатор готовности боевой кассы.</summary>
+    public Task PrintTestReceiptAsync() => SendAsync(BuildTestReceipt(_codePage));
+
     public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
         string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         try
         {
-            await SendAsync(BuildSaleReceipt(items, subtotal, discount, total, discountName,
+            await SendAsync(BuildSaleReceipt(_codePage, items, subtotal, discount, total, discountName,
                 documentNumber, warehouseName, sellerName, saleDate));
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
         catch (Exception ex)
@@ -115,39 +170,64 @@ public class EscPosPrinterService : IPrinterService
         }
     }
 
+    /// <summary>Builds the pre-receipt bytes. Static and separate from sending,
+    /// exactly as BuildSaleReceipt is. This was assembled inline in
+    /// PrintPreReceiptAsync, which is why it was the one ESC @ site with no test
+    /// of its own: the layout could only be reached through a socket.</summary>
+    public static byte[] BuildPreReceipt(EscPosCodePage codePage, IEnumerable<CartItem> items, decimal total)
+    {
+        using var ms = new MemoryStream();
+        WriteInit(ms, codePage);
+        Write(ms, CmdAlignCenter);
+        WriteLine(ms, "PRE-RECEIPT", codePage);
+        WriteLine(ms, "----------------------------", codePage);
+        Write(ms, CmdAlignLeft);
+        foreach (var item in items)
+        {
+            WriteLine(ms, $"  {item.Product.Name} x{item.QuantityDisplay}", codePage);
+            if (item.Product.HasSecondaryUnit)
+                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
+        }
+        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
     public async Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total)
     {
         try
         {
-            using var ms = new MemoryStream();
-            Write(ms, CmdInit);
-            Write(ms, CmdAlignCenter);
-            WriteLine(ms, "PRE-RECEIPT");
-            WriteLine(ms, "----------------------------");
-            Write(ms, CmdAlignLeft);
-            foreach (var item in items)
-            {
-                WriteLine(ms, $"  {item.Product.Name} x{item.QuantityDisplay}");
-                if (item.Product.HasSecondaryUnit)
-                    WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
-            }
-            WriteLine(ms, PadLine("TOTAL:", Money(total), 32));
-            Write(ms, CmdLineFeed);
-            Write(ms, CmdCut);
-            await SendAsync(ms.ToArray());
+            await SendAsync(BuildPreReceipt(_codePage, items, total));
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Pre-receipt print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
     }
 
     private static void Write(MemoryStream ms, byte[] data) => ms.Write(data, 0, data.Length);
-    private static void WriteLine(MemoryStream ms, string text)
+
+    /// <summary>ESC @ и следом ESC t n. Одним методом, а не двумя командами по
+    /// месту: инициализацию пишет каждый билдер, а новый документ заводится
+    /// копированием соседнего. Дописывай выбор таблицы руками — рано или поздно
+    /// скопируется один ESC @ без него, и это ничем себя не выдаст: принтер не
+    /// ругается на неназванную таблицу, он молча берёт свою умолчательную и
+    /// печатает кириллицу мусором.</summary>
+    private static void WriteInit(MemoryStream ms, EscPosCodePage codePage)
     {
-        var bytes = Encoding.UTF8.GetBytes(text + "\n");
+        Write(ms, CmdInit);
+        Write(ms, CmdSelectCodeTable);
+        ms.WriteByte(codePage.EscTSelector);   // единственное, что действительно рантайм
+    }
+
+    private static void WriteLine(MemoryStream ms, string text, EscPosCodePage codePage)
+    {
+        var bytes = codePage.Encoding.GetBytes(text + "\n");
         ms.Write(bytes, 0, bytes.Length);
     }
     /// <summary>Amounts on a receipt, formatted the same way on every register.
@@ -182,8 +262,30 @@ public class EscPosPrinterService : IPrinterService
                 await SendViaUsb(data);
                 break;
             default:
-                await Task.CompletedTask;
-                break;
+                // До фикса ветка тихо ничего не делала: возврат без единого байта
+                // ввода-вывода, который PrintPreReceiptAsync/PrintReceiptAsync и три их
+                // соседа читали как успех и красили статус в Ready. Число вне диапазона
+                // enum {USB,COM,LAN} попадает сюда из settings.json от правки руками или
+                // неудачной миграции — System.Text.Json не проверяет диапазон enum при
+                // чтении. Теперь бросает; catch всех пяти методов печати превращает это в
+                // Error и false, как любой другой отказ транспорта.
+                //
+                // Ветка по-прежнему не делает ввода-вывода до throw — это единственное,
+                // что от неё нужно двум тестам, которые нарочно строят принтер с
+                // (PrinterConnectionType)99:
+                // - CompositePrinterServiceTest.PrintingSurvivesASettingsChangeMidFlight
+                //   (через приватный Fast) — гонке нужен мгновенный возврат без сети;
+                //   исключение отсюда ловится try/catch внутри PrintPreReceiptAsync и до
+                //   теста не доходит.
+                // - SettingsViewModelTest.TestPrint_BuildsFromTheCodePageOnScreen_NotTheSavedOne
+                //   проверяет LastTestPrintService, который сохраняется ДО await
+                //   SendAsync, так что результат самой отправки тест не видит.
+                // Верни эту ветку к тишине или подключи к реальному транспорту — и один из
+                // них сломается не про то, ради чего заведён, вместо понятного сигнала
+                // «смотри сюда».
+                throw new NotSupportedException(
+                    $"Unknown printer connection type {(int)_connectionType}. " +
+                    "Check ConnectionType in settings.json.");
         }
     }
 
@@ -207,40 +309,75 @@ public class EscPosPrinterService : IPrinterService
 
     private Task SendViaUsb(byte[] data)
     {
-        // For USB raw printing, integrating with Windows Spooler API via PInvoke is required.
-        // As a fallback/stub for now, we just output to console to avoid crashing and to allow compilation.
-        Console.WriteLine($"[USB Printer '{_connectionString}'] Outputting {data.Length} bytes.");
-        return Task.CompletedTask;
+        // Проект таргетит net10.0, не net10.0-windows, поэтому платформенная
+        // проверка обязательна. OperatingSystem.IsWindows(), а не
+        // RuntimeInformation: CA1416 распознаёт её как platform guard
+        // гарантированно.
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "USB printing goes through the Windows spooler and is unavailable on this OS.");
+        }
+
+        return SendViaSpoolerAsync(_connectionString, data);
     }
 
+    /// <summary>Отдельным методом с атрибутом, а не лямбдой на месте: guard из
+    /// SendViaUsb не протекает в тело лямбды, и CA1416 сработал бы на ней.
+    ///
+    /// Task.Run, а не синхронный вызов: OpenPrinter и StartDocPrinter — это RPC
+    /// в spoolsv.exe, и на зависшем спулере они блокируются на секунды. Без него
+    /// весь цикл проходил бы на UI-потоке — SendViaUsb никогда не уступал поток,
+    /// а CompositePrinterService строит список задач энергичным Select. Касса
+    /// замерзала бы ровно в момент закрытия продажи.</summary>
+    [SupportedOSPlatform("windows")]
+    private static Task SendViaSpoolerAsync(string queueName, byte[] data)
+        => Task.Run(() => WindowsRawPrinter.Send(queueName, data));
+
+    /// <summary>Исключение подписчика проглатывается намеренно. Вызовы стоят внутри
+    /// try методов печати, а Invoke синхронный: без этого упавший обработчик
+    /// поймался бы catch'ем печати, и чек, который физически вышел из принтера,
+    /// отчитался бы как «Print failed» — кассир напечатал бы дубль.
+    ///
+    /// Обратный переход в Ready живёт в успешных ветках всех пяти методов печати:
+    /// без него первый же отказ красил индикатор навсегда, потому что с Ready
+    /// SetStatus не вызывался нигде.</summary>
     private void SetStatus(PrinterStatus status)
     {
         _status = status;
-        StatusChanged?.Invoke(this, status);
+        try
+        {
+            StatusChanged?.Invoke(this, status);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Printer status subscriber failed: {ex.Message}");
+        }
     }
 
     public static byte[] BuildReturnReceipt(
+        EscPosCodePage codePage,
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> lines,
         decimal totalRefund, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         using var ms = new MemoryStream();
-        Write(ms, CmdInit);
+        WriteInit(ms, codePage);
         Write(ms, CmdAlignCenter);
         Write(ms, CmdDoubleSizeOn);
-        WriteLine(ms, "RETURN / VOZVRAT");
+        WriteLine(ms, "RETURN / VOZVRAT", codePage);
         Write(ms, CmdDoubleSizeOff);
-        WriteLine(ms, $"Doc #{documentNumber}");
-        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate);
-        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}");
-        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}");
-        WriteLine(ms, "----------------------------");
+        WriteLine(ms, $"Doc #{documentNumber}", codePage);
+        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate, codePage);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}", codePage);
+        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         foreach (var l in lines)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32));
-        WriteLine(ms, "----------------------------");
+            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("REFUND:", Money(totalRefund), 32));
+        WriteLine(ms, PadLine("REFUND:", Money(totalRefund), 32), codePage);
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
@@ -255,11 +392,13 @@ public class EscPosPrinterService : IPrinterService
     {
         try
         {
-            await SendAsync(BuildReturnReceipt(lines, totalRefund, documentNumber, warehouseName, sellerName, saleDate));
+            await SendAsync(BuildReturnReceipt(_codePage, lines, totalRefund, documentNumber, warehouseName, sellerName, saleDate));
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Return receipt print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -270,10 +409,12 @@ public class EscPosPrinterService : IPrinterService
         try
         {
             await SendAsync(CmdDrawerKick);
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Cash drawer error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -285,38 +426,39 @@ public class EscPosPrinterService : IPrinterService
     /// till refunds); only its absolute value is ever printed, so the cashier
     /// never has to read out a minus sign.</summary>
     public static byte[] BuildExchangeReceipt(
+        EscPosCodePage codePage,
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> returned,
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
         decimal difference, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
         using var ms = new MemoryStream();
-        Write(ms, CmdInit);
+        WriteInit(ms, codePage);
         Write(ms, CmdAlignCenter);
         Write(ms, CmdDoubleSizeOn);
-        WriteLine(ms, "EXCHANGE / OBMEN");
+        WriteLine(ms, "EXCHANGE / OBMEN", codePage);
         Write(ms, CmdDoubleSizeOff);
-        WriteLine(ms, $"Doc #{documentNumber}");
-        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate);
-        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}");
-        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}");
-        WriteLine(ms, "----------------------------");
+        WriteLine(ms, $"Doc #{documentNumber}", codePage);
+        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate, codePage);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}", codePage);
+        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}", codePage);
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
 
-        WriteLine(ms, "RETURNED:");
+        WriteLine(ms, "RETURNED:", codePage);
         foreach (var l in returned)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32));
+            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
 
-        WriteLine(ms, "ISSUED:");
+        WriteLine(ms, "ISSUED:", codePage);
         foreach (var l in issued)
-            WriteLine(ms, PadLine($"{l.Name} x{l.Quantity}", Money(l.LineRefund), 32));
+            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
 
-        WriteLine(ms, "----------------------------");
+        WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
         // An even swap owes nothing in either direction; without its own label it
         // printed "REFUND: 0.00" and invited the customer to ask for the money.
         var label = difference > 0 ? "AMOUNT DUE:" : difference < 0 ? "REFUND:" : "NO DIFFERENCE:";
-        WriteLine(ms, PadLine(label, Money(Math.Abs(difference)), 32));
+        WriteLine(ms, PadLine(label, Money(Math.Abs(difference)), 32), codePage);
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
@@ -332,11 +474,13 @@ public class EscPosPrinterService : IPrinterService
     {
         try
         {
-            await SendAsync(BuildExchangeReceipt(returned, issued, difference, documentNumber, warehouseName, sellerName, saleDate));
+            await SendAsync(BuildExchangeReceipt(_codePage, returned, issued, difference, documentNumber, warehouseName, sellerName, saleDate));
+            SetStatus(PrinterStatus.Ready);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Exchange receipt print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }

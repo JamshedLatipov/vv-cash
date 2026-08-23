@@ -236,11 +236,86 @@
                                                     CommandParameter="{Binding}">
                                                 <material:MaterialIcon Kind="TrashCan" Width="20" Height="20"/>
                                             </Button>
+                                            <!-- Кодовая страница и пробная печать — в третьей, ранее не занятой
+                                                 строке, одним StackPanel с Grid.ColumnSpan="3" по звёздным колонкам
+                                                 0–2, а не разложены по отдельным ячейкам в Auto-колонках 3 и 4, как
+                                                 было раньше. Та раскладка растила Auto-бюджет с ~76px до ~472px
+                                                 (ComboBox с именами вроде «PC437 — латиница (таблица по
+                                                 умолчанию)» и кнопка с иконкой и подписью — каждая одна в своей
+                                                 Auto-колонке), и на LAN-адрес в звёздных колонках оставалось ~45px
+                                                 вместо ~177px при 700px MaxWidth панели. Колонки 3 и 4 здесь не
+                                                 участвуют вовсе, поэтому по-прежнему меряются только CheckBox'ом и
+                                                 кнопкой удаления выше — Auto-бюджет строки 1 не меняется. -->
+                                            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding [CodePage], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" VerticalAlignment="Center"/>
+                                                <ComboBox Width="220" ItemsSource="{Binding AvailableCodePages}" SelectedItem="{Binding SelectedCodePage, Mode=TwoWay}"
+                                                          DisplayMemberBinding="{Binding DisplayName}" Classes="PrinterCombo"/>
+                                                <!-- Пробная печать своя у каждой записи: кодовая страница задаётся на
+                                                     принтер, и проверять надо именно её. Привязка через
+                                                     $parent[UserControl].DataContext — тот же приём, что у кнопки
+                                                     удаления выше; приводить DataContext предка к типу VM в XAML
+                                                     нельзя, это компилируется и падает в рантайме. -->
+                                                <Button VerticalAlignment="Center"
+                                                        Command="{Binding $parent[UserControl].DataContext.TestPrintCommand}"
+                                                        CommandParameter="{Binding}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <material:MaterialIcon Kind="Printer" Width="18" Height="18"/>
+                                                        <TextBlock Text="{Binding [TestPrint], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+
+                        <!-- Дисплей покупателя. Одна кнопка проверки, а не по одной
+                             на запись: дисплей на кассе один. -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,24,0,12">
+                            <material:MaterialIcon Kind="CashRegister" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                            <TextBlock Text="{Binding [CustomerDisplay], Source={x:Static services:I18nService.Instance}}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <Grid ColumnDefinitions="*, *, *, Auto" RowDefinitions="Auto, Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [DisplayPort], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [DisplayBaudRate], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding [CodePage], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+
+                                <ComboBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding AvailableDisplayPorts}" SelectedItem="{Binding CustomerDisplayPort, Mode=TwoWay}" Classes="PrinterCombo" Margin="0,0,8,0"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CustomerDisplayBaudRateText, Mode=TwoWay}" Classes="PrinterInput" Margin="0,0,8,0"/>
+                                <ComboBox Grid.Row="1" Grid.Column="2" ItemsSource="{Binding AvailableCodePages}" SelectedItem="{Binding SelectedDisplayCodePage, Mode=TwoWay}"
+                                          DisplayMemberBinding="{Binding DisplayName}" Classes="PrinterCombo" Margin="0,0,8,0"/>
+                                <Button Grid.Row="1" Grid.Column="3" VerticalAlignment="Center" Command="{Binding CheckDisplayCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <material:MaterialIcon Kind="CheckCircle" Width="18" Height="18"/>
+                                        <TextBlock Text="{Binding [CheckDisplay], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <!-- Тот же баннер, что и внизу экрана, у той же пары свойств —
+                             продублирован рендер, не состояние. Кнопка «Пробная печать»
+                             живёт в этой карточке, а оба баннера были только под карточкой
+                             локальных данных, за 200px нижнего отступа и без прокрутки к
+                             результату: нажавший её ничего не видел. -->
+                        <Border IsVisible="{Binding HasStatus}" Background="#F0FDF4" BorderBrush="#86EFAC" BorderThickness="1"
+                                CornerRadius="10" Padding="14,10" Margin="0,16,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <material:MaterialIcon Kind="CheckCircle" Width="20" Height="20" Foreground="#15803D" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding StatusMessage}" Foreground="#15803D" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border IsVisible="{Binding HasError}" Background="#FEF2F2" BorderBrush="#FCA5A5" BorderThickness="1"
+                                CornerRadius="10" Padding="14,10" Margin="0,12,0,0">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <material:MaterialIcon Kind="AlertCircleOutline" Width="20" Height="20" Foreground="#B91C1C" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding ErrorMessage}" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
 
                     </StackPanel>
                 </Border>
@@ -288,6 +363,16 @@
                                 </Button>
                             </Grid>
                         </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- Успех проверки. Отдельно от красного баннера ниже: «Пробный чек
+                     отправлен» в рамке с иконкой предупреждения читается как отказ. -->
+                <Border IsVisible="{Binding HasStatus}" Background="#F0FDF4" BorderBrush="#86EFAC" BorderThickness="1"
+                        CornerRadius="10" Padding="14,10" Margin="0,0,0,12">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <material:MaterialIcon Kind="CheckCircle" Width="20" Height="20" Foreground="#15803D" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding StatusMessage}" Foreground="#15803D" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Border>
 

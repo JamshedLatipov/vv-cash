@@ -855,7 +855,7 @@ public partial class ExchangeViewModel : ViewModelBase
             // lines and then the difference, with no discount line of its own, so
             // undiscounted lines would simply not add up to the money that changed hands.
             var issuedReceiptLines = IssuedLines
-                .Select(l => new ReturnReceiptLine(l.Product.Name, (int)l.Quantity, IssuedLineFinalTotal(l))).ToList();
+                .Select(l => new ReturnReceiptLine(l.Product.Name, l.Quantity, IssuedLineFinalTotal(l))).ToList();
             var difference = Difference;
 
             // ---- 1. the return -------------------------------------------------

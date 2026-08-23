@@ -38,4 +38,16 @@ public class SettingsDefaultsTest
     {
         Assert.Equal(string.Empty, new SettingsData().PhoneFormatId);
     }
+
+    /// <summary>9600 — единственный нетривиальный дефолт на все три новых поля:
+    /// порт и код страницы просто пустые, а бод был зашит константой и легче
+    /// прочего уехал бы молча при правке.</summary>
+    [Fact]
+    public void CustomerDisplay_DefaultsToNoPortAt9600Baud()
+    {
+        var data = new SettingsData();
+        Assert.Equal(string.Empty, data.CustomerDisplayPort);
+        Assert.Equal(9600, data.CustomerDisplayBaudRate);
+        Assert.Equal(string.Empty, data.CustomerDisplayCodePageId);
+    }
 }

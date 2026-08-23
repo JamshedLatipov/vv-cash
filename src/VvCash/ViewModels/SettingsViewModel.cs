@@ -32,6 +32,16 @@ public partial class PrinterConfigViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ConnectionLabel))]
     private PrinterConnectionType _connectionType;
 
+    /// <summary>Каталог целиком: он неизменен и не зависит от сети — как
+    /// AvailablePhoneFormats рядом.</summary>
+    public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
+
+    /// <summary>Nullable по той же причине, что SelectedPhoneFormat: SelectingItemsControl
+    /// приводит SelectedItem к null и пишет его обратно через TwoWay, если присвоенного
+    /// значения не нашлось в ItemsSource.</summary>
+    [ObservableProperty]
+    private EscPosCodePage? _selectedCodePage = EscPosCodePages.Default;
+
     public ObservableCollection<string> AvailableConnections { get; } = new();
 
     public bool IsLan => ConnectionType == PrinterConnectionType.LAN;
@@ -97,6 +107,16 @@ public partial class SettingsViewModel : ViewModelBase
 
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
 
+    /// <summary>Результат кнопок проверки, когда он не отказ. Отдельно от
+    /// ErrorMessage: тот красный, с иконкой предупреждения, и «Пробный чек
+    /// отправлен» в такой рамке читается как отказ. Пустеет при каждой новой
+    /// проверке, чтобы прошлый успех не висел над свежей ошибкой.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasStatus))]
+    private string _statusMessage = string.Empty;
+
+    public bool HasStatus => !string.IsNullOrWhiteSpace(StatusMessage);
+
     [ObservableProperty]
     private string _cashRegisterToken = string.Empty;
 
@@ -127,6 +147,22 @@ public partial class SettingsViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _returnPrintReceipt = true;
+
+    [ObservableProperty]
+    private string _customerDisplayPort = string.Empty;
+
+    /// <summary>Строкой, а не int: то же, что SyncIntervalText рядом — TextBox с
+    /// частично набранным числом не должен ронять привязку.</summary>
+    [ObservableProperty]
+    private string _customerDisplayBaudRateText = "9600";
+
+    [ObservableProperty]
+    private EscPosCodePage? _selectedDisplayCodePage = EscPosCodePages.Default;
+
+    /// <summary>COM-порты машины. Тот же источник, что у принтеров на COM.</summary>
+    public ObservableCollection<string> AvailableDisplayPorts { get; } = new();
+
+    public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
 
     /// <summary>Payment categories offered for the exchange payout, loaded from
     /// GET /documents/payment/categories/. Empty when the register is offline or the
@@ -191,6 +227,21 @@ public partial class SettingsViewModel : ViewModelBase
         ReturnOpenCashDrawer = _settingsService.ReturnOpenCashDrawer;
         ReturnPrintReceipt = _settingsService.ReturnPrintReceipt;
 
+        CustomerDisplayPort = _settingsService.CustomerDisplayPort;
+        CustomerDisplayBaudRateText = _settingsService.CustomerDisplayBaudRate.ToString();
+        SelectedDisplayCodePage = EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId);
+        foreach (var port in PrinterDiscoveryService.GetComPorts())
+            AvailableDisplayPorts.Add(port);
+        // Сохранённый порт мог быть не переподключён к моменту открытия экрана — тот
+        // же случай, что и у ConnectionString принтера на COM (см.
+        // PrinterConfigViewModel.UpdateAvailableConnections). Не добавить его сюда —
+        // значит отдать CustomerDisplayPort на слом первой же простановке
+        // SelectedItem: SelectingItemsControl пишет null назад для значения, которого
+        // нет в ItemsSource (см. комментарий у SelectedCodePage выше), а Save ниже
+        // сохранил бы этот null поверх настроенного порта.
+        if (!string.IsNullOrWhiteSpace(CustomerDisplayPort) && !AvailableDisplayPorts.Contains(CustomerDisplayPort))
+            AvailableDisplayPorts.Add(CustomerDisplayPort);
+
         foreach (var printer in _settingsService.Printers)
         {
             var vm = new PrinterConfigViewModel
@@ -198,7 +249,8 @@ public partial class SettingsViewModel : ViewModelBase
                 Name = printer.Name,
                 ConnectionType = printer.ConnectionType,
                 ConnectionString = printer.ConnectionString,
-                IsEnabled = printer.IsEnabled
+                IsEnabled = printer.IsEnabled,
+                SelectedCodePage = EscPosCodePages.Resolve(printer.CodePageId)
             };
             vm.UpdateAvailableConnections();
             Printers.Add(vm);
@@ -227,7 +279,8 @@ public partial class SettingsViewModel : ViewModelBase
             Name = "New Printer",
             ConnectionType = PrinterConnectionType.LAN,
             ConnectionString = "192.168.1.100:9100",
-            IsEnabled = true
+            IsEnabled = true,
+            SelectedCodePage = EscPosCodePages.Default
         };
         vm.UpdateAvailableConnections();
         Printers.Add(vm);
@@ -240,6 +293,77 @@ public partial class SettingsViewModel : ViewModelBase
         {
             Printers.Remove(printer);
         }
+    }
+
+    /// <summary>Что в последний раз построил TestPrint — только для чтения и только
+    /// для тестов. То же обоснование, что у CompositePrinterService.Printers: строка,
+    /// которая доносит кодовую страницу СО ЭКРАНА (а не из настроек) до сервиса
+    /// печати, иначе не покрывается ничем, и её подмену на CompositePrinterService,
+    /// читающий сохранённое, ловил бы только grep.</summary>
+    internal EscPosPrinterService? LastTestPrintService { get; private set; }
+
+    /// <summary>Печатает образец на том, что сейчас на экране, а НЕ на сохранённых
+    /// настройках. Иначе связка «поменял кодовую страницу → напечатал → посмотрел»
+    /// требовала бы сохранения и выхода с экрана, то есть перестала бы быть
+    /// проверкой этого выбора.
+    ///
+    /// Команда живёт на SettingsViewModel, а не на строке принтера, ровно как
+    /// RemovePrinter рядом: строка не знает про баннеры, а привязка
+    /// $parent[UserControl].DataContext с CommandParameter="{Binding}" на этом
+    /// экране уже работает.</summary>
+    [RelayCommand]
+    private async Task TestPrint(PrinterConfigViewModel? printer)
+    {
+        if (printer == null) return;
+
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        var service = new EscPosPrinterService(
+            printer.ConnectionType,
+            printer.ConnectionString,
+            printer.SelectedCodePage ?? EscPosCodePages.Default);
+        LastTestPrintService = service;
+
+        try
+        {
+            await service.PrintTestReceiptAsync();
+            StatusMessage = I18nService.Instance["TestPrintSent"];
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"{I18nService.Instance["TestPrintFailed"]} {ex.Message}";
+        }
+    }
+
+    /// <summary>Строит дисплей из того, что сейчас в полях, по той же причине.
+    /// Одна кнопка, а не по одной на запись: дисплей на кассе один.</summary>
+    [RelayCommand]
+    private async Task CheckDisplay()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        ICustomerDisplayService display = string.IsNullOrWhiteSpace(CustomerDisplayPort)
+            ? new NullCustomerDisplayService()
+            : new VfdDisplayService(
+                CustomerDisplayPort,
+                // Тот же откат, что у Save чуть ниже по файлу, а не свои жёсткие
+                // 9600: иначе нечитаемое поле проверяется на одной скорости и
+                // сохраняется на другой — «проверка прошла» перестаёт значить
+                // что-либо про то, на чём касса в итоге заработает.
+                int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : _settingsService.CustomerDisplayBaudRate,
+                SelectedDisplayCodePage ?? EscPosCodePages.Default);
+
+        // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
+        // таймаута нет и SerialPort его не предлагает: зависший драйвер
+        // USB-serial держит открытие сколько угодно. Без этого кнопка не
+        // отчитается, а повиснет — то есть не сделает того, ради чего заведена.
+        var send = display.ShowLineAsync("VV CASH", "Проверка / Test");
+        var ok = await Task.WhenAny(send, Task.Delay(3000)) == send && send.Result;
+
+        if (ok) StatusMessage = I18nService.Instance["DisplayCheckOk"];
+        else ErrorMessage = I18nService.Instance["DisplayCheckFailed"];
     }
 
     /// <summary>Confirmation overlay state. This screen is reachable from the login screen,
@@ -343,6 +467,7 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
         ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
 
         _settingsService.BackendUrl = BackendUrl;
         _settingsService.CashRegisterToken = CashRegisterToken;
@@ -366,6 +491,18 @@ public partial class SettingsViewModel : ViewModelBase
         _settingsService.ReturnOpenCashDrawer = ReturnOpenCashDrawer;
         _settingsService.ReturnPrintReceipt = ReturnPrintReceipt;
 
+        // Пустой порт здесь — не то же самое, что «порт стёрли»: ComboBox мог
+        // обнулить CustomerDisplayPort сам, если сохранённое значение не успело
+        // попасть в AvailableDisplayPorts (см. конструктор). Как SelectedPhoneFormat
+        // и обе категории платежа ниже — пропуск записи, а не запись пустоты поверх
+        // настроенного порта.
+        if (!string.IsNullOrWhiteSpace(CustomerDisplayPort))
+            _settingsService.CustomerDisplayPort = CustomerDisplayPort;
+        if (int.TryParse(CustomerDisplayBaudRateText, out var displayBaud) && displayBaud > 0)
+            _settingsService.CustomerDisplayBaudRate = displayBaud;
+        if (SelectedDisplayCodePage != null)
+            _settingsService.CustomerDisplayCodePageId = SelectedDisplayCodePage.Id;
+
         // Only when the list actually loaded: an offline settings visit shows an empty
         // dropdown and a null selection, and writing that through would silently
         // disable exchanges on a register that was configured correctly.
@@ -379,7 +516,17 @@ public partial class SettingsViewModel : ViewModelBase
             Name = p.Name,
             ConnectionType = p.ConnectionType,
             ConnectionString = p.ConnectionString,
-            IsEnabled = p.IsEnabled
+            IsEnabled = p.IsEnabled,
+            // Здесь ?? Default, а не пропуск записи, как у SelectedPhoneFormat и
+            // категорий платежа выше. Причина не в том, что каталог всегда полон —
+            // PhoneFormats тоже статичен и сети не требует. Причин три другие:
+            // Printers пересобирается списком целиком, поэтому «пропустить и
+            // сохранить прежнее» потребовало бы сопоставлять каждую строку с её
+            // прежним PrinterConfig, а у только что добавленной строки прежнего нет;
+            // и цена промаха здесь несравнима — откат на CP866 это ровно то, что
+            // Resolve и так отдаёт ненастроенному принтеру, тогда как пустой формат
+            // телефона молча применил бы чужой код страны к настоящим номерам.
+            CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id
         }).ToList();
 
         _settingsService.Save();
