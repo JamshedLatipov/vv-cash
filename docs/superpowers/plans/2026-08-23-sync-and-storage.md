@@ -1935,7 +1935,13 @@ git commit -m "feat(payment): show the customer's balance and limit where the cr
 
 1. Убрать деление: `? line.DiscountAmount`. Ожидание: первые два теста красные. Вернуть.
 2. `: null` → `: 0m` в тернарнике. Ожидание: `ClearQuote_ClearsTheDiscountFields` красный на `Assert.Null`. Вернуть.
-3. Убрать защиту `line.Quantity > 0` — ожидание: **зелёный** (в тестах количество ненулевое). Это не дефект теста, а необходимая защита от деления на ноль. Вернуть и идти дальше.
+3. Убрать защиту `line.Quantity > 0`. Ожидание: **красный, четыре существующих теста** — `ApplyQuote_PricesLinesAtTheServersUnitPrice`, `QuotedLine_FollowsAQuantityChange`, `ApplyQuote_LeavesLinesTheServerDidNotPrice_OnTheirCachedPrice`, `ClearQuote_RestoresTheCachedPrice`, все с `DivideByZeroException`. Вернуть.
+
+**Первая редакция плана предсказывала здесь зелёный** — на том основании, что в новых тестах
+количество ненулевое. Для новых тестов это верно, для набора в целом нет: существующий хелпер
+`QuoteWithLine(productId, unitPrice, discountTotal)` заполняет только `ProductId` и `UnitPrice`,
+оставляя `Quantity` в значении по умолчанию `0m`, а `0m / 0m` для `decimal` бросает. Защита
+оказалась покрыта четырьмя тестами, а не нулём. Поймано исполнителем при мутации.
 
 - [ ] **Step 6: Коммит**
 
