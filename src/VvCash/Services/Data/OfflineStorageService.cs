@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
 using Microsoft.Data.Sqlite;
@@ -12,6 +13,15 @@ public class OfflineStorageService : IOfflineStorageService
 {
     private readonly string _connectionString;
     private bool _isInitialized = false;
+
+    /// <summary>Serialises InitializeAsync. The fast path still reads _isInitialized
+    /// without the lock — that read is only ever false-negative, and a false negative
+    /// costs one uncontended WaitAsync, not a second initialisation: the flag is
+    /// re-checked under the lock.
+    ///
+    /// Not merely defensive since the schema rebuild landed inside InitializeAsync:
+    /// two concurrent callers would run two DROP TABLE against the same rows.</summary>
+    private readonly SemaphoreSlim _initLock = new(1, 1);
 
     /// <summary>Creates the service against the standard per-user database file.
     /// Pass <paramref name="dbPath"/> to point at a different file (e.g. a temp file in tests);
@@ -32,146 +42,154 @@ public class OfflineStorageService : IOfflineStorageService
     {
         if (_isInitialized) return;
 
-        using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync();
-
-        using var command = connection.CreateCommand();
-
-        command.CommandText = @"
-            CREATE TABLE IF NOT EXISTS Settings (
-                Key TEXT PRIMARY KEY,
-                Value TEXT
-            );
-
-            -- RejectedAt/RejectedReason are NULL for a document still waiting its turn.
-            -- A non-null RejectedAt means the server answered, on the merits, that it
-            -- will not take this document: it leaves the retry rotation but stays on
-            -- disk, because it is still the only record of what the register booked.
-            CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
-                Hash TEXT PRIMARY KEY,
-                Payload TEXT,
-                RejectedAt TEXT,
-                RejectedReason TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS Categories (
-                Id TEXT PRIMARY KEY,
-                Name TEXT NOT NULL,
-                IsQuickAccess INTEGER NOT NULL DEFAULT 0,
-                ImageUrl TEXT,
-                ParentId TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS Products (
-                Id TEXT PRIMARY KEY,
-                Name TEXT NOT NULL,
-                Sku TEXT,
-                Category TEXT,
-                Price REAL NOT NULL,
-                OriginalPrice REAL,
-                DiscountPercent REAL,
-                ImagePath TEXT,
-                Barcode TEXT,
-                Tags TEXT,
-                UnitId TEXT,
-                UnitCode TEXT,
-                UnitShortName TEXT,
-                UnitFactor REAL,
-                IsDivisible INTEGER,
-                SellInSecondaryUnit INTEGER,
-                -- Name, Sku and Barcode joined and lowercased, for the POS search box.
-                -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
-                -- only: an all-caps Cyrillic query would never match its own product, and
-                -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
-                SearchText TEXT
-            );
-
-            -- Auto-applied promotions, stored as the raw server payload: the rules
-            -- and targets are nested lists that would need two more tables and a
-            -- join to reassemble, and nothing here ever queries into them.
-            CREATE TABLE IF NOT EXISTS Promotions (
-                Id TEXT PRIMARY KEY,
-                Payload TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS ParkedSales (
-                Id TEXT PRIMARY KEY,
-                Label TEXT,
-                CustomerName TEXT,
-                Total REAL NOT NULL,
-                -- REAL, not INTEGER: a weighted line contributes a fraction of a unit.
-                -- SQLite's dynamic typing keeps rows written under the old declaration readable.
-                ItemCount REAL NOT NULL,
-                CreatedAt TEXT NOT NULL,
-                Payload TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS Sellers (
-                Id TEXT PRIMARY KEY,
-                FirstName TEXT NOT NULL,
-                LastName TEXT,
-                PinHash TEXT,
-                CanSell INTEGER NOT NULL DEFAULT 1,
-                CanRefund INTEGER NOT NULL DEFAULT 0,
-                CanCloseShift INTEGER NOT NULL DEFAULT 0,
-                MaxDiscount REAL NOT NULL DEFAULT 0
-            );
-
-            -- Create indices for performance
-            CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);
-            CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);
-        ";
-
-        await command.ExecuteNonQueryAsync();
-
-        // Ensure LastSyncVersion setting exists
-        command.CommandText = "INSERT OR IGNORE INTO Settings (Key, Value) VALUES ('LastSyncVersion', '0');";
-        await command.ExecuteNonQueryAsync();
-
-        // Migrations for a database created before a column existed. Every one of these
-        // is expected to fail on a register that already has the column, and expected to
-        // succeed exactly once on one that does not.
-        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;");
-        await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ParentId TEXT;");
-        await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN Tags TEXT;");
-
-        // Migration: the rejected-document columns. A register upgrading with documents
-        // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
-        // which is exactly what they are.
-        foreach (var alter in new[]
+        await _initLock.WaitAsync();
+        try
         {
-            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedAt TEXT;",
-            "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedReason TEXT;",
-        })
-        {
-            try
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var command = connection.CreateCommand();
+
+            command.CommandText = @"
+                CREATE TABLE IF NOT EXISTS Settings (
+                    Key TEXT PRIMARY KEY,
+                    Value TEXT
+                );
+
+                -- RejectedAt/RejectedReason are NULL for a document still waiting its turn.
+                -- A non-null RejectedAt means the server answered, on the merits, that it
+                -- will not take this document: it leaves the retry rotation but stays on
+                -- disk, because it is still the only record of what the register booked.
+                CREATE TABLE IF NOT EXISTS UnsyncedDocuments (
+                    Hash TEXT PRIMARY KEY,
+                    Payload TEXT,
+                    RejectedAt TEXT,
+                    RejectedReason TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS Categories (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    IsQuickAccess INTEGER NOT NULL DEFAULT 0,
+                    ImageUrl TEXT,
+                    ParentId TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS Products (
+                    Id TEXT PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    Sku TEXT,
+                    Category TEXT,
+                    Price REAL NOT NULL,
+                    OriginalPrice REAL,
+                    DiscountPercent REAL,
+                    ImagePath TEXT,
+                    Barcode TEXT,
+                    Tags TEXT,
+                    UnitId TEXT,
+                    UnitCode TEXT,
+                    UnitShortName TEXT,
+                    UnitFactor REAL,
+                    IsDivisible INTEGER,
+                    SellInSecondaryUnit INTEGER,
+                    -- Name, Sku and Barcode joined and lowercased, for the POS search box.
+                    -- Lowercased in C# rather than by SQLite's own lower(), which folds ASCII
+                    -- only: an all-caps Cyrillic query would never match its own product, and
+                    -- that is most of this catalog. See SearchTextOf/SearchProductsAsync below.
+                    SearchText TEXT
+                );
+
+                -- Auto-applied promotions, stored as the raw server payload: the rules
+                -- and targets are nested lists that would need two more tables and a
+                -- join to reassemble, and nothing here ever queries into them.
+                CREATE TABLE IF NOT EXISTS Promotions (
+                    Id TEXT PRIMARY KEY,
+                    Payload TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ParkedSales (
+                    Id TEXT PRIMARY KEY,
+                    Label TEXT,
+                    CustomerName TEXT,
+                    Total REAL NOT NULL,
+                    -- REAL, not INTEGER: a weighted line contributes a fraction of a unit.
+                    -- SQLite's dynamic typing keeps rows written under the old declaration readable.
+                    ItemCount REAL NOT NULL,
+                    CreatedAt TEXT NOT NULL,
+                    Payload TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS Sellers (
+                    Id TEXT PRIMARY KEY,
+                    FirstName TEXT NOT NULL,
+                    LastName TEXT,
+                    PinHash TEXT,
+                    CanSell INTEGER NOT NULL DEFAULT 1,
+                    CanRefund INTEGER NOT NULL DEFAULT 0,
+                    CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                    MaxDiscount REAL NOT NULL DEFAULT 0
+                );
+
+                -- Create indices for performance
+                CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);
+                CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);
+            ";
+
+            await command.ExecuteNonQueryAsync();
+
+            // Ensure LastSyncVersion setting exists
+            command.CommandText = "INSERT OR IGNORE INTO Settings (Key, Value) VALUES ('LastSyncVersion', '0');";
+            await command.ExecuteNonQueryAsync();
+
+            // Migrations for a database created before a column existed. Every one of these
+            // is expected to fail on a register that already has the column, and expected to
+            // succeed exactly once on one that does not.
+            await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ImageUrl TEXT;");
+            await AddColumnIfMissingAsync(command, "ALTER TABLE Categories ADD COLUMN ParentId TEXT;");
+            await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN Tags TEXT;");
+
+            // Migration: the rejected-document columns. A register upgrading with documents
+            // already queued keeps them — they read as NULL, i.e. still awaiting a retry,
+            // which is exactly what they are.
+            foreach (var alter in new[]
             {
-                command.CommandText = alter;
-                await command.ExecuteNonQueryAsync();
+                "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedAt TEXT;",
+                "ALTER TABLE UnsyncedDocuments ADD COLUMN RejectedReason TEXT;",
+            })
+            {
+                try
+                {
+                    command.CommandText = alter;
+                    await command.ExecuteNonQueryAsync();
+                }
+                catch { /* column already exists */ }
             }
-            catch { /* column already exists */ }
+
+            // Migration: add the secondary-unit columns to Products if upgrading
+            // from an older DB. One ALTER per column, because a register may be
+            // upgrading from any point in this sequence.
+            foreach (var alter in new[]
+            {
+                "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
+                "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
+                "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
+                "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
+                "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
+                "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
+                "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
+            })
+            {
+                await AddColumnIfMissingAsync(command, alter);
+            }
+
+            await BackfillSearchTextAsync(connection);
+
+            _isInitialized = true;
         }
-
-        // Migration: add the secondary-unit columns to Products if upgrading
-        // from an older DB. One ALTER per column, because a register may be
-        // upgrading from any point in this sequence.
-        foreach (var alter in new[]
+        finally
         {
-            "ALTER TABLE Products ADD COLUMN UnitId TEXT;",
-            "ALTER TABLE Products ADD COLUMN UnitCode TEXT;",
-            "ALTER TABLE Products ADD COLUMN UnitShortName TEXT;",
-            "ALTER TABLE Products ADD COLUMN UnitFactor REAL;",
-            "ALTER TABLE Products ADD COLUMN IsDivisible INTEGER;",
-            "ALTER TABLE Products ADD COLUMN SellInSecondaryUnit INTEGER;",
-            "ALTER TABLE Products ADD COLUMN SearchText TEXT;",
-        })
-        {
-            await AddColumnIfMissingAsync(command, alter);
+            _initLock.Release();
         }
-
-        await BackfillSearchTextAsync(connection);
-
-        _isInitialized = true;
     }
 
     /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it is.
