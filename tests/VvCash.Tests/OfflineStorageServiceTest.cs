@@ -754,6 +754,78 @@ public class OfflineStorageServiceTest : IDisposable
         }
     }
 
+    /// <summary>A rebuild that throws must be caught, logged and stepped over — never
+    /// allowed to abort initialisation. PosViewModel starts this as
+    /// `_ = InitializeAsync();` and never observes the task, so an exception escaping here
+    /// is not a crash anybody sees: it is a register that comes up with no catalogue, no
+    /// shift, and nothing on screen saying why. Losing precision is a bad day; a till that
+    /// will not open is a closed shop.
+    ///
+    /// The failure is induced exactly the way RebuildTableAsync's own precondition comment
+    /// says it can happen — a view over the table. SQLite lets DROP TABLE take the table
+    /// out from under a view and then refuses the RENAME that follows, so this is a failure
+    /// in the *middle* of the rebuild, after the destructive step. That is deliberate: it is
+    /// the case where degrading safely actually costs something, because the transaction has
+    /// to roll the dropped table back rather than just decline to start.
+    ///
+    /// Three things are asserted and all three are the point: initialisation returns instead
+    /// of throwing; the rebuilds queued *behind* the failing one still ran, proving the
+    /// sequence carried on rather than being abandoned; and the table whose rebuild failed is
+    /// left in its old working shape with its row, not half migrated.
+    ///
+    /// The log line itself is not asserted. The runner does not surface Console output, and
+    /// capturing it needs a Console.Out redirect that would make this a test of plumbing
+    /// rather than of behaviour. What the catch is *for* is the three assertions below.</summary>
+    [Fact]
+    public async Task InitializeAsync_WhenARebuildFails_LogsAndCarriesOn()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"vvcash-migrate-failing-{Guid.NewGuid()}.db");
+        try
+        {
+            await SeedPreMigrationDatabaseAsync(dbPath);
+
+            using (var blocker = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                await blocker.OpenAsync();
+                using var make = blocker.CreateCommand();
+                // Named columns rather than SELECT *: the ADD COLUMN migrations that run
+                // before the rebuild would leave a star view's column list stale, and this
+                // must fail on the RENAME for the reason the test says it does.
+                make.CommandText = "CREATE VIEW ProductsRebuildBlocker AS SELECT Id, Price FROM Products;";
+                await make.ExecuteNonQueryAsync();
+            }
+
+            var escaped = await Record.ExceptionAsync(
+                () => new OfflineStorageService(dbPath).InitializeAsync());
+            Assert.Null(escaped);
+
+            using var check = new SqliteConnection($"Data Source={dbPath}");
+            await check.OpenAsync();
+
+            // Carried on: both rebuilds that queue behind the failing Products one completed.
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "ParkedSales", "Total"));
+            Assert.Equal("TEXT", await DeclaredTypeAsync(check, "Sellers", "MaxDiscount"));
+
+            // Degraded, and to the old shape rather than a half-migrated one. REAL still
+            // rounds, but GetDecimal reads it, the till still sells, and the probe fires
+            // again on the next launch — which is the whole bargain the catch is making.
+            Assert.Equal("REAL", await DeclaredTypeAsync(check, "Products", "Price"));
+
+            using var row = check.CreateCommand();
+            row.CommandText = "SELECT Name, Price FROM Products WHERE Id = 'p-1';";
+            using var rd = await row.ExecuteReaderAsync();
+            Assert.True(await rd.ReadAsync());
+            Assert.Equal("Товар", rd.GetString(0));
+            Assert.Equal(19.99m, rd.GetDecimal(1));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(dbPath + suffix)) File.Delete(dbPath + suffix);
+        }
+    }
+
     /// <summary>The values matter more than the assertions. Ordinary prices survive a REAL
     /// column intact — 19.99 and 1234.56 both round-trip through a double without loss — so
     /// a test built on one of those would have been green before this migration as well as
