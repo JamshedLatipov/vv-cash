@@ -529,4 +529,31 @@ public class SyncServiceTest
 
         Assert.Null(await Build(handler, new FakeStorage()).FetchAllRemainsAsync());
     }
+
+    /// <summary>A server that increments page_count on every response can never be
+    /// satisfied, so the walk must give up at SyncService.MaxPages rather than loop
+    /// forever. The stub's own exception is not the interesting assertion -- it exists
+    /// only so a regression fails fast instead of hanging the suite, and it is set well
+    /// past the ceiling so it never fires when the fix is in place. The request-count
+    /// assertion below is what actually proves the production ceiling stopped the walk,
+    /// rather than the stub's guard doing it instead.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_PageCountKeepsGrowing_AbandonsTheWalk()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            if (requests > SyncService.MaxPages + 50)
+                throw new InvalidOperationException(
+                    $"stub served {requests} requests without the walk giving up; the page-count ceiling did not fire");
+            return (HttpStatusCode.OK, $$"""{"body":[],"page_count":{{requests + 1}},"total_items":0}""");
+        });
+
+        var result = await Build(handler, new FakeStorage()).FetchAllRemainsAsync();
+
+        Assert.Null(result);
+        Assert.True(requests <= SyncService.MaxPages + 1,
+            $"expected the walk to stop at the page ceiling ({SyncService.MaxPages}), saw {requests} requests");
+    }
 }

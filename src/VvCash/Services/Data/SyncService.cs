@@ -475,6 +475,18 @@ public class SyncService : ISyncService
         }
     }
 
+    // Internal rather than private only so
+    // FetchAllRemainsAsync_PageCountKeepsGrowing_AbandonsTheWalk can assert against this
+    // number directly instead of duplicating it; it is not part of the public API.
+    //
+    // A server that grows page_count on every response would otherwise keep the walk
+    // below running forever. Following a growing count is deliberate — a catalogue can
+    // legitimately gain a page mid-walk — but it needs an end. Two hundred pages at two
+    // hundred rows is forty thousand products, comfortably past any real catalogue, and
+    // reaching it means the count is not to be trusted rather than that the warehouse is
+    // enormous.
+    internal const int MaxPages = 200;
+
     /// <summary>Walks GET /cashes/remain/ page by page and returns product id to
     /// quantity for the whole warehouse.
     ///
@@ -499,6 +511,12 @@ public class SyncService : ISyncService
 
             while (page <= pageCount)
             {
+                if (page > MaxPages)
+                {
+                    Console.WriteLine($"[SyncService] remain walk exceeded {MaxPages} pages; walk abandoned");
+                    return null;
+                }
+
                 var url = $"{baseUrl}cashes/remain/?page={page}&page_size=200";
                 var response = await _httpClient.GetAsync(url);
                 if (!response.IsSuccessStatusCode)
