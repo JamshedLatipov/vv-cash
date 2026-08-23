@@ -170,6 +170,7 @@ public class ExchangeViewModelTest
     private sealed class FakeCashFeatureService : ICashFeatureService
     {
         public CashFeatures Current { get; } = CashFeatures.Default;
+        public bool HasLoaded => true;
         public void Set(string code, bool enabled) => Current.Flags[code] = enabled;
         public Task RefreshAsync() => Task.CompletedTask;
     }

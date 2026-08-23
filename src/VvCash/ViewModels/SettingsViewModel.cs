@@ -242,25 +242,75 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
-    private async Task ClearCategories()
+    /// <summary>Confirmation overlay state. This screen is reachable from the login screen,
+    /// before anyone has authenticated, and on an offline register a wiped catalog means
+    /// nothing can be sold until connectivity returns — so the two destructive buttons no
+    /// longer do the work themselves. They arm <see cref="_pendingAction"/> and raise this.
+    /// Shaped after PosViewModel's own IsShiftCloseConfirmVisible overlay rather than
+    /// inventing a second confirmation pattern.</summary>
+    [ObservableProperty] private bool _isConfirmVisible;
+
+    [ObservableProperty] private string _confirmMessage = string.Empty;
+
+    /// <summary>What <see cref="ConfirmCommand"/> will run. Cleared by both exits, so a
+    /// stray second tap after a cancel cannot run an action the operator already refused.</summary>
+    private Func<Task>? _pendingAction;
+
+    private void AskToConfirm(string message, Func<Task> action)
     {
-        await _offlineStorageService.ClearCategoriesAsync();
-        await _offlineStorageService.SetLastSyncVersionAsync(0);
+        _pendingAction = action;
+        ConfirmMessage = message;
+        IsConfirmVisible = true;
     }
 
     [RelayCommand]
-    private async Task ClearProducts()
+    private async Task Confirm()
     {
-        await _offlineStorageService.ClearProductsAsync();
-        await _offlineStorageService.SetLastSyncVersionAsync(0);
+        // Taken and cleared here, before the action runs — not what stops a double tap
+        // (that is [RelayCommand]'s default AllowConcurrentExecutions = false on async
+        // commands, which drops CanExecute while one is already running), but it is what
+        // makes cancel-then-confirm a genuine no-op: nothing is left armed for a stray
+        // Confirm to pick up once CancelConfirm has already run.
+        var action = _pendingAction;
+        _pendingAction = null;
+        IsConfirmVisible = false;
+        if (action == null) return;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            // The overlay is already down and the operator has no other signal — this
+            // screen's own error banner is the one place a failed wipe can still be
+            // reported. Silently swallowing it would leave them believing a catalog was
+            // cleared that is still there, or half there.
+            ErrorMessage = $"{I18nService.Instance["ClearFailed"]} {ex.Message}";
+        }
     }
 
     [RelayCommand]
-    private async Task ClearUnsyncedDocuments()
+    private void CancelConfirm()
     {
-        await _offlineStorageService.ClearUnsyncedDocumentsAsync();
+        _pendingAction = null;
+        IsConfirmVisible = false;
     }
+
+    [RelayCommand]
+    private void ClearCategories()
+        => AskToConfirm(I18nService.Instance["ConfirmClearCategories"], async () =>
+        {
+            await _offlineStorageService.ClearCategoriesAsync();
+            await _offlineStorageService.SetLastSyncVersionAsync(0);
+        });
+
+    [RelayCommand]
+    private void ClearProducts()
+        => AskToConfirm(I18nService.Instance["ConfirmClearProducts"], async () =>
+        {
+            await _offlineStorageService.ClearProductsAsync();
+            await _offlineStorageService.SetLastSyncVersionAsync(0);
+        });
 
     [RelayCommand]
     private void GoBack()    {

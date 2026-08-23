@@ -104,7 +104,6 @@ public class SyncServiceTest
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(LastSyncVersion);
         public Task ClearCategoriesAsync() => Task.CompletedTask;
         public Task ClearProductsAsync() => Task.CompletedTask;
-        public Task ClearUnsyncedDocumentsAsync() => Task.CompletedTask;
         public Task SaveParkedSaleAsync(ParkedSale sale) => Task.CompletedTask;
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult<IEnumerable<ParkedSale>>(Array.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);

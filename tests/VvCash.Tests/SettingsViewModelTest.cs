@@ -42,6 +42,7 @@ public class SettingsViewModelTest
     private sealed class FakeFeatures : ICashFeatureService
     {
         public CashFeatures Current => CashFeatures.Default;
+        public bool HasLoaded => true;
         public Task RefreshAsync() => Task.CompletedTask;
     }
 
@@ -76,9 +77,10 @@ public class SettingsViewModelTest
         public Task DeleteUnsyncedDocumentAsync(string hash) => Task.CompletedTask;
         public Task MarkDocumentRejectedAsync(string hash, string reason) => Task.CompletedTask;
         public Task<int> GetLastSyncVersionAsync() => Task.FromResult(0);
-        public Task ClearCategoriesAsync() => Task.CompletedTask;
-        public Task ClearProductsAsync() => Task.CompletedTask;
-        public Task ClearUnsyncedDocumentsAsync() => Task.CompletedTask;
+        public int ClearCategoriesCallCount { get; private set; }
+        public int ClearProductsCallCount { get; private set; }
+        public Task ClearCategoriesAsync() { ClearCategoriesCallCount++; return Task.CompletedTask; }
+        public Task ClearProductsAsync() { ClearProductsCallCount++; return Task.CompletedTask; }
         public Task SaveParkedSaleAsync(ParkedSale sale) => Task.CompletedTask;
         public Task<IEnumerable<ParkedSale>> GetParkedSalesAsync() => Task.FromResult(Enumerable.Empty<ParkedSale>());
         public Task<ParkedSale?> GetParkedSaleAsync(string id) => Task.FromResult<ParkedSale?>(null);
@@ -89,12 +91,16 @@ public class SettingsViewModelTest
     }
 
     private static SettingsViewModel Build(out FakeSettings settings)
+        => Build(out settings, out _);
+
+    private static SettingsViewModel Build(out FakeSettings settings, out FakeStorage storage)
     {
         settings = new FakeSettings();
+        storage = new FakeStorage();
         return new SettingsViewModel(
             new MainViewModel(),
             settings,
-            new FakeStorage(),
+            storage,
             new FakeFeatures(),
             new FakePaymentCategories());
     }
@@ -144,5 +150,76 @@ public class SettingsViewModelTest
 
         Assert.Equal(1, settings.SaveCallCount);
         Assert.Equal("http://localhost:8080/api/v1/", settings.BackendUrl);
+    }
+
+    // -----------------------------------------------------------------------------
+    // The two remaining destructive buttons. This screen opens from the login screen,
+    // before anyone has authenticated, and on an offline register a wiped catalog means
+    // nothing can be sold until connectivity returns — so neither button may act on a
+    // single tap.
+    // -----------------------------------------------------------------------------
+
+    [Fact]
+    public void ClearProducts_OnlyArmsTheConfirmation_AndTouchesNothing()
+    {
+        var vm = Build(out _, out var storage);
+
+        vm.ClearProductsCommand.Execute(null);
+
+        Assert.True(vm.IsConfirmVisible);
+        Assert.False(string.IsNullOrWhiteSpace(vm.ConfirmMessage));
+        Assert.Equal(0, storage.ClearProductsCallCount);
+    }
+
+    [Fact]
+    public void ClearCategories_OnlyArmsTheConfirmation_AndTouchesNothing()
+    {
+        var vm = Build(out _, out var storage);
+
+        vm.ClearCategoriesCommand.Execute(null);
+
+        Assert.True(vm.IsConfirmVisible);
+        Assert.Equal(0, storage.ClearCategoriesCallCount);
+    }
+
+    [Fact]
+    public async Task Confirm_RunsTheArmedActionAndClosesTheOverlay()
+    {
+        var vm = Build(out _, out var storage);
+        vm.ClearProductsCommand.Execute(null);
+
+        await vm.ConfirmCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, storage.ClearProductsCallCount);
+        Assert.Equal(0, storage.ClearCategoriesCallCount);
+        Assert.False(vm.IsConfirmVisible);
+    }
+
+    [Fact]
+    public async Task CancelConfirm_LeavesStorageAlone_AndDisarmsTheAction()
+    {
+        // Disarming matters as much as closing: a Confirm arriving later — a stray second
+        // tap, a keyboard Enter — must not run an action the operator already refused.
+        var vm = Build(out _, out var storage);
+        vm.ClearCategoriesCommand.Execute(null);
+
+        vm.CancelConfirmCommand.Execute(null);
+        await vm.ConfirmCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, storage.ClearCategoriesCallCount);
+        Assert.False(vm.IsConfirmVisible);
+    }
+
+    [Fact]
+    public async Task ArmingASecondActionReplacesTheFirst()
+    {
+        var vm = Build(out _, out var storage);
+        vm.ClearProductsCommand.Execute(null);
+        vm.ClearCategoriesCommand.Execute(null);
+
+        await vm.ConfirmCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, storage.ClearProductsCallCount);
+        Assert.Equal(1, storage.ClearCategoriesCallCount);
     }
 }

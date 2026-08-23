@@ -14,5 +14,11 @@ public class CashFeatureService : ICashFeatureService
     /// mid-startup must render a working screen, not throw.</summary>
     public CashFeatures Current { get; private set; } = CashFeatures.Default;
 
-    public async Task RefreshAsync() => Current = await _storage.GetCashFeaturesAsync();
+    public bool HasLoaded { get; private set; }
+
+    public async Task RefreshAsync()
+    {
+        Current = await _storage.GetCashFeaturesAsync();
+        HasLoaded = true;
+    }
 }

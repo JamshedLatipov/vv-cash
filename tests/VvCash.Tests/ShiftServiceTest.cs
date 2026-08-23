@@ -136,20 +136,23 @@ public class ShiftServiceTest
     }
 
     [Fact]
-    public async Task GetShiftStateAsync_OtherServerError_DoesNotRaiseSessionRevoked_ReturnsNull()
+    public async Task GetShiftStateAsync_OtherServerError_RaisesNeitherEvent()
     {
-        // A 500 (or any non-401 failure) is a server problem, not a rejected session — must
-        // not be treated the same as a 401.
+        // A 500 (or any non-401/403 failure) is a server problem, not a rejected session —
+        // must not be treated the same as either event.
         var handler = new StubHttpMessageHandler(req =>
             (HttpStatusCode.InternalServerError, """{"message":"boom"}"""));
         var svc = CreateService(handler, out _);
+        var deniedCount = 0;
         var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
         svc.SessionRevoked += (s, e) => revokedCount++;
 
         var result = await svc.GetShiftStateAsync();
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         Assert.Null(result);
+        Assert.Equal(0, deniedCount);
         Assert.Equal(0, revokedCount);
     }
 
@@ -202,6 +205,134 @@ public class ShiftServiceTest
 
         Assert.Equal("shift-2", result);
         Assert.Equal("wh-2", session.WarehouseId);
+        Assert.Equal(0, revokedCount);
+    }
+
+    [Fact]
+    public async Task OpenShiftAsync_OtherServerError_RaisesNeitherEvent()
+    {
+        // Mirrors GetShiftStateAsync_OtherServerError_RaisesNeitherEvent: a server fault
+        // (a 500, or any other non-401/403 failure) says nothing about the session, so
+        // neither event may fire.
+        var handler = new StubHttpMessageHandler(req =>
+            (HttpStatusCode.InternalServerError, """{"message":"boom"}"""));
+        var svc = CreateService(handler, out _);
+        var deniedCount = 0;
+        var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
+        svc.SessionRevoked += (s, e) => revokedCount++;
+
+        var result = await svc.OpenShiftAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(result);
+        Assert.Equal(0, deniedCount);
+        Assert.Equal(0, revokedCount);
+    }
+
+    // -----------------------------------------------------------------------------
+    // 403 — the code this backend actually sends for a rejected session
+    // (middlewares/utils.go redirectToAccessDenied). Deliberately a DIFFERENT event
+    // from 401: several backend sources of 403 share one body, and most of them
+    // (tenant-DB failure, an inactive/deleted tenant, missing is_seller, missing
+    // permission) are transient or configuration faults that must never sign a
+    // cashier out.
+    // -----------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetShiftStateAsync_403_RaisesAccessDenied_NotSessionRevoked_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+            (HttpStatusCode.Forbidden, """{"status":"error","message":"forbidden"}"""));
+        var svc = CreateService(handler, out _);
+        var deniedCount = 0;
+        var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
+        svc.SessionRevoked += (s, e) => revokedCount++;
+
+        var result = await svc.GetShiftStateAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(result);
+        Assert.Equal(1, deniedCount);
+        Assert.Equal(0, revokedCount);
+    }
+
+    [Fact]
+    public async Task OpenShiftAsync_403_RaisesAccessDenied_NotSessionRevoked_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+            (HttpStatusCode.Forbidden, """{"status":"error","message":"forbidden"}"""));
+        var svc = CreateService(handler, out _);
+        var deniedCount = 0;
+        var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
+        svc.SessionRevoked += (s, e) => revokedCount++;
+
+        var result = await svc.OpenShiftAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(result);
+        Assert.Equal(1, deniedCount);
+        Assert.Equal(0, revokedCount);
+    }
+
+    [Fact]
+    public async Task GetShiftStateAsync_401_DoesNotRaiseAccessDenied()
+    {
+        // The asymmetry, pinned from the other side: 401 is unambiguous and keeps its
+        // own auto-sign-out path. Merging the two events would lose that distinction.
+        var handler = new StubHttpMessageHandler(req =>
+            (HttpStatusCode.Unauthorized, """{"message":"unauthorized","status":1}"""));
+        var svc = CreateService(handler, out _);
+        var deniedCount = 0;
+        var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
+        svc.SessionRevoked += (s, e) => revokedCount++;
+
+        await svc.GetShiftStateAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(0, deniedCount);
+        Assert.Equal(1, revokedCount);
+    }
+
+    [Fact]
+    public async Task GetShiftStateAsync_NetworkUnreachable_RaisesNeitherEvent()
+    {
+        // Offline operation is sacred: a request that never reached the server says
+        // nothing about the session, so neither event may fire.
+        var handler = new StubHttpMessageHandler(req => throw new HttpRequestException("network down"));
+        var svc = CreateService(handler, out _);
+        var deniedCount = 0;
+        var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
+        svc.SessionRevoked += (s, e) => revokedCount++;
+
+        var result = await svc.GetShiftStateAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Null(result);
+        Assert.Equal(0, deniedCount);
+        Assert.Equal(0, revokedCount);
+    }
+
+    [Fact]
+    public async Task GetShiftStateAsync_Success_RaisesNeitherEvent()
+    {
+        var handler = new StubHttpMessageHandler(req =>
+            (HttpStatusCode.OK, """{"status":0,"body":{"id":"shift-1"}}"""));
+        var svc = CreateService(handler, out _);
+        var deniedCount = 0;
+        var revokedCount = 0;
+        svc.AccessDenied += (s, e) => deniedCount++;
+        svc.SessionRevoked += (s, e) => revokedCount++;
+
+        var result = await svc.GetShiftStateAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("shift-1", result);
+        Assert.Equal(0, deniedCount);
         Assert.Equal(0, revokedCount);
     }
 }

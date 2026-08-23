@@ -162,6 +162,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     public bool IsExchangeVisible => _features.Current.IsEnabled(CashFeatureCodes.Exchange);
     public bool IsExchangeEnabled => IsExchangeVisible && IsSystemOnline;
 
+    /// <summary>Raised whenever <see cref="IsCustomerDisplayEnabled"/> changes, so the host
+    /// (App.axaml.cs) can show or hide the customer-facing window it owns. Same decoupling
+    /// role as <see cref="LogoutRequested"/>: this class states intent, the host performs
+    /// the window mechanics.
+    ///
+    /// Subscribe via <see cref="SubscribeCustomerDisplayVisibility"/> rather than <c>+=</c>
+    /// directly — see its remarks for why a bare subscription can silently never fire.</summary>
+    public event EventHandler<bool>? CustomerDisplayVisibilityChanged;
+
+    /// <summary>Subscribes <paramref name="handler"/> and immediately calls it with the
+    /// flag's current value. Use this rather than <c>+=</c>: the event only fires on a
+    /// *change*, and ICashFeatureService is a singleton that survives a logout/login cycle,
+    /// so the flag may already hold its final value by the time a host subscribes and
+    /// nothing would ever fire. Baking the initial call into the subscription is the only
+    /// version of that rule a caller cannot forget.</summary>
+    public void SubscribeCustomerDisplayVisibility(EventHandler<bool> handler)
+    {
+        CustomerDisplayVisibilityChanged += handler;
+        handler(this, IsCustomerDisplayEnabled);
+    }
+
     /// <summary>A display that was fed cart data before the flag actually loaded (see
     /// ApplyFeatures' remarks: it runs once synchronously with the default cache, then
     /// again once InitializeAsync's real fetch resolves) must not keep showing that
@@ -173,6 +194,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     {
         if (!value && CustomerDisplayViewModel != null)
             CustomerDisplayViewModel.IsIdle = true;
+
+        // Raise after parking, not before: the host's handler acts on the shared customer
+        // window synchronously off the back of this call, and it must see the display view
+        // model already idle rather than still showing the last cart.
+        CustomerDisplayVisibilityChanged?.Invoke(this, value);
     }
 
     /// <summary>Parked sales already on this register outlive the flag being
@@ -319,6 +345,41 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     /// on why this class is transient across logout/login), so the banner's true reset is
     /// simply this instance going away.</summary>
     [ObservableProperty] private bool _isSessionRevoked;
+
+    /// <summary>Set when ShiftService reports HTTP 403 on a shift operation — the code this
+    /// backend actually sends for a rejected session.
+    ///
+    /// Unlike <see cref="IsSessionRevoked"/> this is NOT permanent, and the difference is
+    /// the whole point. A 401 means the token is dead and a dead token does not heal. A 403
+    /// here is ambiguous: an expired JWT, a bad cash token, a tenant-database blip and
+    /// several configuration faults all produce the identical body (see
+    /// <see cref="VvCash.Services.Api.IShiftService.AccessDenied"/> for the full list), and
+    /// only some of them mean the session is over. So this clears the moment a shift id
+    /// actually comes back — see <see cref="OnCurrentShiftIdChanged"/> — rather than
+    /// leaving a red warning over a register that has since opened its shift.
+    ///
+    /// Drives the explanation inside the shift modal rather than the top banner:
+    /// PosView.axaml's Start Shift Modal Overlay is Grid.RowSpan="3" at ZIndex 1000 and
+    /// covers that banner completely.</summary>
+    [ObservableProperty] private bool _isShiftAccessDenied;
+
+    /// <summary>A shift id in hand proves the server accepted this session after all, so a
+    /// 403 raised earlier must stop showing. Hooked here rather than at the two assignment
+    /// sites (InitializeAsync's GetShiftStateAsync and the OpenShift command) so neither can
+    /// be added to later without the reset coming along. DoCloseShiftAsync assigns null on a
+    /// successful close, which correctly does not clear anything.
+    ///
+    /// Note the trap for whoever adds background shift-state polling next (StartBackgroundSync
+    /// already has a loop to hang it on): CommunityToolkit only invokes this hook when the new
+    /// value actually differs from the old one, so a recheck that comes back with the *same*
+    /// shift id we already hold — e.g. a plain `CurrentShiftId = await
+    /// _shiftService.GetShiftStateAsync();` — will not fire it and will not clear a stale
+    /// true here. Anything that re-reads shift state without necessarily changing it must
+    /// clear <see cref="IsShiftAccessDenied"/> itself.</summary>
+    partial void OnCurrentShiftIdChanged(string? value)
+    {
+        if (!string.IsNullOrEmpty(value)) IsShiftAccessDenied = false;
+    }
 
     /// <summary>Raised to ask the host (App.axaml.cs) to return to the login screen — the
     /// escape hatch this class otherwise has no way to reach on its own, since the
@@ -833,7 +894,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         IsMixedPaymentEnabled = features.IsEnabled(CashFeatureCodes.MixedPayment);
         IsCustomerRegistrationEnabled = features.IsEnabled(CashFeatureCodes.CustomerRegistration);
         IsSellerSwitchEnabled = features.IsEnabled(CashFeatureCodes.SellerSwitch);
-        IsCustomerDisplayEnabled = features.IsEnabled(CashFeatureCodes.CustomerDisplay);
+        // The one flag that does not get the benefit of the doubt. Every other flag here
+        // reads as enabled until proven otherwise, which is right on a shop floor. This one
+        // faces a paying customer: showing a display the store switched off is worse than
+        // briefly showing nothing, so it stays hidden until the real map has actually
+        // loaded (see ICashFeatureService.HasLoaded).
+        IsCustomerDisplayEnabled = _features.HasLoaded && features.IsEnabled(CashFeatureCodes.CustomerDisplay);
         IsDiscountEnabled = features.IsEnabled(CashFeatureCodes.Discount);
         IsCouponsEnabled = features.IsEnabled(CashFeatureCodes.Coupons);
 
@@ -932,6 +998,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
         _shiftService.SessionRevoked += OnShiftSessionRevoked;
+        _shiftService.AccessDenied += OnShiftAccessDenied;
 
         _parkedSaleService.CountChanged += OnParkedSaleCountChanged;
         ParkedSalesCount = await _parkedSaleService.GetCountAsync();
@@ -1302,6 +1369,19 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             () => PerformSignOut(I18nService.Instance["SessionExpiredSignInAgain"]));
     }
 
+    /// <summary>Reaction to a 403 on a shift operation. Deliberately does everything
+    /// <see cref="OnShiftSessionRevoked"/> does not: no sign-out, no navigation, no touching
+    /// of credentials. Most of the things that make this backend answer 403 say nothing
+    /// about the session (see <see cref="VvCash.Services.Api.IShiftService.AccessDenied"/>),
+    /// so the register explains itself and leaves the decision to the cashier, who already
+    /// has a sign-out button on the very modal this message appears in. Marshals to the UI
+    /// thread for the same reason every other handler here does — ShiftService posts the
+    /// event rather than invoking it inline.</summary>
+    private void OnShiftAccessDenied(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => IsShiftAccessDenied = true);
+    }
+
     private void OnParkedSaleCountChanged(object? sender, int count)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => ParkedSalesCount = count);
@@ -1347,10 +1427,22 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
         _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
         _shiftService.SessionRevoked -= OnShiftSessionRevoked;
+        _shiftService.AccessDenied -= OnShiftAccessDenied;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
         _syncService.SyncStatusChanged -= OnSyncStatusChanged;
         _syncService.ProductsSynced -= OnProductsSynced;
         _sellerSession.CurrentChanged -= OnSellerChanged;
+
+        // This class is the publisher of this one, not a subscriber, so there is nothing to
+        // unsubscribe from — but the instance is not collected when it is discarded either:
+        // PosViewModel is resolved from the root provider, which captures every IDisposable
+        // it constructs for its own eventual disposal (see App.axaml.cs's remarks where
+        // SellerSwitchViewModel deliberately avoids exactly that). Combined with
+        // InitializeAsync being fire-and-forget with no cancellation, a discarded instance
+        // can still reach ApplyFeatures and fire this event long after its screen is gone —
+        // at a host handler that drives the one long-lived customer window the *current*
+        // session is using. Dropping the invocation list makes that a guaranteed no-op.
+        CustomerDisplayVisibilityChanged = null;
 
         _syncCancellationTokenSource?.Cancel();
         _syncCancellationTokenSource?.Dispose();

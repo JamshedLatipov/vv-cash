@@ -152,8 +152,6 @@
   "ClearCategoriesDesc": "Mahalliy ma'lumotlar bazasidan barcha kategoriyalarni o'chirish",
   "ClearProducts": "Mahsulotlarni tozalash",
   "ClearProductsDesc": "Mahalliy ma'lumotlar bazasidan barcha mahsulotlarni o'chirish",
-  "ClearUnsyncedDocs": "Sotilmagan mahsulotlarni tozalash",
-  "ClearUnsyncedDocsDesc": "Sinxronlanmagan savdo hujjatlarini o'chirish",
   "Returns": "Qaytarishlar",
   "ReturnAction": "Qaytarish",
   "Returnable": "Qaytarish mumkin",
@@ -237,5 +235,10 @@
   "UpdateLaunchFailed": "O'rnatishni boshlab bo'lmadi. Faylni qo'lda ishga tushiring:",
   "PhoneRequired": "Telefon raqamini kiriting",
   "ScanReturnItem": "Mahsulotni skanerlang",
-  "BarcodeNotFoundInReceipt": "Ushbu chekda bu shtrix-kodli mahsulot topilmadi"
+  "BarcodeNotFoundInReceipt": "Ushbu chekda bu shtrix-kodli mahsulot topilmadi",
+  "ShiftAccessDenied": "Server ushbu kassa seansini rad etdi — smenani ochib bo'lmaydi. Chiqing va qaytadan kiring. Yordam bermasa, kassa tokeni va sotuvchi huquqlarini tekshiring.",
+  "ConfirmClearProducts": "Ushbu kassadan butun mahsulot katalogi o'chirilsinmi? Keyingi sinxronizatsiyagacha sotadigan narsa qolmaydi.",
+  "ConfirmClearCategories": "Ushbu kassadan barcha kategoriyalar o'chirilsinmi? Keyingi sinxronizatsiyagacha katalog bo'sh bo'ladi.",
+  "ConfirmDelete": "O'chirish",
+  "ClearFailed": "Kassaning mahalliy ma'lumotlarini tozalab bo'lmadi:"
 }
