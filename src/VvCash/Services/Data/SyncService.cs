@@ -17,6 +17,10 @@ public interface ISyncService
     Task SyncProductsAsync();
     Task FullReinitializeAsync();
     Task<bool> CheckSystemOnlineAsync();
+
+    /// <summary>Every stock line for this register's warehouse, or null when the walk
+    /// did not complete. Null is not "empty": it means the caller must change nothing.</summary>
+    Task<IReadOnlyDictionary<string, decimal>?> FetchAllRemainsAsync();
 }
 
 public class SyncService : ISyncService
@@ -469,5 +473,64 @@ public class SyncService : ISyncService
         {
             Console.WriteLine($"[SyncService] features sync error: {ex.Message}");
         }
+    }
+
+    /// <summary>Walks GET /cashes/remain/ page by page and returns product id to
+    /// quantity for the whole warehouse.
+    ///
+    /// Returns null on any incomplete walk — a non-2xx, an unparseable page, a transport
+    /// failure, being offline. The caller deletes every product this map does not
+    /// mention, so a half-finished walk is not a smaller answer, it is a wrong one.
+    ///
+    /// This endpoint answers with response.List — {body, page_count, total_items,
+    /// item_per_page} — and carries no "status" field, unlike the rest of the cash API.
+    /// page_count is what ends the loop.</summary>
+    public async Task<IReadOnlyDictionary<string, decimal>?> FetchAllRemainsAsync()
+    {
+        var baseUrl = GetBaseUrl();
+        if (string.IsNullOrEmpty(baseUrl)) return null;
+
+        var collected = new Dictionary<string, decimal>();
+
+        try
+        {
+            var page = 1;
+            var pageCount = 1;
+
+            while (page <= pageCount)
+            {
+                var url = $"{baseUrl}cashes/remain/?page={page}&page_size=200";
+                var response = await _httpClient.GetAsync(url);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[SyncService] remain page {page} -> {(int)response.StatusCode}; walk abandoned");
+                    return null;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                var parsed = JsonSerializer.Deserialize<Models.Api.CashRemainPage>(content);
+                if (parsed == null)
+                {
+                    Console.WriteLine($"[SyncService] remain page {page} did not parse; walk abandoned");
+                    return null;
+                }
+
+                foreach (var item in parsed.Body ?? new List<Models.Api.CashRemainItem>())
+                    if (!string.IsNullOrEmpty(item.ProductId))
+                        collected[item.ProductId] = item.Quantity;
+
+                // Read on every page rather than once: a page count that shrinks mid-walk
+                // still terminates, and one that grows is followed.
+                pageCount = parsed.PageCount > 0 ? parsed.PageCount : 1;
+                page++;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncService] remain walk failed: {ex.Message}");
+            return null;
+        }
+
+        return collected;
     }
 }

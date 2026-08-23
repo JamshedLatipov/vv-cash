@@ -337,6 +337,10 @@ public class PosViewModelSellerGateTest
         public Task FullReinitializeAsync() => Task.CompletedTask;
         public Task<bool> CheckSystemOnlineAsync() => Task.FromResult(true);
 
+        // Not exercised here: Task 4 only adds the walk, nothing in PosViewModel calls
+        // it yet. Stubbed solely so this fake keeps satisfying ISyncService.
+        public Task<IReadOnlyDictionary<string, decimal>?> FetchAllRemainsAsync() => Task.FromResult<IReadOnlyDictionary<string, decimal>?>(null);
+
         // Lets a test flip PosViewModel's IsSystemOnline the same way the real
         // background ping does, without waiting on an actual timer.
         public void RaiseSyncStatusChanged(bool isOnline) => SyncStatusChanged?.Invoke(this, isOnline);

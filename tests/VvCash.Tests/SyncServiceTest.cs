@@ -469,4 +469,64 @@ public class SyncServiceTest
         Assert.Equal(0m, product.UnitFactor);
         Assert.False(product.HasSecondaryUnit);
     }
+
+    private const string Page1 =
+        """{"body":[{"product_id":"a","quantity":5},{"product_id":"b","quantity":0}],"page_count":2,"total_items":3}""";
+    private const string Page2 =
+        """{"body":[{"product_id":"c","quantity":2.25}],"page_count":2,"total_items":3}""";
+
+    /// <summary>The walk has to follow page_count, not stop at the first page. The
+    /// request count assertion is not decoration: with a single-page stub the loop never
+    /// iterates, and a partial-failure test written against it would be green without
+    /// exercising anything.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_WalksEveryPage()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            return (HttpStatusCode.OK, requests == 1 ? Page1 : Page2);
+        });
+
+        var result = await Build(handler, new FakeStorage()).FetchAllRemainsAsync();
+
+        Assert.True(requests >= 2, $"expected the walk to request more than one page, saw {requests}");
+        Assert.NotNull(result);
+        Assert.Equal(3, result!.Count);
+        Assert.Equal(5m, result["a"]);
+        Assert.Equal(0m, result["b"]);
+        Assert.Equal(2.25m, result["c"]);
+    }
+
+    /// <summary>The most important test in the batch. A walk that breaks partway must
+    /// return null, because the caller deletes everything the map does not mention — and
+    /// half a map means half a catalogue deleted.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_SecondPageFails_ReturnsNull()
+    {
+        var requests = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requests++;
+            return requests == 1
+                ? (HttpStatusCode.OK, Page1)
+                : (HttpStatusCode.InternalServerError, "boom");
+        });
+
+        var result = await Build(handler, new FakeStorage()).FetchAllRemainsAsync();
+
+        Assert.True(requests >= 2, $"expected the walk to reach the second page, saw {requests}");
+        Assert.Null(result);
+    }
+
+    /// <summary>A transport failure is the offline case, and it is not an error worth
+    /// throwing out of a background sync loop.</summary>
+    [Fact]
+    public async Task FetchAllRemainsAsync_TransportThrows_ReturnsNull()
+    {
+        var handler = new StubHttpMessageHandler(_ => throw new HttpRequestException("no network"));
+
+        Assert.Null(await Build(handler, new FakeStorage()).FetchAllRemainsAsync());
+    }
 }
