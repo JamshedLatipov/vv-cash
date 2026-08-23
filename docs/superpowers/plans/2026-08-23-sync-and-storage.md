@@ -2320,6 +2320,8 @@ git commit -m "fix(images): bound the thumbnail cache a months-long shift never 
 
 Батч B научил: самая дорогая находка нашлась не в задаче, а на финальном ревью всего батча. Откат USB-печати к заглушке оставлял все 756 тестов зелёными — у главной находки не было никакой защиты.
 
+**Переписана 2026-08-23** под фактический состав батча. Исходная редакция перечисляла плашку «нет по учёту», тест конкурентной инициализации и свойства `CurrentBalanceDisplay`/`CreditLimitDisplay` — ничего из этого в дереве нет: находка #6 снята, тест удалён как вакуумный, свойства переименованы.
+
 **Files:** правок нет, только проверки.
 
 - [ ] **Step 1: Чистая полная сборка**
@@ -2328,7 +2330,7 @@ git commit -m "fix(images): bound the thumbnail cache a months-long shift never 
 dotnet build src/VvCash/VvCash.csproj -o build/verify --no-incremental
 ```
 
-Ожидание: **ровно одно** предупреждение — CS8601 в `PosViewModel.cs:2266`. Любое другое разобрать до конца, не списывать на «унаследованное».
+Ожидание: **ровно одно** предупреждение — CS8601 в `PosViewModel.cs:2266`. Любое другое разобрать до конца, не списывать на «унаследованное». Тестовый проект отдельно несёт одиннадцать своих предупреждений, они вне охвата.
 
 - [ ] **Step 2: Полный прогон трижды**
 
@@ -2336,66 +2338,101 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify --no-incremental
 & ./run-tests.ps1
 ```
 
-Ожидание: прежний итог плюс добавленные этой задачей тесты, три раза подряд.
+Ожидание: одинаковый итог три раза подряд, ноль падений.
 
-Если упал случайный посторонний тест — посмотреть стек. Гонка Avalonia Dispatcher известна и к этому батчу отношения не имеет. Если упал новый тест конкурентной инициализации — это уже наш флак, и его надо либо укрепить, либо удалить с записью в долг.
+Если упал случайный посторонний тест — посмотреть стек. Гонка Avalonia Dispatcher известна и к этому батчу отношения не имеет.
 
 - [ ] **Step 3: Мутационный обход всего батча**
 
 Не повтор задачных мутаций, а проверка «есть ли у каждой находки хоть один сторож». По одной за раз, каждая возвращается перед следующей.
 
-| Находка | Откат | Обязано покраснеть |
+**Прежде чем делать вывод из зелёного прогона — доказать, что мутация легла на диск.** Совпадение по полной строке, проверка числа замен, печать изменённых строк. За этот батч трижды случалось, что скрипт не записал правку и зелёный прогон означал ничего.
+
+| # | Откат | Обязано покраснеть |
 |---|---|---|
-| #6 обход | `while (page <= pageCount)` → `while (page <= 1)` | `FetchAllRemainsAsync_WalksEveryPage` |
-| #6 безопасность | неполный обход применяется вместо отказа | `ReconcileRemainsAsync_IncompleteWalk_AppliesNothing` |
-| #9 типы | `Price TEXT` → `Price REAL` в схеме и перестройке | два теста `OfflineStorageServiceTest` |
-| #9 индексы | убрать `CREATE INDEX` из перестройки | тест перестройки |
-| #16 замок | убрать `_initLock` | тест конкурентности (до 5 прогонов) |
-| #8 лимит | `>=` → `>` | `SellOnCredit_ExactlyAtTheLimit_IsAllowed` |
-| #8 переоценка | убрать `SellOnCreditCommand.NotifyCanExecuteChanged()` | тест с подпиской на `CanExecuteChanged` (не тот, что зовёт `CanExecute` напрямую) |
-| #12 деление | убрать `/ line.Quantity` | два теста `CartServiceQuoteTest` |
-| #7 вытеснение | убрать блок `while (_map.Count > _capacity)` | два теста `ProductImageCacheTest` |
+| 9 | `Price TEXT` → `Price REAL` в блоке схемы и в `Products_new` | два теста `OfflineStorageServiceTest` |
+| 9 | убрать оба `CREATE INDEX` из вызова `RebuildTableAsync` для `Products` | тест перестройки, на `Assert.Contains` |
+| 9 | `MaxDiscount TEXT` → `REAL` в схеме и в `Sellers_new` | тест продавца плюс тест точности |
+| 9 | сломать пробу: `== "REAL"` → `== "NOPE"` для `Products` | тест перестройки |
+| 9 | убрать `catch` вокруг перестройки (`when (false)`) | все три миграционных теста, с выбросом наружу |
+| 3 | убрать `DELETE FROM Products WHERE NOT EXISTS ...` | `ApplyRemainsAsync_DeletesUnseenProductsAndStampsQuantities` |
+| 3 | убрать guard на пустую карту | `ApplyRemainsAsync_EmptyResult_...` |
+| 3 | `IsOutOfStock <= 0m` → `== 0m` | тест с отрицательным остатком |
+| 3 | убрать `DELETE FROM RemainSeen` | `ApplyRemainsAsync_StaleRemainSeenRow_...` |
+| 4 | `while (page <= pageCount)` → `while (page <= 1)` | `FetchAllRemainsAsync_WalksEveryPage` |
+| 4 | `return null` в ветке не-2xx → `break` | `FetchAllRemainsAsync_SecondPageFails_ReturnsNull` |
+| 4 | убрать проверку потолка `MaxPages` | `FetchAllRemainsAsync_PageCountKeepsGrowing_...`, по счётчику запросов |
+| 8 | `>=` → `>` | `SellOnCredit_ExactlyAtTheLimit_IsAllowed` |
+| 8 | `IsFullyPaid \|\|` → `CreditDebt <= 0 \|\|` | `SellOnCredit_SettledWithinTolerance_...` |
+| 8 | убрать `SellOnCreditCommand.NotifyCanExecuteChanged()` | тест с подпиской на `CanExecuteChanged` |
+| 8 | убрать `\|\| !IsWithinCreditLimit` из тела `SellOnCredit()` | `SellOnCredit_ExecutedDirectlyPastTheLimit_...` |
+| 8 | убрать `HasCustomer &&` из `IsCreditBlocked` | `IsCreditBlocked_WithNoCustomer_...` |
+| 12 | убрать `/ line.Quantity` | два теста `CartServiceQuoteTest` |
+| 12 | `line.Quantity` → `item.Quantity` в guard и делителе | `ApplyQuote_MatchesTheExchangeScreensArithmetic` |
+| 7 | убрать блок `while (_map.Count > _capacity)` из `GetOrAdd` | все три теста `ProductImageCacheTest` |
+| 7 | добавить `Dispose` при вытеснении | `Eviction_HandsBackAValueThatIsStillUsable` |
 
 **Любая строка, где мутация оставила всё зелёным, означает находку без защиты.** Не идти дальше: либо дописать тест, либо записать отсутствие покрытия в раздел долга явным текстом.
 
-- [ ] **Step 4: Проверить кодировки всех тронутых файлов**
+**Известно заранее, мутировать не нужно:** находка #16 (замок инициализации) не покрыта ничем. Тест был написан и удалён как вакуумный — причина в разделе долга. Это осознанная дыра, а не пропущенная строка таблицы.
 
-```bash
-for f in ru en tg uz kk; do python -c "
-d=open(r'src/VvCash/Assets/i18n/$f.json','rb').read()
-print('$f','BOM',d[:3]==b'\xef\xbb\xbf','LF',d.count(b'\n'),'CRLF',d.count(b'\r\n'))"; done
-```
-
-Ожидание: `BOM True` у всех пяти, LF равен CRLF (то есть одиночных LF нет).
+- [ ] **Step 4: Проверить кодировки**
 
 ```bash
 for f in ru en tg uz kk; do python -c "
 import json,io
-d=json.load(io.open(r'src/VvCash/Assets/i18n/$f.json',encoding='utf-8-sig'))
-for k in ['OutOfStock','CreditLimit','CurrentBalance','CreditLimitExceeded','Discount']:
-    assert k in d, ('$f', k)
-print('$f ok', len(d), 'keys')"; done
+p=r'src/VvCash/Assets/i18n/$f.json'
+d=open(p,'rb').read()
+j=json.load(io.open(p,encoding='utf-8-sig'))
+need=['CreditLimit','Debt','CreditLimitExceeded','Discount']
+gone=['CurrentBalance']
+print('$f','BOM',d[:3]==b'\xef\xbb\xbf','bareLF',d.count(b'\n')-d.count(b'\r\n'),
+      'keys',all(k in j for k in need),'removed',all(k not in j for k in gone))"; done
 ```
 
-- [ ] **Step 5: Сверить каждую новую привязку против объявляющего типа**
+Ожидание: `BOM True`, `bareLF 0`, `keys True`, `removed True` у всех пяти.
 
-Тестами это не ловится вообще. Одиннадцать привязок, добавленных батчем:
+Ключа `OutOfStock` в дереве нет и быть не должно — плашка отменена вместе с находкой #6.
+
+Отдельно — исходники. Четыре файла в репозитории чисто-LF, и это норма, а не поломка:
+
+```bash
+python -c "
+import glob,os
+for p in sorted(glob.glob('src/VvCash/**/*.cs',recursive=True))+sorted(glob.glob('tests/VvCash.Tests/*.cs')):
+    d=open(p,'rb').read()
+    if d[:3]==b'\xef\xbb\xbf' or d.count(b'\n')-d.count(b'\r\n')>0:
+        print(('BOM ' if d[:3]==b'\xef\xbb\xbf' else 'LF  '), os.path.basename(p))"
+```
+
+Ожидание: десять файлов с BOM и четыре чисто-LF, ровно те, что перечислены в разделе «Правила окружения». Новых в списке быть не должно.
+
+- [ ] **Step 5: Сверить каждую привязку батча против объявляющего типа**
+
+Тестами это не ловится вообще: неверный путь собирается чисто и молча ничего не показывает.
 
 | Привязка | Объявлена в |
 |---|---|
-| `IsOutOfStock` | `Models/Product.cs` |
 | `HasCustomer` | `ViewModels/MixedPaymentViewModel.cs` |
-| `CurrentBalanceDisplay` | `ViewModels/MixedPaymentViewModel.cs` |
-| `CreditLimitDisplay` | `ViewModels/MixedPaymentViewModel.cs` |
+| `Debt` | `ViewModels/MixedPaymentViewModel.cs` |
+| `CreditLimit` | `ViewModels/MixedPaymentViewModel.cs` |
 | `IsCreditBlocked` | `ViewModels/MixedPaymentViewModel.cs` |
 | `HasLineDiscount` | `Models/CartItem.cs` |
 | `LineDiscount` | `Models/CartItem.cs` |
+| `LineTotal` | `Models/CartItem.cs` |
 | `LineFinalTotal` | `Models/CartItem.cs` |
-| `[OutOfStock]` | `Assets/i18n/ru.json` |
-| `[CreditLimit]`, `[CurrentBalance]`, `[CreditLimitExceeded]` | `Assets/i18n/ru.json` |
-| `[Discount]` | `Assets/i18n/ru.json` |
+| `[CreditLimit]`, `[Debt]`, `[CreditLimitExceeded]` | `Assets/i18n/ru.json` |
+| `[Discount]` | `Assets/i18n/ru.json` (существовал до батча) |
 
-Открыть объявляющий файл и убедиться глазами. Грепом по имени — не проверка: греп найдёт и то же слово в комментарии.
+Открыть объявляющий файл и убедиться глазами. Греп по имени — не проверка: он найдёт то же слово в комментарии.
+
+Проверить заодно, что старые имена не остались нигде:
+
+```bash
+grep -rn "CurrentBalanceDisplay\|CreditLimitDisplay\|IsOutOfStock" src/VvCash/Views/
+```
+
+Ожидание: пусто.
 
 - [ ] **Step 6: Проверить, что в коммиты не заехало чужое**
 
@@ -2405,30 +2442,32 @@ git log --oneline main..HEAD
 git diff --stat main..HEAD
 ```
 
-Ожидание: `build_deploy.ps1` по-прежнему `??` и ни в одном коммите не участвует. В диапазоне — двенадцать коммитов задач плюс коммит спеки.
+Ожидание: `build_deploy.ps1` по-прежнему `??` и ни в одном коммите не участвует.
 
 - [ ] **Step 7: Ручной проход на приложении**
 
 Собрать и запустить. Пройти:
 
-1. Продажа в долг клиенту с достаточным лимитом — кнопка активна, баланс и лимит видны.
+1. Продажа в долг клиенту с достаточным лимитом — кнопка активна, «Долг» и «Кредитный лимит» видны, оба положительными числами.
 2. Тому же клиенту сумма больше лимита — кнопка гаснет, красным написана причина.
 3. Клиент без лимита — любая продажа в долг заблокирована.
-4. Строка корзины со скидкой от акции — видно «Скидка: −X» и зачёркнутую сумму; числа сходятся с экраном обмена на том же товаре.
-5. Товар с нулевым остатком — на плитке плашка, товар при этом продаётся.
+4. Клиент, оплативший полностью — продажа в долг разрешена независимо от лимита.
+5. Строка корзины со скидкой от акции — видно «Скидка: −X» и зачёркнутую сумму; числа сходятся с экраном обмена на том же товаре.
 6. **Первый запуск на копии боевой БД.** Скопировать `%LOCALAPPDATA%\VvCash\offline_data.db` с работающей кассы, подложить, запустить. Каталог на месте, отложенные продажи на месте, `pragma_table_info` показывает TEXT. Без этого пункта находка #9 не считается закрытой.
 
-- [ ] **Step 8: Сверить конверт живого эндпоинта**
+Пункта про плашку остатка нет: находка #6 снята.
 
-Единственное, что не проверяется локально. Против дев-стенда:
+- [ ] **Step 8: Убедиться, что спящий код опознаётся как спящий**
+
+`FetchAllRemainsAsync` и `ApplyRemainsAsync` полностью реализованы, покрыты тестами и **не вызываются ниоткуда**. Проверить, что это очевидно читателю:
 
 ```bash
-curl -s -H "Authorization: Bearer $TOKEN" "$BACKEND/cashes/remain/?page=1&page_size=5" | head -c 400
+grep -rn "FetchAllRemainsAsync\|ApplyRemainsAsync" src/ --include="*.cs" | grep -v "Test"
 ```
 
-Ожидание: `{"body":[...],"page_count":N,"total_items":M,"item_per_page":5}` и **отсутствие** поля `status`. Если `status` вдруг есть — обходчик из Task 4 его игнорирует, это безопасно; а вот если нет `page_count`, цикл сделает ровно одну страницу, и это надо чинить до выката.
+Ожидание: только объявления в интерфейсах и реализации, ни одного вызова из `PosViewModel` или `SyncService.SyncProductsAsync`.
 
----
+И что предупреждение на месте: в doc-комментарии `FetchAllRemainsAsync` первым абзацем должно стоять, что метод ничем не вызывается, что `/cashes/remain/` не отдаёт `product_id`, и что зелёные тесты работоспособности не доказывают.
 
 ## Что батч оставляет незакрытым
 
