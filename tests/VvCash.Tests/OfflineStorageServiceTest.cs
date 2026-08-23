@@ -299,17 +299,37 @@ public class OfflineStorageServiceTest : IDisposable
 
         var all = (await _service.GetAllProductsAsync()).ToList();
 
+        // Asserted first, on the whole set: a delete that took the wrong row would
+        // otherwise pass DoesNotContain and only surface two lines later as a bare
+        // "sequence contains no matching element" from Single(), with no id in sight.
+        Assert.Equal(new[] { "in-stock", "zero" }, all.Select(p => p.Id).OrderBy(x => x));
         Assert.DoesNotContain(all, p => p.Id == "withdrawn");
         Assert.Equal(7.5m, all.Single(p => p.Id == "in-stock").StockQuantity);
         Assert.Equal(0m, all.Single(p => p.Id == "zero").StockQuantity);
         Assert.True(all.Single(p => p.Id == "zero").IsOutOfStock);
         Assert.False(all.Single(p => p.Id == "in-stock").IsOutOfStock);
+
+        // A second call on the same service exercises the pooled-connection path: SQLite
+        // temp tables live for the underlying native connection, which Microsoft.Data.Sqlite
+        // pools by connection string, so a naive implementation could let RemainSeen leak
+        // rows from this call into the next. DELETE FROM RemainSeen at the top of
+        // ApplyRemainsAsync is what stops "zero" surviving a reconciliation that no
+        // longer mentions it.
+        await _service.ApplyRemainsAsync(new Dictionary<string, decimal>
+        {
+            ["in-stock"] = 2m,
+        });
+
+        var afterSecondCall = (await _service.GetAllProductsAsync()).ToList();
+
+        Assert.Equal(new[] { "in-stock" }, afterSecondCall.Select(p => p.Id).OrderBy(x => x));
+        Assert.Equal(2m, afterSecondCall.Single(p => p.Id == "in-stock").StockQuantity);
     }
 
-    /// <summary>An empty map is indistinguishable from a walk that fell over — see
-    /// ApplyRemainsAsync's own remarks. Both halves of that matter equally here: throwing
-    /// is not enough if the delete already ran first, so this also asserts the catalogue
-    /// and its quantities are untouched, not just that the call failed.</summary>
+    /// <summary>Empty map: the interface doc comment on ApplyRemainsAsync explains why
+    /// this throws. Both halves matter equally in this test: throwing is not enough if
+    /// the delete already ran first, so this also asserts the catalogue and its
+    /// quantities are untouched, not just that the call failed.</summary>
     [Fact]
     public async Task ApplyRemainsAsync_EmptyResult_ThrowsAndLeavesTheCatalogueAlone()
     {
@@ -328,6 +348,75 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.Equal(2, all.Count);
         Assert.Null(all.Single(p => p.Id == "p1").StockQuantity);
         Assert.Null(all.Single(p => p.Id == "p2").StockQuantity);
+    }
+
+    /// <summary>Oversold stock: cloudmarket-server records an allowed oversell as a
+    /// negative remain rather than flooring it at zero (remains.go), so this is the
+    /// worst case the feature exists to catch, not an edge case — it must not read as
+    /// "in stock".</summary>
+    [Fact]
+    public async Task ApplyRemainsAsync_NegativeQuantity_IsOutOfStockAndRoundTrips()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product { Id = "oversold", Name = "Перепродан", Price = 10m },
+        });
+
+        await _service.ApplyRemainsAsync(new Dictionary<string, decimal>
+        {
+            ["oversold"] = -3m,
+        });
+
+        var product = Assert.Single(await _service.GetAllProductsAsync());
+
+        Assert.Equal(-3m, product.StockQuantity);
+        Assert.True(product.IsOutOfStock);
+    }
+
+    /// <summary>DELETE FROM RemainSeen, at the top of ApplyRemainsAsync, guards against
+    /// a row this call did not write: Microsoft.Data.Sqlite pools connections by
+    /// connection string and a TEMP TABLE lives for the underlying native connection, so
+    /// a row stranded there by anything earlier on that same pooled connection — most
+    /// concretely, a prior call that threw before reaching its own DROP TABLE — would
+    /// otherwise still be present. Planted directly here rather than provoked via a real
+    /// failure, because what matters is that ApplyRemainsAsync does not trust RemainSeen
+    /// content it did not itself write this call, regardless of how it got there.
+    /// "withdrawn" is the id the current walk excludes — the guard's absence has to
+    /// leave a real product wrongly alive, not just an orphan row nothing reads.</summary>
+    [Fact]
+    public async Task ApplyRemainsAsync_StaleRemainSeenRow_DoesNotResurrectAWithdrawnProduct()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product { Id = "in-stock", Name = "Есть", Price = 10m },
+            new Product { Id = "withdrawn", Name = "Снят", Price = 20m },
+        });
+
+        // Plants a row for "withdrawn" on whatever native connection the pool hands back
+        // next — the same one ApplyRemainsAsync below will get, since this service's
+        // connection string never changes and nothing else touches the pool in between.
+        var connectionString = $"Data Source={_dbPath}";
+        using (var stale = new SqliteConnection(connectionString))
+        {
+            await stale.OpenAsync();
+            using var cmd = stale.CreateCommand();
+            cmd.CommandText = "CREATE TEMP TABLE IF NOT EXISTS RemainSeen (Id TEXT PRIMARY KEY NOT NULL, Qty TEXT NOT NULL);"
+                             + "INSERT OR REPLACE INTO RemainSeen (Id, Qty) VALUES ('withdrawn', '1');";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // This walk's real result does not mention "withdrawn" at all.
+        await _service.ApplyRemainsAsync(new Dictionary<string, decimal>
+        {
+            ["in-stock"] = 5m,
+        });
+
+        var all = (await _service.GetAllProductsAsync()).ToList();
+
+        Assert.Equal(new[] { "in-stock" }, all.Select(p => p.Id).OrderBy(x => x));
+        Assert.Equal(5m, all.Single().StockQuantity);
     }
 
     // ---------------------------------------------------------------------------------

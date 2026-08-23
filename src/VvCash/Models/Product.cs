@@ -60,7 +60,7 @@ public partial class Product : ObservableObject
     /// reconciliation walk, or null when no walk has completed yet.
     ///
     /// Null and zero are different answers and must not be collapsed: null is "nobody
-    /// has checked", zero is "checked, and there is none". Only the second one puts a
+    /// has checked", zero is "checked, and there is none to sell". Only the second one puts a
     /// badge on the tile.
     ///
     /// Ignored on the one path a Product is ever serialised: the parked-sale snapshot
@@ -78,7 +78,7 @@ public partial class Product : ObservableObject
     /// false for null — a register that has never reconciled must behave exactly as it
     /// did before reconciliation existed.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
-    public bool IsOutOfStock => StockQuantity == 0m;
+    public bool IsOutOfStock => StockQuantity <= 0m;
 
     [ObservableProperty]
     [property: System.Text.Json.Serialization.JsonIgnore]

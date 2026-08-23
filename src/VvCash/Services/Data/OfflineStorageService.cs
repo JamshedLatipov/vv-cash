@@ -420,13 +420,6 @@ public class OfflineStorageService : IOfflineStorageService
         await transaction.CommitAsync();
     }
 
-    /// <summary>The column list every product SELECT shares, in the order ReadProduct
-    /// reads by ordinal. One constant because four copies of the same list is how the
-    /// fifth one ends up different.</summary>
-    private const string ProductColumns =
-        "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, "
-        + "UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit, StockQuantity";
-
     /// <summary>The one place the match column's contents are defined, so writes and the
     /// query below can never disagree about what is being compared.</summary>
     private static string SearchTextOf(string? name, string? sku, string? barcode)
@@ -508,6 +501,13 @@ public class OfflineStorageService : IOfflineStorageService
 
         await transaction.CommitAsync();
     }
+
+    /// <summary>The column list every product SELECT shares, in the order ReadProduct
+    /// reads by ordinal. One constant because four copies of the same list is how the
+    /// fifth one ends up different.</summary>
+    private const string ProductColumns =
+        "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, Barcode, Tags, "
+        + "UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, SellInSecondaryUnit, StockQuantity";
 
     private Product ReadProduct(SqliteDataReader reader)
     {
@@ -1008,12 +1008,7 @@ public class OfflineStorageService : IOfflineStorageService
 
     public async Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains)
     {
-        // A walk that finished and genuinely found nothing is indistinguishable here from
-        // a walk that fell over and returned an empty map, and the two want opposite
-        // things: one would empty the catalogue, the other must change nothing. Refusing
-        // is the safe reading. A warehouse with no stock lines at all leaves the register
-        // with a stale catalogue, which still sells; the alternative leaves it with no
-        // catalogue, which sells nothing.
+        // Empty map: refused. See the interface doc comment on ApplyRemainsAsync for why.
         if (remains.Count == 0)
             throw new ArgumentException("Refusing to apply an empty reconciliation result.", nameof(remains));
 
@@ -1027,7 +1022,7 @@ public class OfflineStorageService : IOfflineStorageService
         using (var cmd = connection.CreateCommand())
         {
             cmd.Transaction = transaction;
-            cmd.CommandText = "CREATE TEMP TABLE IF NOT EXISTS RemainSeen (Id TEXT PRIMARY KEY, Qty TEXT NOT NULL);"
+            cmd.CommandText = "CREATE TEMP TABLE IF NOT EXISTS RemainSeen (Id TEXT PRIMARY KEY NOT NULL, Qty TEXT NOT NULL);"
                             + "DELETE FROM RemainSeen;";
             await cmd.ExecuteNonQueryAsync();
         }
@@ -1050,8 +1045,9 @@ public class OfflineStorageService : IOfflineStorageService
         {
             cmd.Transaction = transaction;
             cmd.CommandText = @"
-                DELETE FROM Products WHERE Id NOT IN (SELECT Id FROM RemainSeen);
+                DELETE FROM Products WHERE NOT EXISTS (SELECT 1 FROM RemainSeen WHERE RemainSeen.Id = Products.Id);
                 UPDATE Products SET StockQuantity = (SELECT Qty FROM RemainSeen WHERE RemainSeen.Id = Products.Id);
+                DROP TABLE IF EXISTS temp.RemainSeen;
             ";
             await cmd.ExecuteNonQueryAsync();
         }
