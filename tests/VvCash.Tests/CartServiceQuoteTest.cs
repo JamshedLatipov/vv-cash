@@ -273,4 +273,72 @@ public class CartServiceQuoteTest
         Assert.Equal(100m, c.Items[0].UnitPrice);
         Assert.Equal(200m, c.Subtotal);
     }
+
+    private static QuoteResult QuoteWithDiscountedLine(
+        string productId, decimal quantity, decimal unitPrice,
+        decimal discountAmount, decimal discountPercent) => new()
+    {
+        QuoteId = "q1",
+        DiscountTotal = discountAmount,
+        Lines =
+        {
+            new QuoteLineResult
+            {
+                ProductId = productId,
+                Quantity = quantity,
+                UnitPrice = unitPrice,
+                DiscountAmount = discountAmount,
+                DiscountPercent = discountPercent,
+            },
+        },
+    };
+
+    /// <summary>Per unit, not per line. The quote reports discount_amount for the whole
+    /// line; CartItem.LineDiscount multiplies back up by quantity, so storing the line
+    /// figure here would triple a three-unit discount on screen.</summary>
+    [Fact]
+    public void ApplyQuote_SplitsTheLineDiscountAcrossUnits()
+    {
+        var c = CartWith(100m, 3);
+
+        c.ApplyQuote(QuoteWithDiscountedLine("p1", quantity: 3m, unitPrice: 100m,
+                                             discountAmount: 30m, discountPercent: 10m));
+
+        Assert.Equal(10m, c.Items[0].QuotedUnitDiscount);
+        Assert.Equal(10m, c.Items[0].QuotedDiscountPercent);
+        Assert.Equal(30m, c.Items[0].LineDiscount);
+        Assert.True(c.Items[0].HasLineDiscount);
+    }
+
+    /// <summary>The same input has to produce the same number the exchange screen
+    /// produces, because both render it as "what came off this line".</summary>
+    [Fact]
+    public void ApplyQuote_MatchesTheExchangeScreensArithmetic()
+    {
+        // Exactly what ExchangeViewModel.ApplyIssuedQuote computes for this line.
+        var expected = 7m / 4m;
+
+        var c = CartWith(25m, 4);
+        c.ApplyQuote(QuoteWithDiscountedLine("p1", quantity: 4m, unitPrice: 25m,
+                                             discountAmount: 7m, discountPercent: 7m));
+
+        Assert.Equal(expected, c.Items[0].QuotedUnitDiscount);
+    }
+
+    /// <summary>Dropping the quote drops the cart back to cached prices. If the discount
+    /// fields survive that, the badge outlives the promotion that justified it.</summary>
+    [Fact]
+    public void ClearQuote_ClearsTheDiscountFields()
+    {
+        var c = CartWith(100m, 2);
+        c.ApplyQuote(QuoteWithDiscountedLine("p1", quantity: 2m, unitPrice: 90m,
+                                             discountAmount: 20m, discountPercent: 10m));
+        Assert.True(c.Items[0].HasLineDiscount);
+
+        c.ClearQuote();
+
+        Assert.Null(c.Items[0].QuotedUnitDiscount);
+        Assert.Equal(0m, c.Items[0].QuotedDiscountPercent);
+        Assert.False(c.Items[0].HasLineDiscount);
+    }
 }
