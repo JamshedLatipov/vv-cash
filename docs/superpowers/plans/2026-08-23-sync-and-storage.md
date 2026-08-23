@@ -939,6 +939,7 @@ git commit -m "feat(storage): let the catalogue carry stock and drop what the wa
 - Create: `src/VvCash/Models/Api/CashRemainItem.cs`
 - Modify: `src/VvCash/Services/Data/SyncService.cs`
 - Test: `tests/VvCash.Tests/SyncServiceTest.cs` (дописать в существующий класс)
+- Modify: `tests/VvCash.Tests/PosViewModelSellerGateTest.cs` — единственная другая реализация `ISyncService` в репозитории. Интерфейс растёт, и без заглушки тестовый проект не собирается. Файл **несёт BOM** — сохранить.
 
 - [ ] **Step 1: Создать DTO**
 
@@ -1147,7 +1148,7 @@ public class CashRemainPage
 - [ ] **Step 7: Коммит**
 
 ```bash
-git add src/VvCash/Models/Api/CashRemainItem.cs src/VvCash/Services/Data/SyncService.cs tests/VvCash.Tests/SyncServiceTest.cs
+git add src/VvCash/Models/Api/CashRemainItem.cs src/VvCash/Services/Data/SyncService.cs \n        tests/VvCash.Tests/SyncServiceTest.cs tests/VvCash.Tests/PosViewModelSellerGateTest.cs
 git commit -m "feat(sync): walk the warehouse stock endpoint, and refuse a half-finished walk"
 ```
 
@@ -2378,6 +2379,8 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BACKEND/cashes/remain/?page=1&page_s
 
   Тест, который бы работал, должен утверждать не форму результата, а **сколько раз выполнилось тело** — то есть требует шпиона внутри `InitializeCoreAsync`. Это решение по дизайну тестов, план его не предусматривал, и наспех оно не принимается. Находка #16 закрыта кодом и не закрыта тестом; замок держится на рассуждении и на ревью, а не на прогоне.
 
+- **Списки файлов в плане дважды оказались неполными, и оба раза по одной причине.** Task 3 растил `IOfflineStorageService` и не назвал шесть тестовых заглушек; Task 4 растил `ISyncService` и не назвал `PosViewModelSellerGateTest.FakeSyncService`. В обоих случаях тестовый проект без них не собирается, то есть коммит по букве плана оставлял бы дерево нерабочим. Правило на будущее: **рост интерфейса — это правка всех его реализаций**, и они принадлежат той же задаче. Искать `grep -rln "IИмяИнтерфейса" tests/`, а не полагаться на память.
+- **Тест на устаревшую строку `RemainSeen` подсаживает её напрямую, а не провоцирует настоящий обрыв.** Осознанно: тест сторожит инвариант «устаревшая строка не воскрешает удалённый товар» независимо от того, как она там оказалась. Вариант «уронить вызов посреди работы и посмотреть» привязал бы тест к конкретному механизму отказа и сломался бы при любой правке порядка операций. Если понадобится сквозная проверка — это отдельная задача, а не догрузка этой.
 - **Отложено ревью качества Task 2, три пункта.** Ни один не влияет на поведение; все три — про то, как код читается и как падает.
   - Три `Assert.True(await rd.ReadAsync())` в миграционных тестах без сообщения. Падение печатает `Assert.True() Failure` и ничего про то, какая строка не нашлась.
   - Схема продублирована: объявления колонок живут и в блоке `CREATE TABLE IF NOT EXISTS`, и в DDL перестройки. Разойтись они могут молча — сегодня их держит вместе только тест сравнения `pragma_table_info`.
