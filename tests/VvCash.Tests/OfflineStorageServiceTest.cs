@@ -306,6 +306,30 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.False(all.Single(p => p.Id == "in-stock").IsOutOfStock);
     }
 
+    /// <summary>An empty map is indistinguishable from a walk that fell over — see
+    /// ApplyRemainsAsync's own remarks. Both halves of that matter equally here: throwing
+    /// is not enough if the delete already ran first, so this also asserts the catalogue
+    /// and its quantities are untouched, not just that the call failed.</summary>
+    [Fact]
+    public async Task ApplyRemainsAsync_EmptyResult_ThrowsAndLeavesTheCatalogueAlone()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveProductsAsync(new[]
+        {
+            new Product { Id = "p1", Name = "Один", Price = 10m },
+            new Product { Id = "p2", Name = "Два", Price = 20m },
+        });
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.ApplyRemainsAsync(new Dictionary<string, decimal>()));
+
+        var all = (await _service.GetAllProductsAsync()).ToList();
+
+        Assert.Equal(2, all.Count);
+        Assert.Null(all.Single(p => p.Id == "p1").StockQuantity);
+        Assert.Null(all.Single(p => p.Id == "p2").StockQuantity);
+    }
+
     // ---------------------------------------------------------------------------------
     // Search. Every keystroke in the POS search box used to load the whole catalog out
     // of SQLite and filter it in memory — a full table scan plus one materialised

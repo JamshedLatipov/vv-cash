@@ -1008,6 +1008,15 @@ public class OfflineStorageService : IOfflineStorageService
 
     public async Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains)
     {
+        // A walk that finished and genuinely found nothing is indistinguishable here from
+        // a walk that fell over and returned an empty map, and the two want opposite
+        // things: one would empty the catalogue, the other must change nothing. Refusing
+        // is the safe reading. A warehouse with no stock lines at all leaves the register
+        // with a stale catalogue, which still sells; the alternative leaves it with no
+        // catalogue, which sells nothing.
+        if (remains.Count == 0)
+            throw new ArgumentException("Refusing to apply an empty reconciliation result.", nameof(remains));
+
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
 

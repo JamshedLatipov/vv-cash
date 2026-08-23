@@ -60,7 +60,10 @@ public interface IOfflineStorageService
     ///
     /// Only ever call this with the result of a walk that finished. A partial map means
     /// a partial delete, and a partial delete of the catalogue is worse than a stale
-    /// one.</summary>
+    /// one. An empty map is the same danger taken to its limit — nothing here can tell
+    /// a warehouse that truly has no stock left apart from a walk that never finished, so
+    /// it is refused with <see cref="ArgumentException"/> rather than trusted; a caller
+    /// cannot reach the empty-catalogue outcome by accident.</summary>
     Task ApplyRemainsAsync(IReadOnlyDictionary<string, decimal> remains);
 
     // Parked sales (отложенные чеки)
