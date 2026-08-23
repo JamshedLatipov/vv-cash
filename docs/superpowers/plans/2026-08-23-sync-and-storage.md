@@ -1190,6 +1190,22 @@ git commit -m "feat(sync): walk the warehouse stock endpoint, and refuse a half-
 
         Assert.Null(storage.AppliedRemains);
     }
+
+    /// <summary>A walk that finished and found no stock lines is not an error, but it is
+    /// still not a reason to empty the catalogue. ApplyRemainsAsync refuses an empty map
+    /// outright, so reaching it here would surface as an exception on a background thread
+    /// with nobody watching — this asserts the caller never gets that far.</summary>
+    [Fact]
+    public async Task ReconcileRemainsAsync_CompleteButEmptyWalk_AppliesNothing()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"body":[],"page_count":1,"total_items":0}"""));
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).ReconcileRemainsAsync();
+
+        Assert.Null(storage.AppliedRemains);
+    }
 ```
 
 В `FakeStorage` (`SyncServiceTest.cs:39`) добавить:
@@ -1232,9 +1248,18 @@ git commit -m "feat(sync): walk the warehouse stock endpoint, and refuse a half-
     public async Task ReconcileRemainsAsync()
     {
         var remains = await FetchAllRemainsAsync();
-        if (remains == null)
+
+        // Two different nothings, and only one of them is an error. Null is "the walk did
+        // not finish" — the safety property this whole feature turns on. An empty map is
+        // "the walk finished and the warehouse has no stock lines at all", which is
+        // legitimate but still must not empty the catalogue: ApplyRemainsAsync refuses it
+        // outright, so the check has to happen here rather than being discovered as an
+        // exception on a background thread nobody is watching.
+        if (remains == null || remains.Count == 0)
         {
-            Console.WriteLine("[SyncService] remain walk incomplete; catalogue left untouched");
+            Console.WriteLine(remains == null
+                ? "[SyncService] remain walk incomplete; catalogue left untouched"
+                : "[SyncService] remain walk returned no stock lines; catalogue left untouched");
             return;
         }
 
@@ -1253,7 +1278,12 @@ git commit -m "feat(sync): walk the warehouse stock endpoint, and refuse a half-
 
 - [ ] **Step 5: Мутация**
 
-Заменить `if (remains == null) { ...; return; }` на `if (remains == null) remains = new Dictionary<string, decimal>();`. Ожидание: `ReconcileRemainsAsync_IncompleteWalk_AppliesNothing` красный. Вернуть.
+Две мутации, по одной за раз.
+
+1. Заменить `if (remains == null || remains.Count == 0) { ...; return; }` на `if (remains == null) remains = new Dictionary<string, decimal>();`. Ожидание: **оба** теста красные — `ReconcileRemainsAsync_IncompleteWalk_AppliesNothing` и `ReconcileRemainsAsync_CompleteButEmptyWalk_AppliesNothing`. Вернуть.
+2. Убрать из условия только `|| remains.Count == 0`. Ожидание: красный ровно один — `ReconcileRemainsAsync_CompleteButEmptyWalk_AppliesNothing`. Вернуть.
+
+Вторая мутация нужна отдельно: без неё первая доказывает лишь то, что обе ветки существуют, но не то, что проверка на пустоту делает работу сама по себе.
 
 Это ровно тот баг, который стёр бы каталог кассы при обрыве связи.
 
