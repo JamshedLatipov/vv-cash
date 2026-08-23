@@ -749,15 +749,20 @@ git commit -m "fix(storage): store money as TEXT so the column stops rounding it
     /// <summary>Stock for this register's warehouse as of the last complete
     /// reconciliation walk, or null when no walk has completed yet.
     ///
-    /// Null and zero are different answers and must not be collapsed: null is "nobody
-    /// has checked", zero is "checked, and there is none". Only the second one puts a
-    /// badge on the tile.</summary>
+    /// Null and a number are different answers and must not be collapsed: null is
+    /// "nobody has checked", a number is what the check found. Only the second one
+    /// can put a badge on the tile.</summary>
     public decimal? StockQuantity { get; set; }
 
-    /// <summary>Whether the register knows this product to be out of stock. Deliberately
-    /// false for null — a register that has never reconciled must behave exactly as it
-    /// did before reconciliation existed.</summary>
-    public bool IsOutOfStock => StockQuantity == 0m;
+    /// <summary>Whether the register knows this product has nothing left to sell.
+    /// Deliberately false for null — a register that has never reconciled must behave
+    /// exactly as it did before reconciliation existed.
+    ///
+    /// Less-than-or-equal, not equal: the backend records an oversell as a negative
+    /// remain on purpose (warehouses/remains.go decrements without a floor and says
+    /// so in its own comment), and GetStockRemains does not filter them out. A
+    /// product at -3 is further out of stock than one at 0, not back in stock.</summary>
+    public bool IsOutOfStock => StockQuantity <= 0m;
 ```
 
 - [ ] **Step 4: Вынести список колонок в константу и добавить `StockQuantity`**
@@ -897,7 +902,13 @@ grep -rln "IOfflineStorageService" tests/VvCash.Tests/ --include="*.cs"
 
 1. Убрать `DELETE FROM Products WHERE Id NOT IN ...`. Ожидание: красный на `Assert.DoesNotContain`. Вернуть.
 2. Заменить `IsOutOfStock => StockQuantity == 0m` на `=> false`. Ожидание: красный на `Assert.True(...IsOutOfStock)`. Вернуть.
-3. Заменить `StockQuantity == 0m` на `StockQuantity <= 0m` — ожидание: **зелёный**, поведение то же. Это не дефект теста: отрицательного остатка бэкенд не отдаёт. Вернуть и идти дальше.
+3. Заменить `IsOutOfStock => StockQuantity <= 0m` на `=> StockQuantity == 0m`. Ожидание: красный на тесте с отрицательным остатком. Вернуть.
+
+**Первая редакция плана требовала здесь обратного** — предлагала заменить `== 0m` на `<= 0m`, ожидать зелёный и объясняла это тем, что «отрицательного остатка бэкенд не отдаёт». Утверждение ложное, и написано оно было без проверки.
+
+Бэкенд отдаёт отрицательные остатки намеренно: `warehouses/remains.go:78-83` называет их stock debt и прямым текстом описывает *«an allowed oversell»*; `remains.go:91` вычитает без пола; в том же пакете `GREATEST(..., 0)` стоит там, где пол действительно нужен (`transfer_remain_repo.go:229`), то есть отсутствие пола намеренное; `remains.quantity` объявлен `numeric not null` без CHECK; `GetStockRemains` не фильтрует по `quantity > 0`.
+
+Из-за этой ошибки товар с остатком `-3` читался бы как «в наличии», а с остатком `0` — как «нет». Ровно тот класс дефекта, ради которого заведена находка #6. Поймано ревью качества Task 3, подтверждено чтением исходников бэкенда.
 
 - [ ] **Step 10: Коммит**
 
