@@ -424,7 +424,62 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
 Проверить, что не осталось: `grep -n "SqliteType.Real" src/VvCash/Services/Data/OfflineStorageService.cs` — ожидание: пусто.
 
-- [ ] **Step 6: Добавить пробу объявленного типа и перестройку**
+- [ ] **Step 6: Извлечь `InitializeCoreAsync`**
+
+Внесено по итогам ревью качества Task 1. Task 1 обернула всё тело `InitializeAsync` в `try`, и guard теперь читается как двухсотстрочный блок. В репозитории уже есть правильная форма для ровно этой задачи — `UpdateService.DownloadAsync` (`src/VvCash/Services/Update/UpdateService.cs:156-167`): двенадцатистрочная обёртка с семафором вокруг `DownloadCoreAsync`.
+
+Делается здесь, а не в Task 1, по одной причине: Task 2 всё равно вскрывает этот метод, а отдельной правкой это был бы третий большой дифф по тем же строкам. Заодно чинит побочный эффект обёртки — `git blame` без `-w` приписывает все полторы сотни строк SQL коммиту Task 1.
+
+Разрезать так: guard остаётся в `InitializeAsync`, всё содержимое `try` уезжает в приватный `InitializeCoreAsync` и **возвращается на исходный уровень отступа**.
+
+```csharp
+    public async Task InitializeAsync()
+    {
+        if (_isInitialized) return;
+
+        await _initLock.WaitAsync();
+        try
+        {
+            if (_isInitialized) return;
+
+            await InitializeCoreAsync();
+
+            _isInitialized = true;
+        }
+        finally
+        {
+            _initLock.Release();
+        }
+    }
+
+    /// <summary>Everything InitializeAsync does once it has decided it is the one doing
+    /// it: schema, additive column migrations, the REAL-to-TEXT table rebuilds, and the
+    /// SearchText backfill. Split out so the guard above stays readable — the same shape
+    /// UpdateService.DownloadAsync uses around DownloadCoreAsync.</summary>
+    private async Task InitializeCoreAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+
+        // ... тело без изменений, на исходном отступе ...
+
+        await BackfillSearchTextAsync(connection);
+    }
+```
+
+`_isInitialized = true;` **остаётся в `InitializeAsync`**, а не уезжает в core: флаг — часть протокола замка, а не часть инициализации.
+
+Проверить после извлечения, что дифф — это только отступ и перенос:
+
+```bash
+git diff -w -- src/VvCash/Services/Data/OfflineStorageService.cs
+```
+
+Ожидание: видны только новая сигнатура `InitializeCoreAsync`, её комментарий, вызов и снятая обёртка. Ни одной изменённой строки SQL. Если `git diff -w` показывает правки внутри `command.CommandText`, значит при переносе задето содержимое — откатить и перенести заново.
+
+- [ ] **Step 7: Добавить пробу объявленного типа и перестройку**
 
 Новые приватные методы рядом с `AddColumnIfMissingAsync`:
 
@@ -474,7 +529,7 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
 Дописать `using System.Linq;` в шапку файла, если его там ещё нет — `Concat` из него.
 
-- [ ] **Step 7: Позвать перестройку из `InitializeAsync`**
+- [ ] **Step 8: Позвать перестройку из `InitializeAsync`**
 
 Вставить **после** блока `AddColumnIfMissingAsync` с колонками единиц измерения и **до** `await BackfillSearchTextAsync(connection);`. Порядок важен: к этому моменту старая таблица уже догнана по составу колонок, поэтому копировать есть что.
 
@@ -532,7 +587,7 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
         await AddColumnIfMissingAsync(command, "ALTER TABLE Products ADD COLUMN StockQuantity TEXT;");
 ```
 
-- [ ] **Step 8: Прогнать тесты — оба обязаны позеленеть**
+- [ ] **Step 9: Прогнать тесты — оба обязаны позеленеть**
 
 ```bash
 & ./run-tests.ps1
@@ -540,7 +595,7 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
 Ожидание: 759 passed (757 прежних плюс два новых).
 
-- [ ] **Step 9: Мутация — проверить, что тесты не вакуумные**
+- [ ] **Step 10: Мутация — проверить, что тесты не вакуумные**
 
 Три отката, каждый по одному:
 
@@ -550,7 +605,7 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
 Если любая мутация оставила тесты зелёными — тест не сторожит то, ради чего написан. Чинить тест, а не идти дальше.
 
-- [ ] **Step 10: Добавить тест на конкурентную инициализацию (долг Task 1)**
+- [ ] **Step 11: Добавить тест на конкурентную инициализацию (долг Task 1)**
 
 Теперь, когда перестройка внутри, гонка настоящая.
 
@@ -590,7 +645,7 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
 Прогнать: `& ./run-tests.ps1`. Ожидание: 760 passed.
 
-- [ ] **Step 11: Мутация замка**
+- [ ] **Step 12: Мутация замка**
 
 Убрать `await _initLock.WaitAsync();` и `finally { _initLock.Release(); }` из Task 1, оставив тело как было. Прогнать тест 5 раз подряд:
 
@@ -602,7 +657,7 @@ var maxDiscountParam = command.Parameters.Add("$MaxDiscount", SqliteType.Text);
 
 **Если он ни разу не упал** — тест не сторожит гонку. Тогда: либо поднять число параллельных вызовов с 8 до 32, либо признать честно, что теста нет, удалить его и записать это в раздел долга. Не оставлять зелёный тест, про который известно, что он ничего не проверяет.
 
-- [ ] **Step 12: Коммит**
+- [ ] **Step 13: Коммит**
 
 ```bash
 git add src/VvCash/Services/Data/OfflineStorageService.cs tests/VvCash.Tests/OfflineStorageServiceTest.cs
