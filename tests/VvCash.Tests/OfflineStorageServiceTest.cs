@@ -432,6 +432,49 @@ public class OfflineStorageServiceTest : IDisposable
     private const string ParkedSalePayload =
         @"{""items"":[{""name"":""Товар «А»"",""qty"":2.5}],""note"":""скидка 50%""}";
 
+    /// <summary>Nothing else exercised SaveParkedSaleAsync into GetParkedSaleAsync. Products
+    /// and Sellers come back from a sync if a write path loses them, and UnsyncedDocuments is
+    /// covered separately — a parked sale is a receipt a cashier is holding, and this round
+    /// trip is the only thing carrying it.
+    ///
+    /// Total is a value a REAL column would round, which makes this test do double duty:
+    /// SaveParkedSaleAsync binds through AddWithValue rather than the explicit SqliteType.Text
+    /// that Products and Sellers use, and AddWithValue binding a decimal as text is measured
+    /// behaviour rather than a declared intent. If that ever stops being true, this assertion
+    /// is what says so.</summary>
+    [Fact]
+    public async Task SaveAndGetParkedSale_RoundTripsEveryFieldExactly()
+    {
+        await _service.InitializeAsync();
+
+        // Sub-millisecond ticks on purpose: CreatedAt is stored with ToString("o") and read
+        // back with RoundtripKind, so anything coarser would silently pass on a narrower format.
+        var createdAt = new DateTime(2026, 8, 23, 14, 32, 18, DateTimeKind.Utc).AddTicks(1234567);
+
+        await _service.SaveParkedSaleAsync(new ParkedSale
+        {
+            Id = "parked-1",
+            Label = "Касса 1",
+            CustomerName = "Пётр «Кузнецов»",
+            Total = 12345678901234.56m,
+            ItemCount = 2.5m,
+            CreatedAt = createdAt,
+            Payload = ParkedSalePayload,
+        });
+
+        var loaded = await _service.GetParkedSaleAsync("parked-1");
+
+        Assert.NotNull(loaded);
+        Assert.Equal("parked-1", loaded!.Id);
+        Assert.Equal("Касса 1", loaded.Label);
+        Assert.Equal("Пётр «Кузнецов»", loaded.CustomerName);
+        Assert.Equal(12345678901234.56m, loaded.Total);
+        Assert.Equal(2.5m, loaded.ItemCount);
+        Assert.Equal(createdAt, loaded.CreatedAt);
+        Assert.Equal(DateTimeKind.Utc, loaded.CreatedAt.Kind);
+        Assert.Equal(ParkedSalePayload, loaded.Payload);
+    }
+
     /// <summary>Creates all three money-carrying tables in the shape that shipped before
     /// this migration, one row each.
     ///

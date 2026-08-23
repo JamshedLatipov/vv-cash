@@ -217,51 +217,42 @@ public class OfflineStorageService : IOfflineStorageService
         }
 
         // Migration: money columns move from REAL to TEXT. Runs only on a register whose
-        // Products was created before this landed — on a fresh database the schema block
-        // above already declared TEXT and the probe below is a no-op.
-        if (await DeclaredTypeAsync(connection, "Products", "Price") == "REAL")
-        {
-            await RebuildTableAsync(connection, "Products", @"
-                CREATE TABLE Products_new (
-                    Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
-                    Price TEXT NOT NULL, OriginalPrice TEXT, DiscountPercent TEXT,
-                    ImagePath TEXT, Barcode TEXT, Tags TEXT,
-                    UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor TEXT,
-                    IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT,
-                    StockQuantity TEXT
-                );",
-                // StockQuantity is deliberately absent from the copy list: the old table
-                // has no such column, and NULL is the correct starting value anyway.
-                "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, "
-                + "Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, "
-                + "SellInSecondaryUnit, SearchText",
-                "CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);",
-                "CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);");
-        }
+        // tables were created before this landed — on a fresh database the schema block
+        // above already declared TEXT and the probes below are no-ops.
+        await RebuildIfRealAsync(connection, "Products", "Price", @"
+            CREATE TABLE Products_new (
+                Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Sku TEXT, Category TEXT,
+                Price TEXT NOT NULL, OriginalPrice TEXT, DiscountPercent TEXT,
+                ImagePath TEXT, Barcode TEXT, Tags TEXT,
+                UnitId TEXT, UnitCode TEXT, UnitShortName TEXT, UnitFactor TEXT,
+                IsDivisible INTEGER, SellInSecondaryUnit INTEGER, SearchText TEXT,
+                StockQuantity TEXT
+            );",
+            // StockQuantity is deliberately absent from the copy list: the old table
+            // has no such column, and NULL is the correct starting value anyway.
+            "Id, Name, Sku, Category, Price, OriginalPrice, DiscountPercent, ImagePath, "
+            + "Barcode, Tags, UnitId, UnitCode, UnitShortName, UnitFactor, IsDivisible, "
+            + "SellInSecondaryUnit, SearchText",
+            "CREATE INDEX IF NOT EXISTS IDX_Products_Category ON Products(Category);",
+            "CREATE INDEX IF NOT EXISTS IDX_Products_Barcode ON Products(Barcode);");
 
-        if (await DeclaredTypeAsync(connection, "ParkedSales", "Total") == "REAL")
-        {
-            await RebuildTableAsync(connection, "ParkedSales", @"
-                CREATE TABLE ParkedSales_new (
-                    Id TEXT PRIMARY KEY, Label TEXT, CustomerName TEXT,
-                    Total TEXT NOT NULL, ItemCount TEXT NOT NULL,
-                    CreatedAt TEXT NOT NULL, Payload TEXT NOT NULL
-                );",
-                "Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload");
-        }
+        await RebuildIfRealAsync(connection, "ParkedSales", "Total", @"
+            CREATE TABLE ParkedSales_new (
+                Id TEXT PRIMARY KEY, Label TEXT, CustomerName TEXT,
+                Total TEXT NOT NULL, ItemCount TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL, Payload TEXT NOT NULL
+            );",
+            "Id, Label, CustomerName, Total, ItemCount, CreatedAt, Payload");
 
-        if (await DeclaredTypeAsync(connection, "Sellers", "MaxDiscount") == "REAL")
-        {
-            await RebuildTableAsync(connection, "Sellers", @"
-                CREATE TABLE Sellers_new (
-                    Id TEXT PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT,
-                    PinHash TEXT, CanSell INTEGER NOT NULL DEFAULT 1,
-                    CanRefund INTEGER NOT NULL DEFAULT 0,
-                    CanCloseShift INTEGER NOT NULL DEFAULT 0,
-                    MaxDiscount TEXT NOT NULL DEFAULT '0'
-                );",
-                "Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount");
-        }
+        await RebuildIfRealAsync(connection, "Sellers", "MaxDiscount", @"
+            CREATE TABLE Sellers_new (
+                Id TEXT PRIMARY KEY, FirstName TEXT NOT NULL, LastName TEXT,
+                PinHash TEXT, CanSell INTEGER NOT NULL DEFAULT 1,
+                CanRefund INTEGER NOT NULL DEFAULT 0,
+                CanCloseShift INTEGER NOT NULL DEFAULT 0,
+                MaxDiscount TEXT NOT NULL DEFAULT '0'
+            );",
+            "Id, FirstName, LastName, PinHash, CanSell, CanRefund, CanCloseShift, MaxDiscount");
 
         // Belt and braces for a database that already has TEXT columns but predates
         // StockQuantity. Cannot happen from a released build — the two shipped together —
@@ -310,6 +301,43 @@ public class OfflineStorageService : IOfflineStorageService
         return (await cmd.ExecuteScalarAsync()) as string ?? string.Empty;
     }
 
+    /// <summary>Moves one table's money columns from REAL to TEXT, if they are still REAL.
+    ///
+    /// A failure is logged and swallowed, the same way AddColumnIfMissingAsync treats a
+    /// migration it cannot run. Without that, this is the only thing in InitializeCoreAsync
+    /// that can abort initialisation outright, and nobody would see it: PosViewModel starts
+    /// the call as `_ = InitializeAsync();` and never observes the task, so a register that
+    /// threw here would come up with no catalogue, no shift, and nothing on screen saying
+    /// why.
+    ///
+    /// Degrading is genuinely safe. A table left declared REAL is still read through
+    /// GetDecimal, which reads REAL perfectly well, so the register keeps selling at the old
+    /// precision — and the probe fires again on the next launch, so the migration retries by
+    /// itself. Losing precision is a bad day; a till that will not open is a closed shop.
+    ///
+    /// The probe reads one column and infers the shape of the rest. That holds for anything
+    /// a released build can produce, because each table's money columns were declared
+    /// together and move together. It does not hold for a database somebody has half
+    /// repaired by hand — Products with Price already TEXT but OriginalPrice still REAL
+    /// satisfies the probe and is never fixed. Accepted knowingly: the alternative is
+    /// probing every money column on every launch to catch a state no release can
+    /// create.</summary>
+    private static async Task RebuildIfRealAsync(
+        SqliteConnection connection, string table, string probeColumn,
+        string createNewSql, string copiedColumns, params string[] indexes)
+    {
+        try
+        {
+            if (await DeclaredTypeAsync(connection, table, probeColumn) != "REAL") return;
+
+            await RebuildTableAsync(connection, table, createNewSql, copiedColumns, indexes);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[OfflineStorageService] Rebuild failed ({table}): {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     /// <summary>Rebuilds a table under a new column declaration, because SQLite has no
     /// ALTER COLUMN. Rows are copied, not dropped: a register that upgrades while
     /// offline would otherwise be left with no catalogue and nothing to sell until the
@@ -317,7 +345,15 @@ public class OfflineStorageService : IOfflineStorageService
     ///
     /// <paramref name="indexes"/> is not optional housekeeping. Indices are created in
     /// the schema block that already ran earlier in this same InitializeAsync, and the
-    /// DROP TABLE below takes them with the table.</summary>
+    /// DROP TABLE below takes them with the table.
+    ///
+    /// Precondition, and the helper is named generally enough that the next caller will not
+    /// guess it: the table must have no foreign keys pointing at it, and no view or trigger
+    /// referencing it. Microsoft.Data.Sqlite turns PRAGMA foreign_keys on by default, and
+    /// under it the DROP TABLE below silently deletes the rows of any ON DELETE CASCADE
+    /// child. A view or trigger over the table makes the RENAME throw instead — "error in
+    /// view v: no such table: main.P". This schema has none of the three, which is the only
+    /// reason the sequence below is safe as written.</summary>
     private static async Task RebuildTableAsync(
         SqliteConnection connection, string table, string createNewSql,
         string copiedColumns, params string[] indexes)
