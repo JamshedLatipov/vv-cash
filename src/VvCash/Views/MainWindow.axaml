@@ -8,10 +8,10 @@
         Width="1440" Height="900"
         MinWidth="1024" MinHeight="600"
         WindowStartupLocation="CenterScreen"
-        WindowState="FullScreen"
-        SystemDecorations="None"
-        CanResize="False"
-        Topmost="True">
+        WindowState="Normal"
+        SystemDecorations="Full"
+        CanResize="True"
+        Topmost="False">
 
     <Window.DataTemplates>
         <DataTemplate DataType="{x:Type vm:LoginViewModel}">

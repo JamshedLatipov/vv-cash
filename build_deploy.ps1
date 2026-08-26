@@ -1,0 +1,1 @@
+powershell -ExecutionPolicy Bypass -File build/installer/release.ps1 -Publish 

@@ -347,7 +347,39 @@ public class CartService : ICartService
     private void RaiseCartChanged()
     {
         RecalculateOfflinePromotion();
+        ApplyOfflinePromotionToLines();
         CartChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Mirrors the winning offline promotion onto each line's Quoted*
+    /// fields — the same fields <see cref="ApplyQuotedPrices"/> sets from a server
+    /// quote — so the cart screen's per-line badge (bound to
+    /// <see cref="CartItem.HasLineDiscount"/>) agrees with <see cref="TotalDiscount"/>
+    /// whichever source is currently winning. Without this, the bottom total and
+    /// name show the offline promotion while every line reads as undiscounted,
+    /// because nothing else ever writes <see cref="PromotionOutcome.PerLine"/> onto
+    /// a <see cref="CartItem"/>. Only touches lines while there is no server quote;
+    /// <see cref="ApplyQuote"/>/<see cref="ClearQuote"/> own these fields once one lands.</summary>
+    private void ApplyOfflinePromotionToLines()
+    {
+        if (Quote != null) return;
+
+        var promo = OfflinePromotion; // gated: null unless it actually beats the flat path
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var item = _items[i];
+            if (promo != null && promo.PerLine.TryGetValue(i, out var amount) && item.Quantity > 0)
+            {
+                item.QuotedUnitDiscount = amount / item.Quantity;
+                var subtotal = item.Product.Price * item.Quantity;
+                item.QuotedDiscountPercent = subtotal > 0 ? MoneyPolicy.Round(amount / subtotal * 100m) : 0m;
+            }
+            else
+            {
+                item.QuotedUnitDiscount = null;
+                item.QuotedDiscountPercent = 0m;
+            }
+        }
     }
 
     /// <summary>Recomputes the local best-deal promotion. Done once per cart change

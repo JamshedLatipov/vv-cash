@@ -105,6 +105,31 @@ public class CartServiceQuoteTest
     }
 
     [Fact]
+    public void OfflinePromotion_MarksTheDiscountedLine()
+    {
+        // The bottom-line total already reflects the offline promotion (see
+        // OfflinePromotion_AppliesWhenThereIsNoQuote above); the cart screen's
+        // per-line badge is bound to CartItem.HasLineDiscount, not to the total,
+        // so that field has to agree or the cashier sees a discount with nothing
+        // on any line explaining where it came from.
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+
+        Assert.True(c.Items[0].HasLineDiscount);
+        Assert.Equal(15m, c.Items[0].QuotedUnitDiscount);
+        Assert.Equal(15m, c.Items[0].QuotedDiscountPercent);
+    }
+
+    [Fact]
+    public void OfflinePromotion_ClearsLineBadge_WhenTheFlatPathWinsInstead()
+    {
+        var c = CartWith(100m, 1, PercentOff("promo1", "Летняя акция", 15m));
+        c.SetCustomerDiscount(25m); // flat beats the promotion
+
+        Assert.False(c.Items[0].HasLineDiscount);
+        Assert.Null(c.Items[0].QuotedUnitDiscount);
+    }
+
+    [Fact]
     public void OfflinePromotion_IsIgnoredWhileAQuoteIsApplied()
     {
         // The server already weighed promotions into its best-deal; applying the
