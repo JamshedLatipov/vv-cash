@@ -99,8 +99,13 @@ public static class PhoneFormats
     public static readonly PhoneFormat Uzbekistan =
         new("UZ", "+998 — Узбекистан (UZ)", "998", "(##) ###-##-##");
 
+    /// <summary>Девять цифр, но группируются иначе, чем в TJ и UZ: код
+    /// оператора в Киргизии трёхзначный.</summary>
+    public static readonly PhoneFormat Kyrgyzstan =
+        new("KG", "+996 — Киргизия (KG)", "996", "(###) ###-###");
+
     public static IReadOnlyList<PhoneFormat> All { get; } =
-        Array.AsReadOnly(new[] { RussiaKazakhstan, Tajikistan, Uzbekistan });
+        Array.AsReadOnly(new[] { RussiaKazakhstan, Tajikistan, Uzbekistan, Kyrgyzstan });
 
     /// <summary>Чем становится касса, где настройка не задана. Он же ответ на
     /// настройку, оставшуюся от удалённой записи каталога.</summary>

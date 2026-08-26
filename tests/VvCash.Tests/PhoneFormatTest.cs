@@ -12,6 +12,7 @@ public class PhoneFormatTest
     [InlineData("RU", 10)]
     [InlineData("TJ", 9)]
     [InlineData("UZ", 9)]
+    [InlineData("KG", 9)]
     public void DigitCount_CountsPlaceholdersInMask(string id, int expected)
     {
         var format = PhoneFormats.Resolve(id);
@@ -66,6 +67,17 @@ public class PhoneFormatTest
         var format = PhoneFormats.Resolve("TJ");
 
         Assert.Equal("+992 (90) 123-45-67", format.Format("901234567999"));
+    }
+
+    /// <summary>Те же девять цифр, что в TJ, но с трёхзначным кодом оператора:
+    /// маска, а не длина, решает, как номер выглядит на экране.</summary>
+    [Fact]
+    public void Format_OnKyrgyzInput_GroupsByThrees()
+    {
+        var format = PhoneFormats.Resolve("KG");
+
+        Assert.Equal("+996 (___) ___-___", format.Placeholder);
+        Assert.Equal("+996 (555) 123-456", format.Format("555123456"));
     }
 
     [Theory]
