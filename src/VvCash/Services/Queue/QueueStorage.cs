@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -132,6 +133,59 @@ public class QueueStorage : IQueueStorage
         ";
         command.Parameters.AddWithValue("$Key", key);
         command.Parameters.AddWithValue("$Value", value);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task SaveOutboxAsync(Guid id, string kind, string payload)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO QueueOutbox (Id, Payload, Kind) VALUES ($Id, $Payload, $Kind)
+            ON CONFLICT(Id) DO UPDATE SET Payload=excluded.Payload, Kind=excluded.Kind;
+        ";
+        command.Parameters.AddWithValue("$Id", id.ToString());
+        command.Parameters.AddWithValue("$Payload", payload);
+        command.Parameters.AddWithValue("$Kind", kind);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task<IReadOnlyList<(Guid Id, string Payload)>> GetOutboxAsync(string kind)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, Payload FROM QueueOutbox WHERE Kind = $Kind ORDER BY rowid";
+        command.Parameters.AddWithValue("$Kind", kind);
+
+        var result = new List<(Guid Id, string Payload)>();
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+        }
+        return result;
+    }
+
+    public async Task DeleteOutboxAsync(Guid id)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM QueueOutbox WHERE Id = $Id";
+        command.Parameters.AddWithValue("$Id", id.ToString());
 
         await command.ExecuteNonQueryAsync();
     }
