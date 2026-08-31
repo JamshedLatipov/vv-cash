@@ -10,7 +10,7 @@ namespace VvCash.Models;
 /// Сериализуется именами, а не числом: settings.json на точках правят руками,
 /// и "Receipt, Ticket" там читается, а 3 — нет.</summary>
 [Flags]
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(PrintRoleJsonConverter))]
 public enum PrintRole
 {
     None = 0,

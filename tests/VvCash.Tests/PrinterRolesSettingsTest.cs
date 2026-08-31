@@ -63,4 +63,77 @@ public class PrinterRolesSettingsTest
 
         Assert.Contains("\"Receipt, Ticket\"", File.ReadAllText(path));
     }
+
+    [Fact]
+    public void MistypedRole_FallsBackToReceipt_WithoutWipingTheRestOfTheFile()
+    {
+        var path = WriteSettings("""
+        {
+          "BackendUrl": "https://example.com",
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": "Bogus" }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+        // The point of this assertion: without the fix, the JsonException from the
+        // bad "Roles" token is caught by Load()'s catch-all, which resets the
+        // entire SettingsData — BackendUrl included, not just the offending role.
+        Assert.Equal("https://example.com", settings.BackendUrl);
+    }
+
+    [Fact]
+    public void PartiallyValidRoleList_FallsBackToReceiptEntirely()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": "Ticket, Bogus" }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+    }
+
+    [Fact]
+    public void NumberInsteadOfString_DoesNotThrow()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": 3 }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+    }
+
+    [Fact]
+    public void NoneIsARealSetting_DistinctFromTheFieldBeingAbsent()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": "None" }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.None, settings.Printers[0].Roles);
+    }
 }
