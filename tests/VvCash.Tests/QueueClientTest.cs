@@ -18,13 +18,13 @@ public class QueueClientTest
         public bool Reachable { get; set; } = true;
         public List<QueueOrder> Posted { get; } = new();
 
-        public Task<bool> PostOrderAsync(QueueOrder order)
+        public Task<PostOrderResult> PostOrderAsync(QueueOrder order)
         {
-            if (!Reachable) return Task.FromResult(false);
+            if (!Reachable) return Task.FromResult(PostOrderResult.Unreachable);
             // Идемпотентность живёт на сервере; здесь просто копим всё, что дошло,
             // чтобы тест увидел дубль, если клиент пошлёт его дважды.
             Posted.Add(order);
-            return Task.FromResult(true);
+            return Task.FromResult(PostOrderResult.Sent);
         }
 
         public Task<IReadOnlyList<QueueOrder>> GetClosedAsync(int tillIndex)
@@ -54,6 +54,7 @@ public class QueueClientTest
 
         var order = await client.EnqueueAsync(Sale());
 
+        Assert.NotNull(order);
         Assert.InRange(order.Number, 100, 999);
         Assert.Single(transport.Posted);
         Assert.Equal(order.Id, transport.Posted[0].Id);
@@ -67,6 +68,7 @@ public class QueueClientTest
 
         var order = await client.EnqueueAsync(Sale());
 
+        Assert.NotNull(order);
         Assert.InRange(order.Number, 100, 999);
         Assert.Empty(transport.Posted);
     }
@@ -78,6 +80,8 @@ public class QueueClientTest
         transport.Reachable = false;
         var first = await client.EnqueueAsync(Sale());
         var second = await client.EnqueueAsync(Sale());
+        Assert.NotNull(first);
+        Assert.NotNull(second);
 
         transport.Reachable = true;
         await client.FlushAsync();
@@ -108,6 +112,7 @@ public class QueueClientTest
         var (client, transport) = Build(db);
         transport.Reachable = false;
         var order = await client.EnqueueAsync(Sale());
+        Assert.NotNull(order);
 
         var (reopened, secondTransport) = Build(db);
         await reopened.FlushAsync();

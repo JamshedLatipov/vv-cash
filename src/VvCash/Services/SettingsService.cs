@@ -27,7 +27,15 @@ public class SettingsData
 
     public QueueRole QueueRole { get; set; } = QueueRole.Off;
     public string QueueServerAddress { get; set; } = string.Empty;
-    public int QueuePort { get; set; } = 8770;
+
+    /// <summary>Порт сервера очереди. Именованная константа, а не троекратно
+    /// повторённое число: тот же 8770 нужен и здесь как значение по умолчанию,
+    /// и в геттере SettingsService.QueuePort как то, во что превращается 0 или
+    /// отрицательное, и в Load() как нормализация уже прочитанного файла —
+    /// три места, а не одно, где 8770 может незаметно разойтись само с собой.</summary>
+    internal const int DefaultQueuePort = 8770;
+
+    public int QueuePort { get; set; } = DefaultQueuePort;
     public string QueueSecret { get; set; } = string.Empty;
     public int TillIndex { get; set; }
 }
@@ -143,12 +151,12 @@ public class SettingsService : ISettingsService, IQueueSettings
         set => _data.QueueServerAddress = value ?? string.Empty;
     }
 
-    /// <summary>Ноль и отрицательное читаются как 8770 — тем же приёмом, что
-    /// SyncIntervalMinutes и CustomerDisplayBaudRate выше: settings.json правят
-    /// руками.</summary>
+    /// <summary>Ноль и отрицательное читаются как SettingsData.DefaultQueuePort —
+    /// тем же приёмом, что SyncIntervalMinutes и CustomerDisplayBaudRate выше:
+    /// settings.json правят руками.</summary>
     public int QueuePort
     {
-        get => _data.QueuePort <= 0 ? 8770 : _data.QueuePort;
+        get => _data.QueuePort <= 0 ? SettingsData.DefaultQueuePort : _data.QueuePort;
         set => _data.QueuePort = value;
     }
 
@@ -235,7 +243,7 @@ public class SettingsService : ISettingsService, IQueueSettings
                 }
                 if (_data.QueuePort <= 0)
                 {
-                    _data.QueuePort = 8770;
+                    _data.QueuePort = SettingsData.DefaultQueuePort;
                 }
                 if (_data.QueueSecret == null)
                 {

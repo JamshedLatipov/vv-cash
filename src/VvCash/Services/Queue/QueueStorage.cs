@@ -93,11 +93,16 @@ public class QueueStorage : IQueueStorage
                 );
 
                 -- Исходящий буфер кассы-клиента. Тот же смысл, что у
-                -- UnsyncedDocuments в offline_data.db, и живёт по тем же правилам.
+                -- UnsyncedDocuments в offline_data.db, и живёт по тем же правилам —
+                -- вплоть до RejectedAt/RejectedReason: NULL значит «ещё в ротации»,
+                -- заполненные — «сервер отказал по существу, повтор не поможет»,
+                -- строка остаётся на диске для разбора, но больше не отправляется.
                 CREATE TABLE IF NOT EXISTS QueueOutbox (
                     Id TEXT PRIMARY KEY,
                     Payload TEXT NOT NULL,
-                    Kind TEXT NOT NULL
+                    Kind TEXT NOT NULL,
+                    RejectedAt TEXT,
+                    RejectedReason TEXT
                 );
             ";
 
@@ -164,14 +169,22 @@ public class QueueStorage : IQueueStorage
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Payload FROM QueueOutbox WHERE Kind = $Kind ORDER BY rowid";
+        command.CommandText =
+            "SELECT Id, Payload FROM QueueOutbox WHERE Kind = $Kind AND RejectedAt IS NULL ORDER BY rowid";
         command.Parameters.AddWithValue("$Kind", kind);
 
         var result = new List<(Guid Id, string Payload)>();
         using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-            result.Add((Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+            // TryParse, не Parse: строка с нечитаемым Id не должна ронять чтение
+            // всей остальной, годной части буфера. Сам испорченный ряд здесь же
+            // и остаётся невидимым для FlushAsync — у него, в отличие от плохого
+            // Payload, даже нет ключа, по которому его можно было бы убрать.
+            if (Guid.TryParse(reader.GetString(0), out var id))
+            {
+                result.Add((id, reader.GetString(1)));
+            }
         }
         return result;
     }
@@ -186,6 +199,26 @@ public class QueueStorage : IQueueStorage
         using var command = connection.CreateCommand();
         command.CommandText = "DELETE FROM QueueOutbox WHERE Id = $Id";
         command.Parameters.AddWithValue("$Id", id.ToString());
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task MarkOutboxRejectedAsync(Guid id, string reason)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE QueueOutbox
+            SET RejectedAt = $RejectedAt, RejectedReason = $Reason
+            WHERE Id = $Id;
+        ";
+        command.Parameters.AddWithValue("$Id", id.ToString());
+        command.Parameters.AddWithValue("$RejectedAt", DateTime.UtcNow.ToString("o"));
+        command.Parameters.AddWithValue("$Reason", reason ?? string.Empty);
 
         await command.ExecuteNonQueryAsync();
     }

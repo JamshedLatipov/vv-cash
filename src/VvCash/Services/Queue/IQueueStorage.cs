@@ -20,8 +20,17 @@ public interface IQueueStorage
     Task SaveOutboxAsync(Guid id, string kind, string payload);
 
     /// <summary>Строки буфера одного типа, старые первыми — порядок, в котором
-    /// их положили, а не Id, который для этого не годится.</summary>
+    /// их положили, а не Id, который для этого не годится. Отклонённые
+    /// (см. MarkOutboxRejectedAsync) сюда не попадают — тот же приём, что
+    /// GetUnsyncedDocumentsAsync применяет к RejectedAt: это то, что ещё нужно
+    /// сделать, а не то, что уже попробовали и получили осознанный отказ.</summary>
     Task<IReadOnlyList<(Guid Id, string Payload)>> GetOutboxAsync(string kind);
 
     Task DeleteOutboxAsync(Guid id);
+
+    /// <summary>Выводит строку буфера из ротации отправки, не удаляя её — как
+    /// OfflineStorageService.MarkDocumentRejectedAsync для документов бэкенда.
+    /// Для случая, когда повтор не поможет: сервер отказал по существу, а не
+    /// был недоступен.</summary>
+    Task MarkOutboxRejectedAsync(Guid id, string reason);
 }
