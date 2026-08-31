@@ -48,6 +48,22 @@ public class QueueServer
     private readonly List<WebSocket> _subscribers = new();
     private readonly object _subscribersLock = new();
 
+    /// <summary>Те же настройки JSON, что ASP.NET Core минимал-API применяет к
+    /// Results.Ok по умолчанию (JsonSerializerDefaults.Web — camelCase имена
+    /// полей). GET /orders их получает бесплатно через сам Results.Ok, а
+    /// вебсокет собирает тело руками — без этого поля здесь оказался бы
+    /// голый JsonSerializer.Serialize с именами полей в PascalCase, и
+    /// кухонный экран получал бы от HTTP и от WS два разных представления
+    /// одного и того же заказа: "id" в одном канале и "Id" в другом.</summary>
+    private static readonly JsonSerializerOptions BroadcastJsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Тайм-аут на отправку одному подписчику при рассылке. Экран
+    /// может быть жив (State всё ещё Open), но зависнуть и не вычитывать
+    /// сокет — без этого одна замёрзшая вкладка держала бы BroadcastOrdersAsync,
+    /// а с ним и ответ на POST /orders, сколько угодно, потому что вызывающие
+    /// эндпоинты ждут рассылку перед тем, как ответить кассе.</summary>
+    private static readonly TimeSpan BroadcastSendTimeout = TimeSpan.FromSeconds(3);
+
     /// <summary>Причина последнего неудачного StartAsync. Null, пока не было ни
     /// одной попытки или последняя была успешной.</summary>
     public string? LastError { get; private set; }
@@ -319,7 +335,7 @@ public class QueueServer
     private async Task SendOrdersAsync(WebSocket socket, CancellationToken token)
     {
         var orders = await _storage.GetOrdersAsync();
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, BroadcastJsonOptions);
         await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, token);
     }
 
@@ -338,7 +354,7 @@ public class QueueServer
         }
 
         var orders = await _storage.GetOrdersAsync();
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, BroadcastJsonOptions);
 
         List<WebSocket>? dead = null;
         foreach (var socket in snapshot)
@@ -350,15 +366,17 @@ public class QueueServer
                     (dead ??= new List<WebSocket>()).Add(socket);
                     continue;
                 }
-                await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+                using var sendTimeout = new CancellationTokenSource(BroadcastSendTimeout);
+                await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, sendTimeout.Token);
             }
             catch (Exception)
             {
-                // Умер посреди рассылки — не наша забота, кроме как перестать
-                // его больше не звать; сам сокет закрывающий цикл в
-                // HandleWebSocketAsync уберёт из списка тоже, но снимок уже
-                // взят, так что дублирующий Remove здесь безвреден (List
-                // просто ничего не найдёт во второй раз).
+                // Умер посреди рассылки или просто завис, не вычитывая свой
+                // сокет (см. BroadcastSendTimeout), — не наша забота, кроме
+                // как перестать его больше не звать; сам сокет закрывающий
+                // цикл в HandleWebSocketAsync уберёт из списка тоже, но
+                // снимок уже взят, так что дублирующий Remove здесь безвреден
+                // (List просто ничего не найдёт во второй раз).
                 (dead ??= new List<WebSocket>()).Add(socket);
             }
         }

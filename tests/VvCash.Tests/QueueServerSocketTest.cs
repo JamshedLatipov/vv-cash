@@ -137,7 +137,10 @@ public class QueueServerSocketTest : IAsyncLifetime
     /// состояние заказа, а не тот же New, с которым его завели. State уходит в
     /// JSON числом (тот же формат, что и у GET /orders — конвертера в строку
     /// нигде не настроено, см. QueueServerTest), поэтому сравниваем через
-    /// десериализацию, а не поиском строки "InProgress" в сыром тексте.</summary>
+    /// десериализацию, а не поиском строки "InProgress" в сыром тексте. Имена
+    /// полей в пуше — camelCase, те же самые Web-настройки JSON, что и у
+    /// GET /orders (см. BroadcastJsonOptions в QueueServer), поэтому
+    /// десериализация здесь просит регистронезависимое сопоставление имён.</summary>
     [Fact]
     public async Task AStateChangeIsAlsoPushedToSubscribers()
     {
@@ -153,11 +156,13 @@ public class QueueServerSocketTest : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, move.StatusCode);
 
         var payload = await ReceiveTextAsync(socket, cts.Token);
-        var pushed = JsonSerializer.Deserialize<List<QueueOrder>>(payload)!;
+        var pushed = JsonSerializer.Deserialize<List<QueueOrder>>(payload, CaseInsensitive)!;
 
         var pushedOrder = Assert.Single(pushed, o => o.Id == order.Id);
         Assert.Equal(QueueOrderState.InProgress, pushedOrder.State);
     }
+
+    private static readonly JsonSerializerOptions CaseInsensitive = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>Вкладка браузера закрывается без протокольного прощания —
     /// Abort() рвёт соединение так же резко, как обычный крестик в углу

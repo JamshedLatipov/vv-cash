@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
@@ -26,6 +27,15 @@ public class HttpQueueTransport : IQueueTransport
     /// стопорила продажу, а долгий таймаут на каждый заказ в буфере как раз
     /// и стопорил бы.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
+
+    /// <summary>Те же Web-настройки JSON (camelCase), что сервер применяет и к
+    /// ответам Results.Ok, и к рассылке по /ws (см. QueueServer.BroadcastJsonOptions).
+    /// Без явного options здесь тело POST ушло бы в PascalCase — сервер его всё
+    /// равно разберёт (ReadFromJsonAsync у ASP.NET Core регистронезависим по
+    /// умолчанию), но по проводу тогда бегали бы два разных представления
+    /// одного и того же заказа, что просто лишний повод для путаницы при
+    /// разборе логов или трафика.</summary>
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http;
     private readonly Func<string> _address;
@@ -55,7 +65,7 @@ public class HttpQueueTransport : IQueueTransport
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, BuildUrl(address, "orders"));
             request.Headers.Add(SecretHeader, _secret());
-            request.Content = JsonContent.Create(order);
+            request.Content = JsonContent.Create(order, options: JsonOptions);
 
             using var response = await _http.SendAsync(request, cts.Token);
             return MapPostResult(response.StatusCode);
@@ -137,7 +147,7 @@ public class HttpQueueTransport : IQueueTransport
                 return Array.Empty<QueueOrder>();
             }
 
-            var orders = await response.Content.ReadFromJsonAsync<List<QueueOrder>>(cts.Token);
+            var orders = await response.Content.ReadFromJsonAsync<List<QueueOrder>>(JsonOptions, cts.Token);
             return (IReadOnlyList<QueueOrder>?)orders ?? Array.Empty<QueueOrder>();
         }
         catch (Exception)
