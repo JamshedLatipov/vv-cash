@@ -167,4 +167,6 @@ public class QueueClient : IQueueClient
             await _pool.ReleaseAsync(closed.Number);
         }
     }
+
+    public Task<int> PendingCountAsync() => _storage.GetOutboxCountAsync(OrderKind);
 }

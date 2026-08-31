@@ -139,6 +139,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     public bool HasUnsyncedDocuments => UnsyncedDocumentsCount > 0;
 
+    /// <summary>Task 25: заказов в исходящем буфере очереди этой кассы —
+    /// поставлены, но ещё не подтверждены соседней кассой-сервером.
+    /// Отдельный счётчик от UnsyncedDocumentsCount выше, не сложенный с ним:
+    /// не дошедший до бэкенда чек и не дошедший до соседней кассы заказ чинят
+    /// разные люди разными действиями (см. IQueueClient.PendingCountAsync),
+    /// и один номер над обоими отправил бы кассира не туда.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPendingQueueOrders))]
+    private int _pendingQueueOrdersCount;
+
+    public bool HasPendingQueueOrders => PendingQueueOrdersCount > 0;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasParkedSales))]
     [NotifyPropertyChangedFor(nameof(IsParkedSalesListVisible))]
@@ -943,6 +955,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 // Ping the server every 10 seconds to update IsSystemOnline status
                 await _syncService.CheckSystemOnlineAsync();
 
+                // Task 25: same 10-second tick keeps the outbox badge current. This is a
+                // local SQLite count, not a network call — QueueFlushLoop (App.axaml.cs)
+                // is what actually drains the buffer on its own 15-second timer; this only
+                // re-reads what is left in it, so the cashier's badge does not lag behind
+                // a flush that happened to land between two ticks here.
+                if (_queueClient != null)
+                {
+                    var pendingCount = await _queueClient.PendingCountAsync();
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => PendingQueueOrdersCount = pendingCount);
+                }
+
                 int intervalMinutes = _settingsService.SyncIntervalMinutes;
                 if (intervalMinutes <= 0) intervalMinutes = 10;
 
@@ -1006,6 +1029,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         _expenseDocumentService.UnsyncedDocumentsCountChanged += OnUnsyncedDocumentsCountChanged;
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
+
+        // Task 25: initial read of the queue outbox count. _queueClient has no
+        // count-changed event to subscribe to (unlike _expenseDocumentService above) —
+        // StartBackgroundSync's own loop keeps this current afterwards, on the same
+        // 10-second cadence it already polls IsSystemOnline on.
+        if (_queueClient != null)
+        {
+            PendingQueueOrdersCount = await _queueClient.PendingCountAsync();
+        }
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
         _shiftService.SessionRevoked += OnShiftSessionRevoked;
@@ -2379,6 +2411,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                     warehouseName: null);
                                 await _printerService.PrintKitchenOrderAsync(queueSale, queueNumber);
                             }
+
+                            // Immediate feedback rather than waiting for the next 10-second
+                            // background tick (see StartBackgroundSync): EnqueueAsync above
+                            // just wrote to (and may have already drained) the outbox, and
+                            // this runs on the UI thread already, so there is no dispatcher
+                            // hop needed the way that background poll requires.
+                            PendingQueueOrdersCount = await _queueClient.PendingCountAsync();
                         }
 
                         _cartService.ClearCart();

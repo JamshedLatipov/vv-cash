@@ -292,6 +292,11 @@ public class PosViewModelSellerGateTest
         }
 
         public Task FlushAsync() => Task.CompletedTask;
+
+        // Task 25: not what this test file exercises (see PendingQueueOrdersCount's
+        // own tests, if any land in a queue-specific file) — zero keeps the badge off
+        // by default for every seller-gate scenario here.
+        public Task<int> PendingCountAsync() => Task.FromResult(0);
     }
 
     private class FakeCustomerDisplayService : ICustomerDisplayService

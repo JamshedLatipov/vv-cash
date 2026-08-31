@@ -32,6 +32,12 @@ public partial class App : Application
     // App instance itself lives for the whole process, same guarantee Services relies on.
     private QueueServer? _queueServer;
 
+    /// <summary>Same lifetime reasoning as _queueServer right above: kept on the App
+    /// instance so nothing GC's a live background Task mid-run. See QueueFlushLoop's own
+    /// remarks for why the process still exits cleanly with neither of these two ever
+    /// explicitly stopped.</summary>
+    private QueueFlushLoop? _queueFlushLoop;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -80,6 +86,18 @@ public partial class App : Application
                     queueSettings.QueuePort,
                     queueSettings.QueueSecret);
                 _ = _queueServer.StartAsync();
+            }
+
+            // Background flush loop (Task 25). Whenever the queue is on at all — Server
+            // included: the server till talks to itself over its own loopback transport
+            // (see ConfigureServices' remarks on IQueueTransport), so its own outbox still
+            // needs retrying the same way a client's does. Off leaves this null, matching
+            // _queueServer above and IQueueClient's own fail-open design — nothing here
+            // needs the buffer flushed if the queue was never turned on.
+            if (queueSettings.QueueRole != QueueRole.Off)
+            {
+                _queueFlushLoop = new QueueFlushLoop(Services.GetRequiredService<IQueueClient>());
+                _queueFlushLoop.Start();
             }
 
             var loginVm = Services.GetRequiredService<LoginViewModel>();

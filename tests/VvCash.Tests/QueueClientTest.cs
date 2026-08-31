@@ -194,18 +194,21 @@ public class QueueClientTest
         public Task<IReadOnlyList<(Guid Id, string Payload)>> GetOutboxAsync(string kind)
             => Task.FromResult<IReadOnlyList<(Guid, string)>>(Array.Empty<(Guid, string)>());
 
+        public Task<int> GetOutboxCountAsync(string kind) => Task.FromResult(0);
+
         public Task DeleteOutboxAsync(Guid id) => Task.CompletedTask;
         public Task MarkOutboxRejectedAsync(Guid id, string reason) => Task.CompletedTask;
 
-        // Ничего из Task 13-15 этот тест не касается — QueueClient не зовёт эти
-        // методы вовсе, они здесь только чтобы фейк остался валидной реализацией
-        // расширенного интерфейса.
+        // Ничего из Task 13-15 и Task 25 этот тест не касается — QueueClient не
+        // зовёт эти методы вовсе, они здесь только чтобы фейк остался валидной
+        // реализацией расширенного интерфейса.
         public Task<IReadOnlyList<QueueOrder>> GetOrdersAsync()
             => Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
 
         public Task SaveOrderAsync(QueueOrder order) => Task.CompletedTask;
         public Task<QueueOrder?> GetOrderAsync(Guid id) => Task.FromResult<QueueOrder?>(null);
         public Task UpdateOrderStateAsync(QueueOrder order) => Task.CompletedTask;
+        public Task CloseStaleOrdersAsync(DateTime today) => Task.CompletedTask;
     }
 
     /// <summary>Номер уже выдан, а буфер записать не удалось. Продажа всё равно

@@ -123,6 +123,12 @@ public class QueueServer
 
         try
         {
+            // Перевод дня уже на старте (Task 25): точка, которую не
+            // перезапускают сутками, иначе увидела бы вчерашние заказы
+            // закрытыми только по первому же POST /orders — а на кухонном
+            // экране до первой продажи нового дня они бы всё ещё висели.
+            await _storage.CloseStaleOrdersAsync(_now());
+
             var builder = WebApplication.CreateBuilder();
             // Консольный логгер ASP.NET Core говорит поверх остального
             // консольного вывода кассы; сама касса не читает эти логи.
@@ -242,6 +248,12 @@ public class QueueServer
 
         app.MapPost("/orders", async (HttpContext context) =>
         {
+            // Тот же перевод дня, что и в StartAsync (см. его докстринг) —
+            // здесь, потому что точка может неделями не перезапускаться, и
+            // единственный регулярный вход в это время суток — как раз
+            // постановка нового заказа.
+            await _storage.CloseStaleOrdersAsync(_now());
+
             var order = await context.Request.ReadFromJsonAsync<QueueOrder>(WireJsonOptions);
             if (order == null) return Results.BadRequest();
 

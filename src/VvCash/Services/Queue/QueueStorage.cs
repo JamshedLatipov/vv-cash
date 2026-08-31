@@ -192,6 +192,26 @@ public class QueueStorage : IQueueStorage
         return result;
     }
 
+    public async Task<int> GetOutboxCountAsync(string kind)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        // Тот же фильтр, что у GetOutboxAsync: отклонённые (RejectedAt не
+        // NULL) сервером уже разобраны и не в ротации — считать их "ещё не
+        // отправлено" значило бы врать кассиру числом, которое никогда не
+        // уменьшится само.
+        command.CommandText =
+            "SELECT COUNT(*) FROM QueueOutbox WHERE Kind = $Kind AND RejectedAt IS NULL";
+        command.Parameters.AddWithValue("$Kind", kind);
+
+        var result = await command.ExecuteScalarAsync();
+        return Convert.ToInt32(result);
+    }
+
     public async Task DeleteOutboxAsync(Guid id)
     {
         await InitializeAsync();
@@ -302,6 +322,65 @@ public class QueueStorage : IQueueStorage
         command.Parameters.AddWithValue("$ClosedAt", (object?)FormatDate(order.ClosedAt) ?? DBNull.Value);
 
         await command.ExecuteNonQueryAsync();
+    }
+
+    public async Task CloseStaleOrdersAsync(DateTime today)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        // Кандидаты — всё ещё рабочее состояние. Closed и Cancelled — уже
+        // конечные исходы (см. докстринг интерфейса) и здесь не трогаются
+        // вовсе, поэтому даже не выбираются.
+        using var selectCommand = connection.CreateCommand();
+        selectCommand.CommandText =
+            $"{OrderColumnsSelect} WHERE State NOT IN ($Closed, $Cancelled)";
+        selectCommand.Parameters.AddWithValue("$Closed", QueueOrderState.Closed.ToString());
+        selectCommand.Parameters.AddWithValue("$Cancelled", QueueOrderState.Cancelled.ToString());
+
+        // Отбор по календарному дню — в C#, на уже распарсенном DateTime, а
+        // не в SQL: CreatedAt на диске несёт тот Kind/оффсет, с которым его
+        // записал BindOrder (обычно местное время кассы — см. докстринг
+        // интерфейса), а SQL-функция date() сначала нормализует строку к UTC
+        // по этому оффсету и лишь потом берёт календарную дату. Для заказа,
+        // пробитого рано утром по местному времени с положительным оффсетом,
+        // это два разных дня.
+        var stale = new List<QueueOrder>();
+        using (var reader = await selectCommand.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                var order = ReadOrder(reader);
+                if (order.CreatedAt.Date < today.Date)
+                {
+                    stale.Add(order);
+                }
+            }
+        }
+
+        if (stale.Count == 0) return;
+
+        // Одна команда на всех: State и ClosedAt одинаковы для каждой строки
+        // (см. докстринг интерфейса — ClosedAt = today, тот же today, что и
+        // граница календарного дня выше), меняется только $Id, поэтому
+        // параметры заводятся один раз до цикла, а не на каждой итерации.
+        using var updateCommand = connection.CreateCommand();
+        updateCommand.CommandText = @"
+            UPDATE QueueOrders
+            SET State = $State, ClosedAt = $ClosedAt
+            WHERE Id = $Id;
+        ";
+        updateCommand.Parameters.AddWithValue("$State", QueueOrderState.Closed.ToString());
+        updateCommand.Parameters.AddWithValue("$ClosedAt", FormatDate(today));
+        var idParam = updateCommand.Parameters.Add("$Id", SqliteType.Text);
+
+        foreach (var order in stale)
+        {
+            idParam.Value = order.Id.ToString();
+            await updateCommand.ExecuteNonQueryAsync();
+        }
     }
 
     private const string OrderColumnsSelect =
