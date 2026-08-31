@@ -120,8 +120,21 @@ public class NumberPool : INumberPool
             using (var update = connection.CreateCommand())
             {
                 update.Transaction = transaction;
+                // IssuedSeq IS NOT NULL — не косметика: сервер называет закрытые
+                // заказы этой кассы на каждом опросе (см. QueueFlushLoop, раз в
+                // 15 секунд), и ничего их оттуда не убирает, так что один и тот
+                // же номер сюда прилетает снова и снова. Без этого условия повтор
+                // переставлял бы ReleasedAtSeq на текущий seq при каждом проходе,
+                // окно кулдауна не открывалось бы никогда, и после исчерпания
+                // свежих номеров касса скатывалась бы на третью ветку
+                // IssueAsync — ту, что выдаёт номер, ещё числящийся на чьём-то
+                // талоне. Тот же щит защищает и от другого захода на ту же
+                // коллизию: устаревший «закрыт» по заказу, чей номер уже
+                // переиздан кому-то новому, теперь просто не находит строку для
+                // обновления, вместо того чтобы освободить чужой активный номер.
                 update.CommandText =
-                    "UPDATE NumberPool SET IssuedSeq = NULL, ReleasedAtSeq = $seq WHERE Number = $n";
+                    "UPDATE NumberPool SET IssuedSeq = NULL, ReleasedAtSeq = $seq " +
+                    "WHERE Number = $n AND IssuedSeq IS NOT NULL";
                 update.Parameters.AddWithValue("$seq", seq);
                 update.Parameters.AddWithValue("$n", number);
                 await update.ExecuteNonQueryAsync();

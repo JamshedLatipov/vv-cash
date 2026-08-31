@@ -126,6 +126,37 @@ public class NumberPoolTest
         Assert.Equal(0, afterExhaustion % 5);
     }
 
+    /// <summary>A closed order is reported by the server on every poll until
+    /// something deletes it, and nothing does — QueueFlushLoop calls
+    /// FlushAsync every 15 seconds, so the same closed order gets released
+    /// again and again, not once. A repeat release must be a no-op: it must
+    /// not push the cooldown window out from under the first, real release.
+    /// Anchor stays at the original release's seq (180); the window opens at
+    /// seq 230, not at seq 240 as it would if the repeat re-stamped it.</summary>
+    [Fact]
+    public async Task ARepeatedReleaseDoesNotPushTheCooldownWindowOut()
+    {
+        var pool = Pool();
+
+        // Exhaust so branch 1 (fresh) is empty and the cooldown branch is
+        // what actually decides, same setup as the cooldown-width test above.
+        var issued = new List<int>();
+        for (var i = 0; i < 180; i++) issued.Add(await pool.IssueAsync());
+
+        var released = issued[0];
+        await pool.ReleaseAsync(released); // real release, anchored at seq 180
+
+        for (var i = 0; i < 10; i++) await pool.IssueAsync(); // seq -> 190
+
+        // The stale repeat: same number, reported closed again.
+        await pool.ReleaseAsync(released);
+
+        for (var i = 0; i < NumberPool.CooldownIssues - 10 - 1; i++) // seq 191..229
+            Assert.NotEqual(released, await pool.IssueAsync());
+
+        Assert.Equal(released, await pool.IssueAsync()); // seq 230
+    }
+
     [Fact]
     public async Task ANewDayResetsAndReshuffles()
     {
