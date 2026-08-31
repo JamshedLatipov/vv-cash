@@ -94,6 +94,31 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
+; Task 24: firewall rule for the queue server's port. Unconditional — not gated behind a
+; Tasks checkbox — because auto-update reruns this very installer silently on every
+; release (see the two app-launch entries below), and nobody will ever be back at this
+; wizard page to tick a box. It runs on every install regardless of whether this till
+; ends up as QueueRole.Server: an inbound allow rule for a port nothing is listening on is
+; inert, and there is no settings.json to read a role out of on a first install anyway —
+; the settings screen that sets QueueRole only exists after the app itself is installed.
+;
+; The port is hardcoded to 8770 (SettingsData.DefaultQueuePort — the same default the
+; settings screen's QueuePort starts at), not read from anywhere. That is the known
+; limitation: if an administrator later changes QueuePort on the settings screen, this
+; rule does NOT follow it. It keeps allowing 8770 forever, and the port the till actually
+; listens on afterwards is left unreachable from other registers until someone opens it
+; by hand (or reruns the installer, which only ever reopens 8770 again, not whatever the
+; new port is). Inno Setup has no way to reach into a running install's own settings.json
+; to learn a different value, so this is a deliberate gap, not an oversight.
+;
+; Rerunning "netsh advfirewall firewall add rule" with the same name does not fail and
+; does not overwrite the existing rule — it adds a second, separate rule with the same
+; name. Harmless to firewall behaviour (Windows evaluates duplicate allow rules the same
+; as one), but on a machine that has auto-updated across many releases, "VvCash Queue"
+; quietly accumulates one more identical entry per update; nothing here prunes the old
+; ones.
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""VvCash Queue"" dir=in action=allow protocol=TCP localport=8770"; Flags: runhidden; StatusMsg: "Настройка сетевого доступа..."
+
 ; Two entries on purpose. The first is the familiar "Run VvCash" checkbox on the last
 ; wizard page — postinstall makes it a checkbox, and skipifsilent means it does nothing
 ; during an unattended install.

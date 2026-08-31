@@ -12,6 +12,7 @@ using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Hardware;
+using VvCash.Services.Queue;
 
 namespace VvCash.ViewModels;
 
@@ -192,6 +193,56 @@ public partial class SettingsViewModel : ViewModelBase
 
     public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
 
+    /// <summary>Task 24: пять настроек очереди заказов и кухни (см.
+    /// IQueueSettings). Читаются/пишутся через приведение _settingsService к
+    /// IQueueSettings, которую та же SettingsService реализует наравне с
+    /// ISettingsService — тем же приёмом, что App.axaml.cs использует для
+    /// NumberPool/QueueServer, а не через второй впрыснутый сервис.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsQueueServerFieldsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsQueueClientFieldsVisible))]
+    private QueueRole _queueRole = QueueRole.Off;
+
+    /// <summary>Значения роли для ComboBox — как ConnectionTypes у принтера
+    /// чуть выше: без DisplayMemberBinding, так что на экране это те же
+    /// "Off"/"Server"/"Client", что и в самом enum (тот же нелокализованный
+    /// приём, что и у ConnectionTypes).</summary>
+    public Array QueueRoles => Enum.GetValues(typeof(QueueRole));
+
+    /// <summary>Порт и секрет сервера очереди видны только тогда, когда эта
+    /// касса сама назначена сервером: клиенту нечего слушать, и показывать
+    /// эти поля значило бы предлагать настроить порт, который эта касса
+    /// никогда не откроет (см. QueueServer.StartAsync).</summary>
+    public bool IsQueueServerFieldsVisible => QueueRole == QueueRole.Server;
+
+    /// <summary>Адрес кассы-сервера имеет смысл только у клиента — сервер
+    /// сам себя по этому адресу не набирает (см. App.axaml.cs: сервер ходит
+    /// к себе по 127.0.0.1, минуя QueueServerAddress вовсе).</summary>
+    public bool IsQueueClientFieldsVisible => QueueRole == QueueRole.Client;
+
+    [ObservableProperty]
+    private string _queueServerAddress = string.Empty;
+
+    /// <summary>Строкой, а не int — тот же приём, что SyncIntervalText и
+    /// CustomerDisplayBaudRateText выше: TextBox с частично набранным числом
+    /// не должен ронять привязку.</summary>
+    [ObservableProperty]
+    private string _queuePortText = SettingsData.DefaultQueuePort.ToString();
+
+    [ObservableProperty]
+    private string _queueSecret = string.Empty;
+
+    /// <summary>Номер этой кассы в пуле номеров очереди (см.
+    /// IQueueSettings.TillIndex) — строкой по той же причине, что и
+    /// QueuePortText выше. Виден на экране ВСЕГДА, а не только у клиента:
+    /// сервер тоже продаёт и тоже выдаёт номера из своего диапазона (класс
+    /// вычетов Number % NumberPool.Tills). Две кассы с одинаковым номером
+    /// начнут выдавать покупателям одинаковые номера — по этой же причине
+    /// IQueueSettings.TillIndex зажимает его в 0..NumberPool.Tills-1, а не
+    /// принимает как есть.</summary>
+    [ObservableProperty]
+    private string _tillIndexText = "0";
+
     /// <summary>Payment categories offered for the exchange payout, loaded from
     /// GET /documents/payment/categories/. Empty when the register is offline or the
     /// role lacks documents.PaymentCategoryList — in which case the previously saved id
@@ -269,6 +320,17 @@ public partial class SettingsViewModel : ViewModelBase
         // сохранил бы этот null поверх настроенного порта.
         if (!string.IsNullOrWhiteSpace(CustomerDisplayPort) && !AvailableDisplayPorts.Contains(CustomerDisplayPort))
             AvailableDisplayPorts.Add(CustomerDisplayPort);
+
+        // Task 24: cast rather than a second injected service — see this block's own
+        // class-level remarks just above the properties it fills in.
+        if (_settingsService is IQueueSettings queueSettings)
+        {
+            QueueRole = queueSettings.QueueRole;
+            QueueServerAddress = queueSettings.QueueServerAddress;
+            QueuePortText = queueSettings.QueuePort.ToString();
+            QueueSecret = queueSettings.QueueSecret;
+            TillIndexText = queueSettings.TillIndex.ToString();
+        }
 
         foreach (var printer in _settingsService.Printers)
         {
@@ -531,6 +593,26 @@ public partial class SettingsViewModel : ViewModelBase
             _settingsService.CustomerDisplayBaudRate = displayBaud;
         if (SelectedDisplayCodePage != null)
             _settingsService.CustomerDisplayCodePageId = SelectedDisplayCodePage.Id;
+
+        // Task 24: same cast as the constructor above.
+        if (_settingsService is IQueueSettings queueSettings)
+        {
+            queueSettings.QueueRole = QueueRole;
+            queueSettings.QueueServerAddress = QueueServerAddress;
+            // Пропуск записи при нечитаемом вводе — тот же приём, что и у
+            // SyncIntervalText/CustomerDisplayBaudRateText выше, но без их
+            // отката к дефолту: SettingsService.QueuePort уже сам подменяет
+            // 0 и отрицательное на DefaultQueuePort (см. его геттер), так
+            // что откатывать здесь ещё раз нечего.
+            if (int.TryParse(QueuePortText, out var queuePort) && queuePort > 0)
+                queueSettings.QueuePort = queuePort;
+            queueSettings.QueueSecret = QueueSecret;
+            // Не зажимается здесь — IQueueSettings.TillIndex зажимает сам на
+            // чтении (0..NumberPool.Tills-1), так что записывать можно как
+            // распарсилось.
+            if (int.TryParse(TillIndexText, out var tillIndex))
+                queueSettings.TillIndex = tillIndex;
+        }
 
         // Only when the list actually loaded: an offline settings visit shows an empty
         // dropdown and a null selection, and writing that through would silently

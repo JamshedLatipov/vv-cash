@@ -304,6 +304,48 @@
                             </Grid>
                         </Border>
 
+                        <!-- Очередь заказов и кухня (Task 24). Роль и номер кассы видны
+                             всегда — номер кассы решает, из какого диапазона пула номеров
+                             продаёт эта касса, и это касается и сервера тоже (он тоже
+                             продаёт), поэтому поле не спрятано за условием роли. Адрес
+                             сервера имеет смысл только у клиента; порт и секрет — только
+                             у сервера (см. SettingsViewModel.IsQueueClientFieldsVisible /
+                             IsQueueServerFieldsVisible). -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,24,0,12">
+                            <material:MaterialIcon Kind="ServerNetwork" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                            <TextBlock Text="{Binding [QueueSettings], Source={x:Static services:I18nService.Instance}}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="12">
+                                <Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [QueueRole], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <!-- Номер кассы — её класс вычетов в пуле номеров очереди.
+                                         Виден всегда, не только у клиента: сервер тоже продаёт и
+                                         тоже выдаёт номера из своего диапазона. Две кассы с
+                                         одинаковым номером начнут выдавать покупателям
+                                         одинаковые номера. -->
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [TillNumber], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+
+                                    <ComboBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding QueueRoles}" SelectedItem="{Binding QueueRole, Mode=TwoWay}" Classes="PrinterCombo" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding TillIndexText, Mode=TwoWay}" Classes="PrinterInput"/>
+                                </Grid>
+
+                                <StackPanel IsVisible="{Binding IsQueueClientFieldsVisible}">
+                                    <TextBlock Text="{Binding [QueueServerAddress], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding QueueServerAddress, Mode=TwoWay}" Classes="PrinterInput" Watermark="{Binding [QueueServerAddressWatermark], Source={x:Static services:I18nService.Instance}}"/>
+                                </StackPanel>
+
+                                <Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto" IsVisible="{Binding IsQueueServerFieldsVisible}">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [QueuePort], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [QueueSecret], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+
+                                    <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding QueuePortText, Mode=TwoWay}" Classes="PrinterInput" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding QueueSecret, Mode=TwoWay}" Classes="PrinterInput" PasswordChar="•"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
                         <!-- Тот же баннер, что и внизу экрана, у той же пары свойств —
                              продублирован рендер, не состояние. Кнопка «Пробная печать»
                              живёт в этой карточке, а оба баннера были только под карточкой
