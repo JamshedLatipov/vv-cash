@@ -65,4 +65,23 @@ public class QueueDocumentsTest
         Assert.DoesNotContain("Market 1", text);
         Assert.True(bare.Length < full.Length);
     }
+
+    [Fact]
+    public void SaleReceiptDataCarriesEverythingTheReceiptPrints()
+    {
+        var data = new SaleReceiptData(OneCoffee(), 24m, 4m, 20m,
+            DiscountName: "Happy hour", DocumentNumber: "A-7",
+            WarehouseName: "Market 1", SellerName: "Ann", SaleDate: "2026-08-31 14:22");
+
+        var bytes = EscPosPrinterService.BuildSaleReceipt(
+            EscPosCodePages.Default, data.Items, data.Subtotal, data.Discount, data.Total,
+            data.DiscountName, data.DocumentNumber, data.WarehouseName, data.SellerName,
+            data.SaleDate, queueNumber: "305");
+
+        var text = Text(bytes);
+        Assert.Contains("# 305", text);
+        Assert.Contains("A-7", text);
+        Assert.Contains("Ann", text);
+        Assert.Contains("Happy hour", text);
+    }
 }
