@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
 
@@ -30,6 +31,31 @@ public class EscPosPrinterService : IPrinterService
     /// Receipt: служба, собранная на экране настроек ради пробной печати, ролями
     /// не пользуется вовсе, и заставлять её их объявлять незачем.</summary>
     public PrintRole Roles => _roles;
+
+    /// <summary>Бюджет на ОДНУ сетевую фазу SendViaLan — на попытку соединения и
+    /// отдельно на саму запись, а не на обе разом: здоровое соединение занимает
+    /// доли миллисекунды, и почти весь бюджет всё равно достаётся записи.
+    ///
+    /// Измерено на этой машине разовым скриптом на голых сокетах (числа — в
+    /// сообщении коммита, который завёл этот таймаут; здесь не продублированы,
+    /// чтобы поменять таймаут можно было не редактируя чужой протокол замера):
+    /// - занятый порт на loopback (принтер выключен, порт слушает кто-то другой)
+    ///   — ОС сама отказывает за ~2038 мс (SYN получает RST);
+    /// - адрес, на который вообще никто не отвечает (принтер сменил IP, второй
+    ///   адаптер, опечатка в настройках) — SYN не получает ни RST, ни ответа
+    ///   вообще, и ОС досылает его по своим ретраям ~21058 мс, прежде чем
+    ///   сдаться — на порядок хуже занятого порта, и именно это возместить
+    ///   нечем, кроме своего таймаута;
+    /// - живой слушатель на этой же машине — 0 мс.
+    /// Секунда сети магазина, где принтер висит на том же коммутаторе, что
+    /// касса, отвечает за миллисекунды или не отвечает вовсе — секунда кладёт
+    /// между этими случаями запас на порядок, не отрезая по живому первый.
+    ///
+    /// internal set, а не readonly: EscPosLanTransportTest сокращает его на
+    /// проверке подключения к закрытому порту — иначе тест либо ждёт секунду
+    /// по-настоящему на каждый прогон, либо вовсе не отличает «отказала наша
+    /// отмена» от «наконец ответила ОС» (см. комментарий самого теста).</summary>
+    internal TimeSpan LanTimeout { get; set; } = TimeSpan.FromSeconds(1);
 
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
     private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
@@ -377,15 +403,63 @@ public class EscPosPrinterService : IPrinterService
         await port.BaseStream.WriteAsync(data, 0, data.Length);
     }
 
+    /// <summary>ConnectAsync и WriteAsync каждый получают свой собственный
+    /// CancellationTokenSource(LanTimeout) — см. этот таймаут за числами.
+    /// OperationCanceledException от НАШЕГО cts перегоняется в TimeoutException
+    /// с адресом и фазой: голое OperationCanceledException пять методов печати
+    /// тоже поймали бы (они ловят Exception без разбора типа), но в логе оно
+    /// неотличимо от отмены, которую никто не запрашивал, а TimeoutException —
+    /// ровно то исключение, которого от сетевого таймаута и ждут. Другие
+    /// исключения (SocketException — принтер сам ответил отказом раньше, чем
+    /// истёк бюджет) проходят как есть — это не таймаут, а честный отказ сети.
+    ///
+    /// Про чтение: ниже его нет и не было — SendViaLan не ждёт подтверждения от
+    /// принтера, только отправляет. Защищать здесь нечего.
+    ///
+    /// Запись отдельным honest-тестом не покрыта: единственный воспроизводимый
+    /// на этой машине способ подвесить её — переслать заведомо неисправному
+    /// принтеру, который принял соединение и перестал вычитывать буфер, — на
+    /// loopback этого Windows не работает ни при каком размере одной записи
+    /// (проверено буквально до 128 МБ одним WriteAsync): loopback fast path
+    /// копирует данные в приёмный буфер напрямую, минуя обычное управление
+    /// потоком, независимо от SendBufferSize/ReceiveBufferSize. Реального
+    /// подвисания в этих условиях добиться удалось только НЕСКОЛЬКИМИ отдельными
+    /// WriteAsync подряд на одном соединении — SendViaLan шлёт данные одним
+    /// вызовом, так что тот приём сюда не переносится, не подделывая то, что
+    /// проверяется. Сам механизм — что CancellationToken действительно обрывает
+    /// зависшую WriteAsync, а не просто перестаёт её ждать — проверен отдельным
+    /// разовым скриптом на голых сокетах (см. отчёт по задаче), а не тестом в
+    /// этом наборе: с реальным сетевым интерфейсом (не loopback) это же
+    /// подвисание воспроизводится штатно, потому что fast path — свойство
+    /// именно loopback-адаптера.</summary>
     private async Task SendViaLan(byte[] data)
     {
         var parts = _connectionString.Split(':');
         var host = parts[0];
         var port = parts.Length > 1 ? int.Parse(parts[1]) : 9100;
         using var client = new TcpClient();
-        await client.ConnectAsync(host, port);
+        try
+        {
+            using var connectCts = new CancellationTokenSource(LanTimeout);
+            await client.ConnectAsync(host, port, connectCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException(
+                $"LAN printer at {_connectionString} did not accept a connection within {LanTimeout.TotalSeconds:0.#}s.");
+        }
+
         using var stream = client.GetStream();
-        await stream.WriteAsync(data, 0, data.Length);
+        try
+        {
+            using var writeCts = new CancellationTokenSource(LanTimeout);
+            await stream.WriteAsync(data, writeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException(
+                $"LAN printer at {_connectionString} accepted the connection but did not accept the print within {LanTimeout.TotalSeconds:0.#}s.");
+        }
     }
 
     private Task SendViaUsb(byte[] data)
