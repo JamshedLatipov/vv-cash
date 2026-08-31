@@ -249,6 +249,32 @@ public class QueueStorage : IQueueStorage
         return result;
     }
 
+    public async Task<IReadOnlyList<Guid>> GetOutboxIdsAsync(string kind)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT Id FROM QueueOutbox WHERE Kind = $Kind AND RejectedAt IS NULL ORDER BY rowid";
+        command.Parameters.AddWithValue("$Kind", kind);
+
+        var result = new List<Guid>();
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            // Same TryParse-not-Parse leniency as GetOutboxAsync, for the same reason: an
+            // unreadable Id must not take the rest of the (readable) buffer down with it.
+            if (Guid.TryParse(reader.GetString(0), out var id))
+            {
+                result.Add(id);
+            }
+        }
+        return result;
+    }
+
     public async Task<int> GetOutboxCountAsync(string kind)
     {
         await InitializeAsync();

@@ -33,6 +33,16 @@ public interface IQueueStorage
     /// ради него весь Payload каждой строки незачем.</summary>
     Task<int> GetOutboxCountAsync(string kind);
 
+    /// <summary>Id строк буфера данного типа, ещё в ротации отправки — то же множество,
+    /// что считает GetOutboxCountAsync и листает целиком с Payload GetOutboxAsync, но
+    /// здесь — только Id. Заведён для QueueClient.PendingCountAsync: с этим фиксом (см. её
+    /// докстринг) счётчику бейджа уже недостаточно числа из БД самого по себе — нужно
+    /// объединить его с набором заказов, чья фоновая отправка ещё не осела, а для
+    /// объединения по множеству нужны сами Id, не просто их количество. Тянуть ради этого
+    /// GetOutboxAsync целиком означало бы платить за Payload каждой строки — ровно тот
+    /// перерасход, ради которого в своё время и завели отдельный GetOutboxCountAsync.</summary>
+    Task<IReadOnlyList<Guid>> GetOutboxIdsAsync(string kind);
+
     Task DeleteOutboxAsync(Guid id);
 
     /// <summary>Выводит строку буфера из ротации отправки, не удаляя её — как

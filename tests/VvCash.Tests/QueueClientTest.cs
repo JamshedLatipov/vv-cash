@@ -50,6 +50,26 @@ public class QueueClientTest
         }
     }
 
+    /// <summary>A transport whose PostOrderAsync does not resolve until the test calls
+    /// Release - the honest way to prove EnqueueAsync does not wait for the network hop
+    /// (see the freeze-fix tests below), instead of asserting on how fast it happens to
+    /// return, which would be flaky on a loaded machine. GetClosedAsync is not part of
+    /// what these tests exercise, so it just answers empty.</summary>
+    private sealed class BlockingTransport : IQueueTransport
+    {
+        private readonly TaskCompletionSource<PostOrderResult> _gate =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<PostOrderResult> PostOrderAsync(QueueOrder order) => _gate.Task;
+
+        public Task<IReadOnlyList<QueueOrder>> GetClosedAsync(int tillIndex) =>
+            Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
+
+        /// <summary>Lets every PostOrderAsync call currently blocked on this transport
+        /// return <paramref name="result"/>.</summary>
+        public void Release(PostOrderResult result) => _gate.SetResult(result);
+    }
+
     /// <summary>IssueAsync, который никогда не возвращает номер — стоит в
     /// queue.db заблокированной или переполненной базы, которую EnqueueAsync
     /// обязан пережить, а не уронить продажу.</summary>
@@ -76,12 +96,34 @@ public class QueueClientTest
         new List<CartItem> { new() { Product = new Product { Name = "Coffee", Price = 12m }, Quantity = 2m } },
         24m, 0m, 24m);
 
+    /// <summary>EnqueueAsync followed by settling its own dispatched background send. This
+    /// fix detached that send from EnqueueAsync (see QueueClient's remarks), which is exactly
+    /// the point - but it also means the loop-heavy tests below, which used to get one order
+    /// fully resolved before the next EnqueueAsync call even started for free, now need to
+    /// ask for that sequencing explicitly, or two dispatched sends racing later flushes or
+    /// each other could double-post an order and make an exact-count assertion flaky. See
+    /// LastDispatchedSend's own docstring for why awaiting it, not a wall-clock wait, is
+    /// what keeps this deterministic.</summary>
+    private static async Task<QueueOrder?> EnqueueAndSettle(QueueClient client)
+    {
+        var order = await client.EnqueueAsync(Sale());
+        await client.LastDispatchedSend!;
+        return order;
+    }
+
     [Fact]
     public async Task AnOrderGetsANumberAndReachesTheServer()
     {
         var (client, transport, _) = Build();
 
         var order = await client.EnqueueAsync(Sale());
+        // This fix: the send itself is no longer awaited by EnqueueAsync (see its
+        // remarks) - that is the whole point of the fix - so a test that wants to
+        // look at what the transport received has to wait for the dispatched
+        // background send to settle first. Awaiting the task QueueClient itself
+        // handed back is the deterministic way to do that; see LastDispatchedSend's
+        // own docstring for why this is preferred over polling wall-clock time.
+        await client.LastDispatchedSend!;
 
         Assert.NotNull(order);
         Assert.InRange(order.Number, 100, 999);
@@ -96,6 +138,7 @@ public class QueueClientTest
         transport.Reachable = false;
 
         var order = await client.EnqueueAsync(Sale());
+        await client.LastDispatchedSend!; // let the (no-op) background send settle before the test exits
 
         Assert.NotNull(order);
         Assert.InRange(order.Number, 100, 999);
@@ -108,9 +151,18 @@ public class QueueClientTest
         var (client, transport, _) = Build();
         transport.Reachable = false;
         var first = await client.EnqueueAsync(Sale());
+        var firstSend = client.LastDispatchedSend!;
         var second = await client.EnqueueAsync(Sale());
+        var secondSend = client.LastDispatchedSend!;
         Assert.NotNull(first);
         Assert.NotNull(second);
+
+        // Both background sends have to settle (as Unreachable no-ops, since
+        // Reachable is still false here) before Reachable flips - otherwise
+        // whichever of these two hasn't run yet could fire mid-flush, seeing
+        // Reachable = true and posting straight to the transport out from
+        // under FlushAsync, which would double-post that order.
+        await Task.WhenAll(firstSend, secondSend);
 
         transport.Reachable = true;
         await client.FlushAsync();
@@ -126,6 +178,7 @@ public class QueueClientTest
         var (client, transport, _) = Build();
         transport.Reachable = false;
         await client.EnqueueAsync(Sale());
+        await client.LastDispatchedSend!; // settle the no-op send before Reachable flips - see the test above
 
         transport.Reachable = true;
         await client.FlushAsync();
@@ -145,6 +198,11 @@ public class QueueClientTest
         var (client, transport, _) = Build();
 
         await client.EnqueueAsync(Sale());
+        // Reachable = true here, so EnqueueAsync's own dispatched send will delete
+        // this row itself. Settle it before FlushAsync walks the outbox, or the two
+        // could both see the row and both post it - not wrong (the row still ends
+        // up gone either way), but it would make the Assert.Single below flaky.
+        await client.LastDispatchedSend!;
         await client.FlushAsync();
 
         Assert.Single(transport.Posted);
@@ -157,6 +215,7 @@ public class QueueClientTest
         var (client, transport, _) = Build(db);
         transport.Reachable = false;
         var order = await client.EnqueueAsync(Sale());
+        await client.LastDispatchedSend!; // settle the no-op send before this client goes out of scope
         Assert.NotNull(order);
 
         var (reopened, secondTransport, _) = Build(db);
@@ -196,6 +255,14 @@ public class QueueClientTest
             => Task.FromResult<IReadOnlyList<(Guid, string)>>(Array.Empty<(Guid, string)>());
 
         public Task<int> GetOutboxCountAsync(string kind)
+            => throw new InvalidOperationException("queue.db is locked");
+
+        // Same failure as GetOutboxCountAsync above, and for the same reason:
+        // PendingCountAsync now reads ids (see its own docstring on why a bare
+        // count stopped being enough), not a count, so this is the method that
+        // actually has to throw for APendingCountReadFailureReturnsZeroInsteadOfThrowing
+        // below to still exercise the locked-db path it is named for.
+        public Task<IReadOnlyList<Guid>> GetOutboxIdsAsync(string kind)
             => throw new InvalidOperationException("queue.db is locked");
 
         public Task DeleteOutboxAsync(Guid id) => Task.CompletedTask;
@@ -266,9 +333,14 @@ public class QueueClientTest
         var (client, transport, _) = Build();
         transport.Reachable = false;
         var refused = await client.EnqueueAsync(Sale());
+        var refusedSend = client.LastDispatchedSend!;
         var ok = await client.EnqueueAsync(Sale());
+        var okSend = client.LastDispatchedSend!;
         Assert.NotNull(refused);
         Assert.NotNull(ok);
+
+        // Settle both no-op sends before Reachable flips - see WhatCouldNotBeSentIsSentWhenTheServerReturns.
+        await Task.WhenAll(refusedSend, okSend);
 
         transport.Reachable = true;
         transport.RefusedIds.Add(refused.Id);
@@ -293,7 +365,13 @@ public class QueueClientTest
         var (client, transport, _) = Build();
         transport.Reachable = false;
         await client.EnqueueAsync(Sale());
+        var firstSend = client.LastDispatchedSend!;
         await client.EnqueueAsync(Sale());
+        var secondSend = client.LastDispatchedSend!;
+        // Both no-op sends have to be done before the counter is reset below - a
+        // late one firing after the reset would inflate PostOrderAsyncCallCount by
+        // a call that has nothing to do with FlushAsync.
+        await Task.WhenAll(firstSend, secondSend);
 
         transport.PostOrderAsyncCallCount = 0;
         await client.FlushAsync();
@@ -377,14 +455,14 @@ public class QueueClientTest
         // those out instead of recycling `first`'s number, and the scenario would not
         // fire at all.
         var orders = new List<QueueOrder>();
-        for (var i = 0; i < 180; i++) orders.Add((await client.EnqueueAsync(Sale()))!);
+        for (var i = 0; i < 180; i++) orders.Add((await EnqueueAndSettle(client))!);
         var first = orders[0];
 
         transport.ClosedOrders = new List<QueueOrder> { new() { Id = first.Id, Number = first.Number } };
         await client.FlushAsync(); // real release, anchored at the current seq
 
-        for (var i = 0; i < NumberPool.CooldownIssues - 1; i++) await client.EnqueueAsync(Sale());
-        var second = await client.EnqueueAsync(Sale()); // the CooldownIssues-th issue after release
+        for (var i = 0; i < NumberPool.CooldownIssues - 1; i++) await EnqueueAndSettle(client);
+        var second = await EnqueueAndSettle(client); // the CooldownIssues-th issue after release
         Assert.Equal(first.Number, second!.Number); // sanity: same ticket number, new customer
         Assert.True(await IsStillIssuedAsync(db, first.Number)); // sanity: it is live right now
 
@@ -395,6 +473,105 @@ public class QueueClientTest
         // `second` is the live holder now; the stale replay for `first` must not free
         // the number out from under them before their own real close.
         Assert.True(await IsStillIssuedAsync(db, first.Number));
+    }
+
+    // --- The freeze fix: a payment must not wait on the network hop to the queue server ---
+    //
+    // The shop reported the register freezing for a couple of seconds on every payment.
+    // The timing probe used to confirm the diagnosis (see the report for this fix) showed
+    // HttpQueueTransport.PostOrderAsync itself was the dominant cost: a genuinely
+    // unreachable server measured ~2.0-2.1s per attempt on this machine (a refused loopback
+    // TCP connection alone, well under HttpQueueTransport.RequestTimeout's 3s ceiling), and
+    // EnqueueAsync used to await that call directly on every single sale. The three tests
+    // below are what would fail without the fix and pass with it.
+
+    /// <summary>The actual regression test for the freeze: EnqueueAsync must return without
+    /// waiting for the transport call to settle. BlockingTransport never resolves
+    /// PostOrderAsync on its own, so if EnqueueAsync still awaited the send inline (the bug),
+    /// this would hang against an unreleased gate until the safety-net delay below wins the
+    /// race and the Assert.Same fails — not a wall-clock threshold on how fast EnqueueAsync
+    /// runs, which is exactly what the brief for this fix asks to avoid, just a generous
+    /// upper bound so a regression fails the test instead of hanging the run.</summary>
+    [Fact]
+    public async Task EnqueueDoesNotWaitForTheServerRoundTrip()
+    {
+        var storage = new QueueStorage(TempDb());
+        var pool = new NumberPool(storage, 0, "secret", Now);
+        var transport = new BlockingTransport();
+        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+
+        var enqueueTask = client.EnqueueAsync(Sale());
+
+        var hangGuard = Task.Delay(TimeSpan.FromSeconds(10));
+        var winner = await Task.WhenAny(enqueueTask, hangGuard);
+
+        // The guarantee under test: EnqueueAsync completed on its own, while the transport
+        // call it dispatched is still outstanding - not because anything answered it.
+        Assert.Same(enqueueTask, winner);
+        Assert.True(enqueueTask.IsCompletedSuccessfully);
+
+        var order = await enqueueTask;
+        Assert.NotNull(order);
+        Assert.InRange(order!.Number, 100, 999); // the number is still issued, transport or no transport
+
+        // Let the background send settle before the test exits, so it doesn't leak into the next one.
+        transport.Release(PostOrderResult.Sent);
+        await client.LastDispatchedSend!;
+    }
+
+    /// <summary>The durability guarantee this fix must not weaken: the order has to be on
+    /// disk before EnqueueAsync returns, independent of whether — or when — its send ever
+    /// resolves. Also exercises PendingCountAsync's own half of the fix (see its docstring):
+    /// the badge has to count this order as pending for as long as its send is genuinely
+    /// unresolved, which BlockingTransport lets this test hold open indefinitely rather than
+    /// relying on the background task happening to still be running at assertion time.</summary>
+    [Fact]
+    public async Task TheOrderIsDurableAndCountedPendingBeforeItsSendEverResolves()
+    {
+        var storage = new QueueStorage(TempDb());
+        var pool = new NumberPool(storage, 0, "secret", Now);
+        var transport = new BlockingTransport();
+        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+
+        var order = await client.EnqueueAsync(Sale());
+        Assert.NotNull(order);
+
+        // The send is still outstanding - transport.Release has not been called - yet the
+        // row is already durable, and the badge already counts it.
+        var direct = await storage.GetOutboxAsync("Order");
+        Assert.Contains(direct, row => row.Id == order!.Id);
+        Assert.Equal(1, await client.PendingCountAsync());
+
+        transport.Release(PostOrderResult.Sent);
+        await client.LastDispatchedSend!;
+
+        // Settled now: the send succeeded, so the row is gone and the badge drops back to 0.
+        Assert.Equal(0, await client.PendingCountAsync());
+    }
+
+    /// <summary>The other existing guarantee this fix must not weaken: a send that does not
+    /// go through leaves the row for QueueFlushLoop to retry — unchanged from before this
+    /// fix, just no longer on the sale's own thread. TheServerBeingDownStillYieldsANumber
+    /// above already covers the immediate-Unreachable case (FakeTransport); this one is the
+    /// same guarantee through the code path this fix actually changed — a send resolved in
+    /// the background, after EnqueueAsync already returned.</summary>
+    [Fact]
+    public async Task AFailedBackgroundSendLeavesTheRowForFlushAsync()
+    {
+        var storage = new QueueStorage(TempDb());
+        var pool = new NumberPool(storage, 0, "secret", Now);
+        var transport = new BlockingTransport();
+        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+
+        var order = await client.EnqueueAsync(Sale());
+        Assert.NotNull(order);
+
+        transport.Release(PostOrderResult.Unreachable);
+        await client.LastDispatchedSend!;
+
+        Assert.Equal(1, await client.PendingCountAsync());
+        var direct = await storage.GetOutboxAsync("Order");
+        Assert.Contains(direct, row => row.Id == order!.Id);
     }
 
     private static async Task<bool> IsStillIssuedAsync(string db, int number)

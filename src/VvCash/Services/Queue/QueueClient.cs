@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -45,6 +47,25 @@ public class QueueClient : IQueueClient
     private readonly IQueueTransport _transport;
     private readonly int _tillIndex;
     private readonly Func<DateTime> _now;
+
+    /// <summary>Ids of orders whose durable outbox row exists but whose own background send
+    /// (dispatched by EnqueueAsync below — see its remarks) has not yet resolved that row
+    /// (deleted it on Sent, marked it on Refused, or given up on Unreachable/failure). Read
+    /// only by PendingCountAsync, to close the exact race its own docstring describes; see
+    /// there for why plain outbox membership is not enough on its own once the send is not
+    /// awaited by the sale path anymore. Per-instance, not persisted — there is one
+    /// QueueClient per till for the life of the process, and nothing outside this process
+    /// needs to know about a send that has not settled yet (see QueueFlushLoop, which will
+    /// simply retry from the outbox on its own schedule regardless).</summary>
+    private readonly ConcurrentDictionary<Guid, byte> _inFlight = new();
+
+    /// <summary>Testing hook only — internal, not part of IQueueClient, and not touched by
+    /// production code. EnqueueAsync no longer awaits its own send (see its remarks), so a
+    /// test that needs to observe the send's outcome deterministically — not by polling a
+    /// wall clock, which the freeze-fix's test brief explicitly rules out — awaits this
+    /// instead. Sequential test to sequential test contamination is not a concern: nothing
+    /// reads this except with fresh QueueClient instances (see QueueClientTest.Build).</summary>
+    internal Task? LastDispatchedSend { get; private set; }
 
     public QueueClient(IQueueStorage storage, INumberPool pool, IQueueTransport transport, int tillIndex, Func<DateTime> now)
     {
@@ -107,7 +128,10 @@ public class QueueClient : IQueueClient
         {
             // Буфер сначала, отправка потом: падение между «отправлено» и
             // «записано» потеряло бы заказ, а дубль отправки сервер просто
-            // отбросит по Guid (см. FakeTransport в тесте).
+            // отбросит по Guid (см. FakeTransport в тесте). This is the
+            // durability guarantee, and this fix does not touch it: the row
+            // is on disk before EnqueueAsync can return, whether or not the
+            // send below ever gets dispatched.
             await _storage.SaveOutboxAsync(order.Id, OrderKind, JsonSerializer.Serialize(order));
         }
         catch (Exception ex)
@@ -120,18 +144,92 @@ public class QueueClient : IQueueClient
             return order;
         }
 
-        var result = await _transport.PostOrderAsync(order);
-        if (result == PostOrderResult.Sent)
-        {
-            await _storage.DeleteOutboxAsync(order.Id);
-        }
-        else if (result == PostOrderResult.Refused)
-        {
-            await _storage.MarkOutboxRejectedAsync(order.Id, RefusedReason);
-        }
-        // Unreachable — строка остаётся в буфере как есть, до ближайшего FlushAsync.
+        // Everything the sale itself needed is already done: the number was issued before
+        // this method was even called, the paper is printed from it independently of
+        // everything below (see ProceedToPayAsync), and the order is now durably on disk —
+        // QueueFlushLoop will retry it every 15 seconds even if the process died right
+        // here. The one thing left, telling the neighbour register, is a real HTTP request
+        // (HttpQueueTransport.RequestTimeout: up to 3 seconds per attempt) that nothing on
+        // the sale path is waiting for — so it must not be awaited here. This is the actual
+        // fix for the freeze the shop reported: measured, an unreachable queue server used
+        // to make this call itself take ~2.1s (dominated by the transport's own ~2.0s), and
+        // now the caller never sees that wait at all.
+        //
+        // Registered in _inFlight before Task.Run is even dispatched, not after: see
+        // PendingCountAsync's docstring for why the ordering here — durable write, then
+        // _inFlight, then dispatch — is what makes the badge it reads deterministic rather
+        // than a race against the thread pool.
+        _inFlight[order.Id] = 0;
+
+        // Task.Run, the same shape QueueFlushLoop.Start uses for its own loop, not a bare
+        // unawaited call to SendAndRecordAsync(order): without it, this async method would
+        // capture whatever synchronization context called EnqueueAsync (Avalonia's UI
+        // dispatcher, in production) and its awaits would keep hopping back onto that
+        // thread to resume — exactly the coupling to the interactive path this fix removes
+        // elsewhere. `_ =`, not stored anywhere a caller could await it and not collected by
+        // anything with its own lifecycle (QueueClient owns no CancellationTokenSource to
+        // tear it down mid-flight) — SendAndRecordAsync's own try/catch is what keeps a
+        // failure here from becoming an unobserved task exception, the same division of
+        // responsibility QueueFlushLoop.Start uses for its loop.
+        var send = Task.Run(() => SendAndRecordAsync(order));
+        LastDispatchedSend = send;
+        _ = send;
 
         return order;
+    }
+
+    /// <summary>The network half of EnqueueAsync, run detached from the sale path — see the
+    /// dispatch site above for why. Sent/Refused/Unreachable are resolved exactly the way
+    /// EnqueueAsync used to resolve them inline before this fix; only "the caller is not
+    /// waiting for it" changed.
+    ///
+    /// A QueueFlushLoop tick can legitimately be walking the very same outbox row at the
+    /// same time — it polls every 15 seconds, and this row is visible to it the moment
+    /// SaveOutboxAsync's transaction above commits, well before this task is even
+    /// guaranteed to have started running. That race is not something this method needs to
+    /// prevent, because both possible bookkeeping calls are plain, idempotent
+    /// `WHERE Id = ...` statements (see QueueStorage.DeleteOutboxAsync and
+    /// MarkOutboxRejectedAsync): whichever of the two racers finishes last simply repeats a
+    /// no-op against a row the other one already resolved — a DELETE that matches nothing,
+    /// or an UPDATE that matches nothing. Nothing here can lose the row: at every instant it
+    /// is either still sitting in the outbox for the next flush, or it has been resolved
+    /// (deleted or marked) by whichever attempt got there first. The one thing both racers
+    /// CAN do is post the same order to the transport twice — already an accepted outcome
+    /// per this class's own docstring (the server dedupes by Guid), and no different from
+    /// what a slow send racing a 15-second flush could already do before this fix.</summary>
+    private async Task SendAndRecordAsync(QueueOrder order)
+    {
+        try
+        {
+            var result = await _transport.PostOrderAsync(order);
+            if (result == PostOrderResult.Sent)
+            {
+                await _storage.DeleteOutboxAsync(order.Id);
+            }
+            else if (result == PostOrderResult.Refused)
+            {
+                await _storage.MarkOutboxRejectedAsync(order.Id, RefusedReason);
+            }
+            // Unreachable — строка остаётся в буфере как есть, до ближайшего FlushAsync.
+        }
+        catch (Exception ex)
+        {
+            // Same treatment as every other queue.db failure in this class, and doubly so
+            // here: a background task that throws unobserved must not take the process
+            // down, and there is nobody left to show an error to anyway — the sale this
+            // send belongs to finished and returned long ago. The row, if it was not
+            // already resolved above, is simply left where it is; FlushAsync gets the next
+            // attempt at it.
+            Console.WriteLine($"[QueueClient] Background send for queue order {order.Id} failed: {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            // Only after Sent/Refused/Unreachable has actually been acted on (or given up
+            // on, just above) — see PendingCountAsync's docstring for why this specific
+            // ordering, resolve-then-leave-_inFlight, is what keeps the badge from ever
+            // under-counting a still-pending order.
+            _inFlight.TryRemove(order.Id, out _);
+        }
     }
 
     public async Task FlushAsync()
@@ -216,12 +314,37 @@ public class QueueClient : IQueueClient
     /// Program.cs, so an uncaught SqliteException here reaches Avalonia's synchronization
     /// context and takes the whole process down — after the money is taken and the
     /// receipt is printed, before the cart is cleared. A count that cannot be read is a
-    /// missing badge, not a dead till.</summary>
+    /// missing badge, not a dead till.
+    ///
+    /// A bare outbox count stopped being enough once EnqueueAsync's send moved off the sale
+    /// path (see its remarks): ProceedToPayAsync calls this on the very next line after
+    /// EnqueueAsync returns, to refresh the badge, and by then the row that call just wrote
+    /// may already be gone — deleted by that same order's own background send, which needs
+    /// nothing more than a thread-pool pickup and a successful POST to get there before this
+    /// method's own SELECT runs. Which side of that wins is thread-pool scheduling, not a
+    /// decision anyone made — exactly the "accidental" outcome not wanted here.
+    ///
+    /// The decision: a durably-buffered order counts as pending for the badge until its own
+    /// send has actually been resolved (deleted, marked, or given up on) — not merely until
+    /// its row happens to still be sitting in the outbox at whatever instant this runs. See
+    /// _inFlight: EnqueueAsync adds an order's id there before it ever dispatches that
+    /// order's send, and SendAndRecordAsync only removes it in its own finally, after the row
+    /// has already been resolved one way or another. So every order is accounted for
+    /// continuously — via the outbox row, via _inFlight, or (briefly, harmlessly) via both at
+    /// once — from the moment it is durably saved to the moment its send is fully settled,
+    /// with no gap either side could fall through. Unioning the two sets (not simply adding
+    /// their sizes) is what keeps a row that is in both from being counted twice.</summary>
     public async Task<int> PendingCountAsync()
     {
         try
         {
-            return await _storage.GetOutboxCountAsync(OrderKind);
+            var outboxIds = await _storage.GetOutboxIdsAsync(OrderKind);
+            var pending = new HashSet<Guid>(outboxIds);
+            foreach (var id in _inFlight.Keys)
+            {
+                pending.Add(id);
+            }
+            return pending.Count;
         }
         catch (Exception ex)
         {
