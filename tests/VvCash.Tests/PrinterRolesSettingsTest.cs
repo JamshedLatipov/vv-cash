@@ -153,4 +153,96 @@ public class PrinterRolesSettingsTest
 
         Assert.Equal(PrintRole.Ticket | PrintRole.KitchenOrder, settings.Printers[0].Roles);
     }
+
+    [Fact]
+    public void RoleAsJsonArray_FallsBackToReceipt_WithoutWipingTheRestOfTheFile()
+    {
+        var path = WriteSettings("""
+        {
+          "BackendUrl": "https://example.com",
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": ["Receipt", "Ticket"] }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+        // Same point as the "Bogus" test above: an array is a plausible hand-edit
+        // from someone listing roles without knowing the comma-string convention,
+        // and it must not take the rest of the file down with it.
+        Assert.Equal("https://example.com", settings.BackendUrl);
+    }
+
+    [Fact]
+    public void RoleAsJsonObject_FallsBackToReceipt_WithoutWipingTheRestOfTheFile()
+    {
+        var path = WriteSettings("""
+        {
+          "BackendUrl": "https://example.com",
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": {"x": 1} }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+        Assert.Equal("https://example.com", settings.BackendUrl);
+    }
+
+    [Fact]
+    public void TrailingComma_IsTolerated_LikeTheOldConverterAccepted()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": "Ticket, KitchenOrder," }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Ticket | PrintRole.KitchenOrder, settings.Printers[0].Roles);
+    }
+
+    [Fact]
+    public void OnlyCommas_HaveNoRecognisedName_AndFallBackToReceipt()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": "," }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+    }
+
+    [Fact]
+    public void RoleAsJsonNull_DoesNotThrow()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": null }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Receipt, settings.Printers[0].Roles);
+    }
 }

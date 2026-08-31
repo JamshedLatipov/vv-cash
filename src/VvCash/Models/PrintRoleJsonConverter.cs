@@ -34,34 +34,52 @@ public class PrintRoleJsonConverter : JsonConverter<PrintRole>
     {
         if (reader.TokenType != JsonTokenType.String)
         {
-            // A number, null, bool — this field was only ever meant to hold names
-            // someone typed by hand. Fall back instead of throwing.
-            return PrintRole.Receipt;
-        }
-
-        var text = reader.GetString();
-        if (string.IsNullOrWhiteSpace(text))
-        {
+            // A number, null, bool, array, object — this field was only ever meant
+            // to hold names someone typed by hand, so anything else falls back.
+            // Skip() is what makes that safe for [ ] and { } too: it consumes the
+            // whole subtree (a no-op for a scalar token, already fully "read").
+            // Without it the reader stays parked on the opening token, and
+            // Deserialize<SettingsData> throws "read too much or not enough" —
+            // which Load()'s catch-all turns into the exact whole-file reset this
+            // converter exists to prevent.
+            reader.Skip();
             return PrintRole.Receipt;
         }
 
         var result = PrintRole.None;
-        foreach (var token in text.Split(','))
+        var sawAnyName = false;
+        foreach (var token in (reader.GetString() ?? string.Empty).Split(','))
         {
             var name = token.Trim();
-            if (name.Length == 0 || !ByName.TryGetValue(name, out var role))
+            if (name.Length == 0)
+            {
+                // A stray or trailing comma. JsonStringEnumConverter tolerated one
+                // ("Ticket, KitchenOrder,"), so a hand-edited file keeps its meaning.
+                continue;
+            }
+
+            if (!ByName.TryGetValue(name, out var role))
             {
                 return PrintRole.Receipt;
             }
 
             result |= role;
+            sawAnyName = true;
         }
 
-        return result;
+        // No recognised name anywhere in the list (empty string, whitespace, a
+        // lone comma) is unparseable input like any other, not an empty-but-valid
+        // setting — that's None, and it has to be spelled out to mean it.
+        return sawAnyName ? result : PrintRole.Receipt;
     }
 
     public override void Write(Utf8JsonWriter writer, PrintRole value, JsonSerializerOptions options)
     {
+        // Only ever fed one of the three named flags or a combination of them
+        // today. If that ever stops being true, Enum.ToString() falls back to a
+        // raw number for a Flags value with no name ("8"), and Read() above has
+        // no numeric entries in ByName — the next load silently degrades it to
+        // Receipt, same as any other value it does not recognise.
         writer.WriteStringValue(value.ToString());
     }
 }
