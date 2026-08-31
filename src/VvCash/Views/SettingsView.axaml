@@ -217,7 +217,7 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                                        <Grid ColumnDefinitions="*, *, *, Auto, Auto" RowDefinitions="Auto, Auto, Auto">
+                                        <Grid ColumnDefinitions="*, *, *, Auto, Auto" RowDefinitions="Auto, Auto, Auto, Auto">
                                             <!-- Labels row -->
                                             <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [Name], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
                                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [Type], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
@@ -263,6 +263,14 @@
                                                         <TextBlock Text="{Binding [TestPrint], Source={x:Static services:I18nService.Instance}}" VerticalAlignment="Center"/>
                                                     </StackPanel>
                                                 </Button>
+                                            </StackPanel>
+                                            <!-- Роли принтера: какие документы на него уходят. Тремя
+                                                 независимыми галками, а не одной ComboBox — принтер обычно
+                                                 держит больше одной роли (например, чек и бегунок сразу). -->
+                                            <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0" VerticalAlignment="Center">
+                                                <CheckBox Content="{Binding [PrintsReceipt], Source={x:Static services:I18nService.Instance}}" IsChecked="{Binding PrintsReceipt, Mode=TwoWay}"/>
+                                                <CheckBox Content="{Binding [PrintsTicket], Source={x:Static services:I18nService.Instance}}" IsChecked="{Binding PrintsTicket, Mode=TwoWay}"/>
+                                                <CheckBox Content="{Binding [PrintsKitchenOrder], Source={x:Static services:I18nService.Instance}}" IsChecked="{Binding PrintsKitchenOrder, Mode=TwoWay}"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>

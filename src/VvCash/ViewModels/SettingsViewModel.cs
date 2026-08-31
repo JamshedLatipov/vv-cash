@@ -42,6 +42,34 @@ public partial class PrinterConfigViewModel : ObservableObject
     [ObservableProperty]
     private EscPosCodePage? _selectedCodePage = EscPosCodePages.Default;
 
+    /// <summary>Роли держатся набором флагов, а на экране — тремя независимыми
+    /// галками: «печатает чеки и бегунки» это обычная настройка, а не исключение.
+    /// Хранить их тремя bool и собирать флаги на сохранении было бы вторым
+    /// источником правды — здесь один, а галки его проекции.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PrintsReceipt))]
+    [NotifyPropertyChangedFor(nameof(PrintsTicket))]
+    [NotifyPropertyChangedFor(nameof(PrintsKitchenOrder))]
+    private PrintRole _roles = PrintRole.Receipt;
+
+    public bool PrintsReceipt
+    {
+        get => Roles.HasFlag(PrintRole.Receipt);
+        set => Roles = value ? Roles | PrintRole.Receipt : Roles & ~PrintRole.Receipt;
+    }
+
+    public bool PrintsTicket
+    {
+        get => Roles.HasFlag(PrintRole.Ticket);
+        set => Roles = value ? Roles | PrintRole.Ticket : Roles & ~PrintRole.Ticket;
+    }
+
+    public bool PrintsKitchenOrder
+    {
+        get => Roles.HasFlag(PrintRole.KitchenOrder);
+        set => Roles = value ? Roles | PrintRole.KitchenOrder : Roles & ~PrintRole.KitchenOrder;
+    }
+
     public ObservableCollection<string> AvailableConnections { get; } = new();
 
     public bool IsLan => ConnectionType == PrinterConnectionType.LAN;
@@ -250,7 +278,8 @@ public partial class SettingsViewModel : ViewModelBase
                 ConnectionType = printer.ConnectionType,
                 ConnectionString = printer.ConnectionString,
                 IsEnabled = printer.IsEnabled,
-                SelectedCodePage = EscPosCodePages.Resolve(printer.CodePageId)
+                SelectedCodePage = EscPosCodePages.Resolve(printer.CodePageId),
+                Roles = printer.Roles
             };
             vm.UpdateAvailableConnections();
             Printers.Add(vm);
@@ -526,7 +555,8 @@ public partial class SettingsViewModel : ViewModelBase
             // и цена промаха здесь несравнима — откат на CP866 это ровно то, что
             // Resolve и так отдаёт ненастроенному принтеру, тогда как пустой формат
             // телефона молча применил бы чужой код страны к настоящим номерам.
-            CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id
+            CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id,
+            Roles = p.Roles
         }).ToList();
 
         _settingsService.Save();
