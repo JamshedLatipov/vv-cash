@@ -136,4 +136,21 @@ public class PrinterRolesSettingsTest
 
         Assert.Equal(PrintRole.None, settings.Printers[0].Roles);
     }
+
+    [Fact]
+    public void RoleNamesAreMatchedCaseInsensitively()
+    {
+        var path = WriteSettings("""
+        {
+          "Printers": [
+            { "Name": "a", "ConnectionType": 2, "ConnectionString": "10.0.0.1:9100",
+              "IsEnabled": true, "Roles": "ticket, KITCHENorder" }
+          ]
+        }
+        """);
+
+        var settings = new SettingsService(path);
+
+        Assert.Equal(PrintRole.Ticket | PrintRole.KitchenOrder, settings.Printers[0].Roles);
+    }
 }
