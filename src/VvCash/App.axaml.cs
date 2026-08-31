@@ -15,6 +15,7 @@ using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
+using VvCash.Services.Queue;
 using VvCash.Services.Update;
 using VvCash.ViewModels;
 using VvCash.Views;
@@ -24,6 +25,12 @@ namespace VvCash;
 public partial class App : Application
 {
     public IServiceProvider? Services { get; private set; }
+
+    // Held on the App instance, not a local in OnFrameworkInitializationCompleted: nothing
+    // else in that method closes over this one, and a bare local with no reference keeping
+    // it alive would be a live Kestrel listener one GC away from disappearing mid-run. The
+    // App instance itself lives for the whole process, same guarantee Services relies on.
+    private QueueServer? _queueServer;
 
     public override void Initialize()
     {
@@ -53,6 +60,27 @@ public partial class App : Application
 
             var initSettingsService = Services.GetRequiredService<ISettingsService>();
             I18nService.Instance.Initialize(string.IsNullOrEmpty(initSettingsService.Language) ? "ru" : initSettingsService.Language);
+
+            // Queue server (Task 23). Only the till this shop designated QueueRole.Server
+            // runs one; every other till (QueueRole.Off or Client) leaves _queueServer null.
+            // Fire-and-forget on purpose, like the printer/customer-display hardware this
+            // app already shrugs off failures from: an occupied port or an empty secret is a
+            // misconfiguration for the settings screen to surface (QueueServer.LastError),
+            // not a reason the till itself must refuse to open — see StartAsync's own remarks
+            // for why it swallows its own failure instead of throwing. Nothing here needs to
+            // await storage initialisation either: every one of QueueStorage's public methods
+            // initialises itself on first use (see QueueStorage.InitializeAsync), the same
+            // lazy-init guard OfflineStorageService uses, so there is no separate readiness
+            // step to wait on before the server can start answering requests.
+            var queueSettings = Services.GetRequiredService<IQueueSettings>();
+            if (queueSettings.QueueRole == QueueRole.Server)
+            {
+                _queueServer = new QueueServer(
+                    Services.GetRequiredService<IQueueStorage>(),
+                    queueSettings.QueuePort,
+                    queueSettings.QueueSecret);
+                _ = _queueServer.StartAsync();
+            }
 
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
@@ -391,6 +419,69 @@ public partial class App : Application
         // Hardware Services
         services.AddSingleton<IPrinterService, CompositePrinterService>();
         services.AddSingleton<ICustomerDisplayService, ConfiguredCustomerDisplayService>();
+
+        // Queue Services (Task 22/23). QueueStorage gets a factory rather than a type
+        // registration: its single constructor takes an optional dbPath string, and the
+        // container would otherwise try (and fail) to resolve that string as a service.
+        // Registered as itself AND as IQueueStorage off the very same singleton — NumberPool
+        // needs the concrete type (it reaches past the narrow storage interface for
+        // ConnectionString — see NumberPool's own class remarks), while QueueClient and
+        // QueueServer only need the interface, and both must still land on the one queue.db
+        // this till uses.
+        services.AddSingleton(_ => new QueueStorage());
+        services.AddSingleton<IQueueStorage>(sp => sp.GetRequiredService<QueueStorage>());
+
+        // SettingsService already implements IQueueSettings alongside ISettingsService (see
+        // its own remarks) — resolved from that same singleton rather than a second
+        // registration, so a role/port/secret edit on the settings screen is visible to the
+        // queue immediately instead of to whichever interface happened to get its own copy.
+        services.AddSingleton<IQueueSettings>(sp => (IQueueSettings)sp.GetRequiredService<ISettingsService>());
+
+        // Singleton, not transient: NumberPool serialises issue/release through its own
+        // in-process semaphore (see its own class remarks), which only means anything with
+        // exactly one live instance for the whole till. TillIndex and QueueSecret are read
+        // once here, matching NumberPool's own constructor (unlike HttpQueueTransport below,
+        // which re-reads its settings on every call) — TillIndex is documented there as not
+        // meant to move on a live till anyway.
+        services.AddSingleton<INumberPool>(sp =>
+        {
+            var settings = sp.GetRequiredService<IQueueSettings>();
+            return new NumberPool(
+                sp.GetRequiredService<QueueStorage>(), settings.TillIndex, settings.QueueSecret, () => DateTime.Now);
+        });
+
+        // No AuthHeaderHandler on this client: it talks to another till's local queue server
+        // (or, on the server till itself, to its own loopback port — see below), never to our
+        // own backend, and has no business carrying that handler's bearer token.
+        services.AddHttpClient("QueueClient");
+        services.AddSingleton<IQueueTransport>(sp =>
+        {
+            var settings = sp.GetRequiredService<IQueueSettings>();
+            var http = sp.GetRequiredService<IHttpClientFactory>().CreateClient("QueueClient");
+            // The server till talks to itself through this same transport, over 127.0.0.1 on
+            // its own port, rather than a "write straight to storage" shortcut for the one
+            // role that happens to be local — one path means one set of failure modes, and
+            // the loopback hop costs nothing. QueueServerAddress is what every OTHER till
+            // points at this one with, so the server till's own value of that setting is
+            // simply never read.
+            return new HttpQueueTransport(
+                http,
+                () => settings.QueueRole == QueueRole.Server
+                    ? $"127.0.0.1:{settings.QueuePort}"
+                    : settings.QueueServerAddress,
+                () => settings.QueueSecret);
+        });
+
+        services.AddSingleton<IQueueClient>(sp =>
+        {
+            var settings = sp.GetRequiredService<IQueueSettings>();
+            return new QueueClient(
+                sp.GetRequiredService<IQueueStorage>(),
+                sp.GetRequiredService<INumberPool>(),
+                sp.GetRequiredService<IQueueTransport>(),
+                settings.TillIndex,
+                () => DateTime.Now);
+        });
 
         // ViewModels
         services.AddTransient<LoginViewModel>();
