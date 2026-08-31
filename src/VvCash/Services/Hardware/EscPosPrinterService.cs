@@ -53,7 +53,8 @@ public class EscPosPrinterService : IPrinterService
         IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
         string? discountName = null,
         string? documentNumber = null, string? warehouseName = null,
-        string? sellerName = null, string? saleDate = null)
+        string? sellerName = null, string? saleDate = null,
+        string? queueNumber = null)
     {
         using var ms = new MemoryStream();
         WriteInit(ms, codePage);
@@ -61,6 +62,17 @@ public class EscPosPrinterService : IPrinterService
         Write(ms, CmdDoubleSizeOn);
         WriteLine(ms, "VV CASH POS", codePage);
         Write(ms, CmdDoubleSizeOff);
+        // Бегунок — это тот же чек с номером в шапке, а не отдельный документ:
+        // расходиться с чеком при первой правке раскладки ему незачем. Пусто —
+        // печатается клиентский чек, и номера на нём нет по решению спеки.
+        if (!string.IsNullOrWhiteSpace(queueNumber))
+        {
+            Write(ms, CmdDoubleSizeOn);
+            Write(ms, CmdBoldOn);
+            WriteLine(ms, $"# {queueNumber}", codePage);
+            Write(ms, CmdBoldOff);
+            Write(ms, CmdDoubleSizeOff);
+        }
         // The same four facts the return and exchange receipts carry, and for the same
         // reason: without them a sale receipt brought back to the till cannot be matched
         // to its document. Each is omitted when absent rather than printed empty — an
@@ -189,6 +201,31 @@ public class EscPosPrinterService : IPrinterService
                 WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
         }
         WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
+    /// <summary>Талон клиенту: номер и ничего лишнего. Отдельный документ, а не
+    /// строка на чеке — клиент отдаёт талон, получая заказ, а чек оставляет себе.
+    /// Время и точка печатаются, когда переданы: талон из кассы без склада в
+    /// настройках не должен нести пустую строку.</summary>
+    public static byte[] BuildTicket(EscPosCodePage codePage, string number,
+        string? time = null, string? warehouseName = null)
+    {
+        using var ms = new MemoryStream();
+        WriteInit(ms, codePage);
+        Write(ms, CmdAlignCenter);
+        WriteLine(ms, "----------------------------", codePage);
+        Write(ms, CmdDoubleSizeOn);
+        Write(ms, CmdBoldOn);
+        WriteLine(ms, number, codePage);
+        Write(ms, CmdBoldOff);
+        Write(ms, CmdDoubleSizeOff);
+        WriteLine(ms, "----------------------------", codePage);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, warehouseName!, codePage);
+        if (!string.IsNullOrWhiteSpace(time)) WriteLine(ms, time!, codePage);
+        Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
         Write(ms, CmdCut);
         return ms.ToArray();
