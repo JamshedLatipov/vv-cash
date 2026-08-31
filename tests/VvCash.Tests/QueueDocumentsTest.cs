@@ -49,11 +49,20 @@ public class QueueDocumentsTest
         Assert.Contains("Market 1", text);
     }
 
+    /// <summary>Сравнение с полным талоном, а не одна проверка на номер: талон без
+    /// склада и времени обязан не нести пустых строк, а тест, который ищет только
+    /// номер, зелен и без обоих охранных условий.</summary>
     [Fact]
     public void TicketOmitsWhatItWasNotGiven()
     {
-        var bytes = EscPosPrinterService.BuildTicket(EscPosCodePages.Default, "305");
+        var bare = EscPosPrinterService.BuildTicket(EscPosCodePages.Default, "305");
+        var full = EscPosPrinterService.BuildTicket(
+            EscPosCodePages.Default, "305", "14:22", "Market 1");
 
-        Assert.Contains("305", Text(bytes));
+        var text = Text(bare);
+        Assert.Contains("305", text);
+        Assert.DoesNotContain("14:22", text);
+        Assert.DoesNotContain("Market 1", text);
+        Assert.True(bare.Length < full.Length);
     }
 }
