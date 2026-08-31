@@ -1,6 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.WebSockets;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -33,6 +37,16 @@ public class QueueServer
     private readonly string _secret;
     private readonly Func<DateTime> _now;
     private WebApplication? _app;
+
+    /// <summary>Живые подписчики /ws — кухонный экран и табло зала, которым
+    /// сервер сам досылает изменения. Обычный List под явным lock'ом:
+    /// подписчиков разом единицы (пара экранов на точке), Kestrel обслуживает
+    /// запросы параллельно, значит подключение и рассылка могут столкнуться —
+    /// отсюда и lock. Снимок для рассылки берётся под ним (ToArray), а сама
+    /// отправка идёт уже вне lock'а: await внутри lock не компилируется, а
+    /// держать список заблокированным на время сетевого IO незачем.</summary>
+    private readonly List<WebSocket> _subscribers = new();
+    private readonly object _subscribersLock = new();
 
     /// <summary>Причина последнего неудачного StartAsync. Null, пока не было ни
     /// одной попытки или последняя была успешной.</summary>
@@ -93,6 +107,10 @@ public class QueueServer
                 await next();
             });
 
+            // Раньше MapEndpoints: /ws принимает апгрейд соединения, и этому
+            // будущему эндпоинту нужна поддержка протокола до маршрутизации.
+            app.UseWebSockets();
+
             MapEndpoints(app);
 
             await app.StartAsync();
@@ -151,6 +169,11 @@ public class QueueServer
             if (order == null) return Results.BadRequest();
 
             await _storage.SaveOrderAsync(order);
+            // Рассылаем и на повторной постановке того же заказа (SaveOrderAsync
+            // тогда ничего не меняет): лишняя рассылка того же списка безвредна,
+            // а отличать «новый» от «дубль» здесь незачем — кухня и табло просто
+            // получат тот же снимок ещё раз.
+            await BroadcastOrdersAsync();
             return Results.StatusCode(StatusCodes.Status202Accepted);
         });
 
@@ -197,7 +220,134 @@ public class QueueServer
             }
 
             await _storage.UpdateOrderStateAsync(order);
+            // Только на успешном переходе: 404 и 409 выше ничего не меняли в
+            // хранилище, и рассылать в этих случаях было бы враньём той же
+            // формы, от которой вся эта фича защищает, — сообщением о смене,
+            // которой не было.
+            await BroadcastOrdersAsync();
             return Results.Ok(order);
         });
+
+        // Кухонный экран и табло зала подключаются сюда и просто ждут — им
+        // нечего сказать серверу, весь их разговор — через POST выше; сокет
+        // только слушает push. Map, а не MapGet: апгрейд-запрос браузера всё
+        // равно приходит методом GET, но именно универсальный Map — тот же
+        // приём, что в официальных примерах ASP.NET Core на WebSockets —
+        // не заворачивает результат в Results.*, а отдаёт HttpContext
+        // напрямую, что и нужно для ручного AcceptWebSocketAsync.
+        app.Map("/ws", HandleWebSocketAsync);
+    }
+
+    /// <summary>Держит одно вебсокет-соединение от апгрейда до закрытия. Экран,
+    /// который только что переподключился, не должен ждать следующего заказа,
+    /// чтобы перестать показывать вчерашние цифры — поэтому текущий список
+    /// уходит сразу же, до входа в цикл ожидания.</summary>
+    private async Task HandleWebSocketAsync(HttpContext context)
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return;
+        }
+
+        var socket = await context.WebSockets.AcceptWebSocketAsync();
+        lock (_subscribersLock)
+        {
+            _subscribers.Add(socket);
+        }
+
+        try
+        {
+            await SendOrdersAsync(socket, context.RequestAborted);
+
+            // Читать с этого сокета нечего — кухня и табло говорят обратно
+            // через POST, а не через сам вебсокет, — но ReceiveAsync всё
+            // равно нужен: это единственный способ узнать, что браузер закрыл
+            // вкладку (получим Close-фрейм) или порвал соединение резко
+            // (получим исключение, которое ловится ниже).
+            var buffer = new byte[4096];
+            while (socket.State == WebSocketState.Open)
+            {
+                var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), context.RequestAborted);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, CancellationToken.None);
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Вкладка браузера закрылась без протокольного прощания (обрыв
+            // сети, аварийное закрытие) — это обычный уход подписчика, а не
+            // повод уронить обработку запроса; подписчик снимается ниже, в
+            // finally, тем же путём, что и при штатном закрытии.
+        }
+        finally
+        {
+            lock (_subscribersLock)
+            {
+                _subscribers.Remove(socket);
+            }
+            socket.Dispose();
+        }
+    }
+
+    private async Task SendOrdersAsync(WebSocket socket, CancellationToken token)
+    {
+        var orders = await _storage.GetOrdersAsync();
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders);
+        await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, token);
+    }
+
+    /// <summary>Шлёт актуальный список заказов каждому живому подписчику.
+    /// Один упавший или закрывшийся сокет не должен останавливать рассылку
+    /// остальным — вкладка браузера закрывается без протокольного прощания, и
+    /// именно поэтому каждая отправка обёрнута в свой try: неудача с одним
+    /// подписчиком не мешает дойти до следующих в снимке.</summary>
+    private async Task BroadcastOrdersAsync()
+    {
+        WebSocket[] snapshot;
+        lock (_subscribersLock)
+        {
+            if (_subscribers.Count == 0) return;
+            snapshot = _subscribers.ToArray();
+        }
+
+        var orders = await _storage.GetOrdersAsync();
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders);
+
+        List<WebSocket>? dead = null;
+        foreach (var socket in snapshot)
+        {
+            try
+            {
+                if (socket.State != WebSocketState.Open)
+                {
+                    (dead ??= new List<WebSocket>()).Add(socket);
+                    continue;
+                }
+                await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // Умер посреди рассылки — не наша забота, кроме как перестать
+                // его больше не звать; сам сокет закрывающий цикл в
+                // HandleWebSocketAsync уберёт из списка тоже, но снимок уже
+                // взят, так что дублирующий Remove здесь безвреден (List
+                // просто ничего не найдёт во второй раз).
+                (dead ??= new List<WebSocket>()).Add(socket);
+            }
+        }
+
+        if (dead != null)
+        {
+            lock (_subscribersLock)
+            {
+                foreach (var socket in dead)
+                {
+                    _subscribers.Remove(socket);
+                }
+            }
+        }
     }
 }
