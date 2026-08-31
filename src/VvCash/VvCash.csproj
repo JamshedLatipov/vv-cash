@@ -54,6 +54,17 @@
     <AvaloniaResource Include="Assets/**" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Экраны очереди едут внутри сборки, а не файлами рядом с exe: иначе
+         автообновление разъедется с кодом, и на точке после обновления
+         останется вчерашняя страница поверх сегодняшнего QueueServer.
+         Assets/Web/* уже накрыт AvaloniaResource выше (Assets/**) — это не
+         конфликт: AvaloniaResource и EmbeddedResource это два независимых
+         списка элементов сборки с разными типами, один даёт avares://,
+         другой — Assembly.GetManifestResourceStream, файл спокойно состоит
+         в обоих. -->
+    <EmbeddedResource Include="Assets/Web/*" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Lets VvCash.Tests reach CompositePrinterService.Printers, the read-only
          snapshot that lets a test see which EscPosCodePage each printer actually
          got. Internal, not public: it keeps the snapshot off the public API surface

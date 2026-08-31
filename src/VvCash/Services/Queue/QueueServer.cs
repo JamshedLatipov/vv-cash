@@ -276,6 +276,41 @@ public class QueueServer
         // не заворачивает результат в Results.*, а отдаёт HttpContext
         // напрямую, что и нужно для ручного AcceptWebSocketAsync.
         app.Map("/ws", HandleWebSocketAsync);
+
+        // Сами страницы и их общий стиль — из манифеста сборки (Task 19), не
+        // с диска: см. ReadAssetAsync ниже.
+        app.MapGet("/kds", () => AssetAsync("kds.html", "text/html"));
+        app.MapGet("/board", () => AssetAsync("board.html", "text/html"));
+        app.MapGet("/theme.css", () => AssetAsync("theme.css", "text/css"));
+    }
+
+    /// <summary>Читает файл, вшитый в сборку как EmbeddedResource. Имя ресурса
+    /// складывается из корневого namespace проекта (VvCash) и пути к файлу
+    /// относительно проекта с точками вместо слэшей — то есть
+    /// Assets/Web/board.html становится VvCash.Assets.Web.board.html; это
+    /// подтверждено чтением реального GetManifestResourceNames() собранной
+    /// сборки, а не взято на веру. Null, если ресурса с таким именем нет —
+    /// вызывающий превращает это в 404, а не в необработанное исключение.</summary>
+    private static async Task<string?> ReadAssetAsync(string fileName)
+    {
+        var assembly = typeof(QueueServer).Assembly;
+        await using var stream = assembly.GetManifestResourceStream($"VvCash.Assets.Web.{fileName}");
+        if (stream is null) return null;
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync();
+    }
+
+    /// <summary>internal, не private: маршруты /kds, /board и /theme.css в
+    /// этом файле все три указывают на существующие ресурсы, так что «ресурса
+    /// нет» через HTTP снаружи не воспроизвести — по продукту такого запроса
+    /// просто не бывает. QueueServerStaticTest зовёт этот метод напрямую
+    /// (InternalsVisibleTo на VvCash.Tests уже объявлен в VvCash.csproj),
+    /// чтобы проверить именно то, что требует задача: отсутствующий ресурс
+    /// это 404, а не необработанное исключение.</summary>
+    internal static async Task<IResult> AssetAsync(string fileName, string contentType)
+    {
+        var body = await ReadAssetAsync(fileName);
+        return body is null ? Results.NotFound() : Results.Content(body, contentType);
     }
 
     /// <summary>Держит одно вебсокет-соединение от апгрейда до закрытия. Экран,
