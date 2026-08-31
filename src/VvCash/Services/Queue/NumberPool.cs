@@ -1,7 +1,6 @@
 using System;
+using System.Globalization;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -34,11 +33,13 @@ public class NumberPool : INumberPool
     private readonly Func<DateTime> _now;
 
     /// <summary>Сериализует выдачу и возврат друг относительно друга внутри
-    /// одного процесса — см. вопрос о конкурентности в отчёте по задаче: два
-    /// экземпляра NumberPool над одним файлом (как в тесте на устойчивость
-    /// шаффла к перезапуску) этим семафором не защищены, но и не работают
-    /// параллельно ни в одном сценарии, который поддерживает эта задача — у
-    /// каждой кассы всегда один живой экземпляр над её собственным файлом.</summary>
+    /// одного процесса — это покрывает единственный сценарий, который кассе
+    /// вообще нужен: одна касса, один живой экземпляр NumberPool. Два экземпляра
+    /// над одним файлом этим семафором не защищены (в проде это и не сценарий —
+    /// у каждой кассы свой файл, см. класс-докстринг), но это не тихая порча
+    /// данных: вторая транзакция, которой нужна блокировка на запись, которую уже
+    /// держит первая, получает от SQLite отказ сразу — "database is locked" — а не
+    /// проходит с устаревшим прочитанным значением.</summary>
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
     public NumberPool(QueueStorage storage, int tillIndex, string secret, Func<DateTime> now)
@@ -102,9 +103,9 @@ public class NumberPool : INumberPool
 
             using var transaction = connection.BeginTransaction();
 
-            // Not a new sequence number: a release does not itself count as an
-            // event in the issue order, it only timestamps the number's cooldown
-            // against whatever the sequence already is.
+            // Не новая выдача, а отметка на уже текущей: возврат сам по себе не
+            // событие в очереди выдачи, он лишь ставит номеру таймер кулдауна
+            // относительно того значения seq, что уже есть.
             var seq = await ReadSeqAsync(connection, transaction);
 
             using (var update = connection.CreateCommand())
@@ -125,11 +126,19 @@ public class NumberPool : INumberPool
         }
     }
 
-    /// <summary>Order of preference, exactly as specified: an untouched number
-    /// first, then a released one that has cleared the cooldown, and only when
-    /// neither exists — the number issued longest ago. That third branch is what
-    /// keeps a kitchen-screen-less shift from ever stalling: nothing is ever
-    /// released there, so branches 1 and 2 would otherwise starve forever.</summary>
+    /// <summary>Порядок предпочтения, как задано: нетронутый номер первым, затем
+    /// возвращённый и отстоявший кулдаун, и только если нет ни того ни другого —
+    /// номер, выданный раньше всех прочих. Третья ветка — то, что не даёт кассе
+    /// без экрана на кухне встать намертво: там никто ничего не возвращает,
+    /// и без неё первые две ветки голодали бы вечно.
+    ///
+    /// У третьей ветки есть обратная сторона: если выдать все 180 номеров и
+    /// затем вернуть все 180 (вырожденный случай, а не обычная смена), она
+    /// готова тут же выдать номер, отпущенный секунду назад — условие «не
+    /// раньше кулдауна» у неё не проверяется вовсе, потому что оно относится
+    /// только ко второй ветке. Это не дефект: третья ветка существует ради
+    /// того, чтобы касса не встала, а не ради кулдауна, и в такой момент
+    /// свежих и отстоявших номеров всё равно нет ни одного.</summary>
     private static async Task<int?> SelectNumberToIssueAsync(
         SqliteConnection connection, SqliteTransaction transaction, long seq)
     {
@@ -169,6 +178,14 @@ public class NumberPool : INumberPool
         return result == null ? null : Convert.ToInt32(result);
     }
 
+    /// <summary>0, если строки IssueSeq ещё нет или её не удалось разобрать.
+    /// EnsureTodaysPoolAsync всегда пишет эту строку при заведении дня, так что
+    /// на практике это откат не срабатывает — но если бы он сработал посреди
+    /// дня (строку стёрли или испортили руками), последствия не «начали
+    /// заново», а тихая порча кулдауна до конца дня: seq снова пойдёт от
+    /// маленьких чисел, «$seq - ReleasedAtSeq» уйдёт в минус для уже
+    /// освобождённых номеров, и вторая ветка перестанет находить кандидатов,
+    /// пока seq не догонит прежние значения ReleasedAtSeq.</summary>
     private static async Task<long> ReadSeqAsync(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = connection.CreateCommand();
@@ -176,7 +193,9 @@ public class NumberPool : INumberPool
         command.CommandText = "SELECT Value FROM QueueState WHERE Key = 'IssueSeq'";
 
         var result = await command.ExecuteScalarAsync();
-        return result is string raw && long.TryParse(raw, out var value) ? value : 0L;
+        return result is string raw
+            && long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? value : 0L;
     }
 
     private static async Task WriteSeqAsync(SqliteConnection connection, SqliteTransaction transaction, long seq)
@@ -187,18 +206,18 @@ public class NumberPool : INumberPool
             INSERT INTO QueueState (Key, Value) VALUES ('IssueSeq', $Value)
             ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value;
         ";
-        command.Parameters.AddWithValue("$Value", seq.ToString());
+        command.Parameters.AddWithValue("$Value", seq.ToString(CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync();
     }
 
-    /// <summary>Reshuffles and resets the pool the first time this till issues on a
-    /// new day. Local time, per the spec: the day boundary belongs to the shop
-    /// floor, not to whatever time zone a server happens to run in. Delete and
-    /// insert run in one transaction so a crash mid-reshuffle can never leave the
-    /// table half old, half new.</summary>
+    /// <summary>Перешаффливает и обнуляет пул при первой выдаче этой кассы в новый
+    /// день. Местное время, как в спецификации: граница дня — это граница смены в
+    /// торговом зале, а не часовой пояс сервера, которого может и не быть на связи.
+    /// Удаление и вставка — в одной транзакции, чтобы падение посреди перешаффла
+    /// не могло оставить таблицу наполовину старой, наполовину новой.</summary>
     private async Task EnsureTodaysPoolAsync(SqliteConnection connection)
     {
-        var today = _now().ToString("yyyy-MM-dd");
+        var today = _now().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         string? storedDay;
         using (var read = connection.CreateCommand())
@@ -252,25 +271,23 @@ public class NumberPool : INumberPool
         await transaction.CommitAsync();
     }
 
-    /// <summary>This till's slice of the range, Fisher–Yates shuffled under a seed
-    /// derived from the day, the till index and the shared secret. Deterministic
-    /// per day so a mid-day restart (TheShuffleIsStableAcrossRestartsWithinADay)
-    /// reproduces the same order instead of losing track of what was already
-    /// handed out; seeded from the secret, not just the date, so the order cannot
-    /// be predicted from a ticket and the day alone.</summary>
+    /// <summary>Срез этой кассы, перемешанный Фишером — Йетсом на потоке
+    /// QueueShuffleKeystream (день, индекс кассы, общий секрет — см. его
+    /// докстринг о том, почему не System.Random). Детерминированно по дню, так
+    /// что перезапуск посреди дня (TheShuffleIsStableAcrossRestartsWithinADay)
+    /// воспроизводит тот же порядок, а не теряет, что уже роздано; на секрете,
+    /// а не только на дате, чтобы порядок нельзя было предсказать по одному
+    /// талону и дате на нём.</summary>
     private int[] ShuffledSlice(string day)
     {
         var slice = Enumerable.Range(FirstNumber, LastNumber - FirstNumber + 1)
             .Where(n => n % Tills == _tillIndex)
             .ToArray();
 
-        var seed = BitConverter.ToInt32(
-            SHA256.HashData(Encoding.UTF8.GetBytes($"{day}|{_tillIndex}|{_secret}")), 0);
-        var random = new Random(seed);
-
+        var keystream = new QueueShuffleKeystream(day, _tillIndex, _secret);
         for (var i = slice.Length - 1; i > 0; i--)
         {
-            var j = random.Next(i + 1);
+            var j = keystream.NextIndex(i + 1);
             (slice[i], slice[j]) = (slice[j], slice[i]);
         }
 
