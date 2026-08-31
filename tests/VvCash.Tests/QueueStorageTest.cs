@@ -126,4 +126,56 @@ public class QueueStorageTest
             CultureInfo.CurrentCulture = previousCulture;
         }
     }
+
+    /// <summary>ON CONFLICT DO NOTHING, не UPDATE — доказательство от противного.
+    /// Клиент досылает буфер, не зная, что заказ уже успел продвинуться на
+    /// кухне; повторно пришедшая копия (та же самая, State = New) не должна
+    /// откатить его обратно. Под UPDATE вместо DO NOTHING этот тест красный.</summary>
+    [Fact]
+    public async Task AResentCopyDoesNotResetAnOrderThatAlreadyMovedOn()
+    {
+        var storage = new QueueStorage(TempDb());
+        var order = Order();
+        await storage.SaveOrderAsync(order);
+
+        var advanced = await storage.GetOrderAsync(order.Id);
+        advanced!.State = QueueOrderState.InProgress;
+        await storage.UpdateOrderStateAsync(advanced);
+
+        // Та же самая (по Id) стартовая копия, будто клиент досылает буфер заново.
+        await storage.SaveOrderAsync(order);
+
+        var stored = await storage.GetOrderAsync(order.Id);
+        Assert.Equal(QueueOrderState.InProgress, stored!.State);
+    }
+
+    [Fact]
+    public async Task AnUnknownOrderIdReadsAsNull()
+    {
+        var storage = new QueueStorage(TempDb());
+        await storage.InitializeAsync();
+
+        Assert.Null(await storage.GetOrderAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task UpdateOrderStateStampsReadyAndClosedIndependently()
+    {
+        var storage = new QueueStorage(TempDb());
+        var order = Order();
+        await storage.SaveOrderAsync(order);
+
+        order.State = QueueOrderState.InProgress;
+        await storage.UpdateOrderStateAsync(order);
+
+        var readyAt = new DateTime(2026, 8, 31, 10, 5, 0);
+        order.State = QueueOrderState.Ready;
+        order.ReadyAt = readyAt;
+        await storage.UpdateOrderStateAsync(order);
+
+        var stored = await storage.GetOrderAsync(order.Id);
+        Assert.Equal(QueueOrderState.Ready, stored!.State);
+        Assert.Equal(readyAt, stored.ReadyAt);
+        Assert.Null(stored.ClosedAt);
+    }
 }

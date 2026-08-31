@@ -66,6 +66,9 @@ public class QueueServerTest : IAsyncLifetime
         Lines = new List<QueueOrderLine> { new() { Name = "Coffee", Quantity = "2 pcs" } }
     };
 
+    private Task<HttpResponseMessage> Move(Guid id, string state) =>
+        _client.PostAsync($"orders/{id}/state", new StringContent(state, Encoding.UTF8));
+
     private async Task<List<QueueOrder>> Listing()
     {
         var response = await _client.GetAsync("orders");
@@ -181,5 +184,94 @@ public class QueueServerTest : IAsyncLifetime
         await _client.PostAsJsonAsync("orders", order);
 
         Assert.Single(await Listing(), o => o.Id == order.Id);
+    }
+
+    // ---- Task 15: state transitions ----
+
+    [Fact]
+    public async Task TheKitchenMovesAnOrderForward()
+    {
+        var order = Order();
+        await _client.PostAsJsonAsync("orders", order);
+
+        var response = await Move(order.Id, "InProgress");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var updated = await response.Content.ReadFromJsonAsync<QueueOrder>();
+        Assert.Equal(QueueOrderState.InProgress, updated!.State);
+    }
+
+    /// <summary>409, и заказ остаётся ровно там, где был — проверяем состояние
+    /// после отказа, а не только код ответа: код мог бы быть правильным, а
+    /// UPDATE рядом с ним — выполниться по ошибке.</summary>
+    [Fact]
+    public async Task AForbiddenTransitionIsRefusedAndChangesNothing()
+    {
+        var order = Order();
+        await _client.PostAsJsonAsync("orders", order);
+
+        // New -> Ready в обход InProgress.
+        var response = await Move(order.Id, "Ready");
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var stored = Assert.Single(await Listing(), o => o.Id == order.Id);
+        Assert.Equal(QueueOrderState.New, stored.State);
+        Assert.Null(stored.ReadyAt);
+    }
+
+    [Fact]
+    public async Task AnUnknownOrderIsNotFound()
+    {
+        var response = await Move(Guid.NewGuid(), "InProgress");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReadyAtAndClosedAtAreStampedWalkingTheWholeChain()
+    {
+        var order = Order();
+        await _client.PostAsJsonAsync("orders", order);
+
+        await Move(order.Id, "InProgress");
+        var readyResponse = await Move(order.Id, "Ready");
+        var closedResponse = await Move(order.Id, "Closed");
+
+        var ready = await readyResponse.Content.ReadFromJsonAsync<QueueOrder>();
+        var closed = await closedResponse.Content.ReadFromJsonAsync<QueueOrder>();
+
+        Assert.NotNull(ready!.ReadyAt);
+        Assert.Null(ready.ClosedAt);
+        Assert.NotNull(closed!.ReadyAt);
+        Assert.NotNull(closed.ClosedAt);
+    }
+
+    /// <summary>Часы сервера, не кассы: если бы штамп ставился из тела запроса,
+    /// планшет кухни с неверными часами мог бы записать в ReadyAt что угодно.
+    /// Здесь сервер сконструирован с фиксированным now, отличным от реального
+    /// времени, — штамп обязан прийти именно из него.</summary>
+    [Fact]
+    public async Task TimestampsComeFromTheServersClockNotTheCaller()
+    {
+        var fixedNow = new DateTime(2030, 1, 1, 12, 0, 0);
+        var server = new QueueServer(new QueueStorage(TempDb()), port: 0, secret: "secret", () => fixedNow);
+        var port = await server.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}/") };
+        client.DefaultRequestHeaders.Add("X-Queue-Secret", "secret");
+        try
+        {
+            var order = Order();
+            await client.PostAsJsonAsync("orders", order);
+            await client.PostAsync($"orders/{order.Id}/state", new StringContent("InProgress", Encoding.UTF8));
+
+            var response = await client.PostAsync($"orders/{order.Id}/state", new StringContent("Ready", Encoding.UTF8));
+            var updated = await response.Content.ReadFromJsonAsync<QueueOrder>();
+
+            Assert.Equal(fixedNow, updated!.ReadyAt);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
     }
 }

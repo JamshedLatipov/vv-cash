@@ -204,6 +204,8 @@ public class QueueClientTest
             => Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
 
         public Task SaveOrderAsync(QueueOrder order) => Task.CompletedTask;
+        public Task<QueueOrder?> GetOrderAsync(Guid id) => Task.FromResult<QueueOrder?>(null);
+        public Task UpdateOrderStateAsync(QueueOrder order) => Task.CompletedTask;
     }
 
     /// <summary>Номер уже выдан, а буфер записать не удалось. Продажа всё равно

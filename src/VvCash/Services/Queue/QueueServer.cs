@@ -153,5 +153,51 @@ public class QueueServer
             await _storage.SaveOrderAsync(order);
             return Results.StatusCode(StatusCodes.Status202Accepted);
         });
+
+        // Тело — просто имя целевого состояния ("Ready"), а не JSON-объект:
+        // кухонный экран шлёт его как plain text fetch-запросом, обвязка была
+        // бы накладными расходами без всякой пользы для единственного поля.
+        app.MapPost("/orders/{id:guid}/state", async (Guid id, HttpContext context) =>
+        {
+            string body;
+            using (var reader = new StreamReader(context.Request.Body))
+            {
+                body = (await reader.ReadToEndAsync()).Trim();
+            }
+
+            if (!Enum.TryParse<QueueOrderState>(body, ignoreCase: true, out var target))
+            {
+                return Results.BadRequest($"Неизвестное состояние: '{body}'.");
+            }
+
+            var order = await _storage.GetOrderAsync(id);
+            if (order == null) return Results.NotFound();
+
+            if (!QueueOrderStates.CanMove(order.State, target))
+            {
+                // 409, а не 400: запрос корректен по форме, конфликт — с
+                // текущим состоянием заказа, которое клиент, возможно, ещё
+                // не видел (задержка сети между двумя кухонными экранами).
+                return Results.Conflict();
+            }
+
+            order.State = target;
+
+            // Часы сервера, не то, что мог бы прислать клиент: у кухонного
+            // планшета с неверными часами не должно быть способа записать в
+            // ReadyAt/ClosedAt чепуху.
+            var now = _now();
+            if (target == QueueOrderState.Ready)
+            {
+                order.ReadyAt = now;
+            }
+            if (target is QueueOrderState.Closed or QueueOrderState.Cancelled)
+            {
+                order.ClosedAt = now;
+            }
+
+            await _storage.UpdateOrderStateAsync(order);
+            return Results.Ok(order);
+        });
     }
 }

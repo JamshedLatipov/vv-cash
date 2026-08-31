@@ -45,4 +45,14 @@ public interface IQueueStorage
     /// заказ к этому моменту мог успеть продвинуться по состояниям на кухне —
     /// повторно пришедшая копия не должна откатывать его обратно в New.</summary>
     Task SaveOrderAsync(QueueOrder order);
+
+    /// <summary>Один заказ по Id, или null, если такого нет — 404 у эндпоинта
+    /// смены состояния строится на этом null.</summary>
+    Task<QueueOrder?> GetOrderAsync(Guid id);
+
+    /// <summary>Переносит State, ReadyAt и ClosedAt из <paramref name="order"/> в
+    /// строку с тем же Id. Не общий UPDATE по всем колонкам: единственный
+    /// вызывающий — переход состояния, и лишние колонки в запросе только
+    /// маскировали бы, что именно он меняет.</summary>
+    Task UpdateOrderStateAsync(QueueOrder order);
 }

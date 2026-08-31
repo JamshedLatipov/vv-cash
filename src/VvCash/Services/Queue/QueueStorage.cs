@@ -268,6 +268,42 @@ public class QueueStorage : IQueueStorage
         await command.ExecuteNonQueryAsync();
     }
 
+    public async Task<QueueOrder?> GetOrderAsync(Guid id)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"{OrderColumnsSelect} WHERE Id = $Id";
+        command.Parameters.AddWithValue("$Id", id.ToString());
+
+        using var reader = await command.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? ReadOrder(reader) : null;
+    }
+
+    public async Task UpdateOrderStateAsync(QueueOrder order)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            UPDATE QueueOrders
+            SET State = $State, ReadyAt = $ReadyAt, ClosedAt = $ClosedAt
+            WHERE Id = $Id;
+        ";
+        command.Parameters.AddWithValue("$Id", order.Id.ToString());
+        command.Parameters.AddWithValue("$State", order.State.ToString());
+        command.Parameters.AddWithValue("$ReadyAt", (object?)FormatDate(order.ReadyAt) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$ClosedAt", (object?)FormatDate(order.ClosedAt) ?? DBNull.Value);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
     private const string OrderColumnsSelect =
         "SELECT Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines FROM QueueOrders";
 
