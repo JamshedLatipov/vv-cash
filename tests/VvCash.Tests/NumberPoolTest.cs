@@ -90,54 +90,28 @@ public class NumberPoolTest
         Assert.NotEqual(b, c);
     }
 
+    /// <summary>Возврат сам не двигает seq — все освобождённые номера получают
+    /// один и тот же ReleasedAtSeq, и окно кулдауна открывается ровно через
+    /// CooldownIssues выдач после него, не раньше и не позже. Цикл ловит
+    /// слишком короткий кулдаун на первой же итерации; финальный assert —
+    /// слишком длинный.</summary>
     [Fact]
-    public async Task AReleasedNumberDoesNotComeBackImmediately()
-    {
-        var pool = Pool();
-        var first = await pool.IssueAsync();
-        await pool.ReleaseAsync(first);
-
-        var next = new List<int>();
-        for (var i = 0; i < NumberPool.CooldownIssues; i++) next.Add(await pool.IssueAsync());
-
-        Assert.DoesNotContain(first, next);
-    }
-
-    /// <summary>The task brief's own version of this test issues 180, releases the
-    /// first 50, then makes exactly one more IssueAsync call and expects a released
-    /// number back. Traced against the specified branch order, that does not hold:
-    /// ReleaseAsync stamps ReleasedAtSeq with the *current* sequence (180, not a
-    /// fresh one), so immediately after the release every released number is only
-    /// one issue old. Branch 2's cooldown guard ($seq - ReleasedAtSeq >= 50) stays
-    /// false until 50 more issues have gone by, so that single extra call falls
-    /// through to branch 3 and returns a still-issued number (the one issued 51st,
-    /// never released) — not one of the 50 that were released. Confirmed empirically:
-    /// the literal version fails with e.g. next=865, not in the released set.
-    /// Filed as a spec bug in the task 9 report rather than bent to pass; this
-    /// corrected version burns through the cooldown window before asserting.</summary>
-    [Fact]
-    public async Task AReleasedNumberComesBackAfterTheCooldown()
+    public async Task TheCooldownIsExactlyFiftyIssuesWide()
     {
         var pool = Pool();
 
-        // Слайс — 180 номеров, кулдаун — 50. Выдав все и вернув первые
-        // пятьдесят, доводим пул до состояния, где свежих номеров нет, а
-        // отстоявшие есть.
+        // Исчерпываем срез, чтобы первая ветка была пуста и решение реально
+        // принимал кулдаун, а не он же в обход, потому что до него не дошло.
         var issued = new List<int>();
         for (var i = 0; i < 180; i++) issued.Add(await pool.IssueAsync());
-        var released = issued.Take(NumberPool.CooldownIssues).ToList();
-        foreach (var number in released)
-            await pool.ReleaseAsync(number);
 
-        // The cooldown counts issues since the release, and every released number
-        // shares the same ReleasedAtSeq (the release itself does not advance the
-        // sequence) — so it takes CooldownIssues more issues before any of them
-        // is eligible again. The 130 still-issued numbers (branch 3) are what
-        // fills that gap.
-        for (var i = 0; i < NumberPool.CooldownIssues - 1; i++) await pool.IssueAsync();
-        var next = await pool.IssueAsync();
+        var released = issued[0];
+        await pool.ReleaseAsync(released);
 
-        Assert.Contains(next, released);
+        for (var i = 0; i < NumberPool.CooldownIssues - 1; i++)
+            Assert.NotEqual(released, await pool.IssueAsync());
+
+        Assert.Equal(released, await pool.IssueAsync());
     }
 
     [Fact]
@@ -153,19 +127,25 @@ public class NumberPoolTest
     }
 
     [Fact]
-    public async Task ANewDayReshufflesAndStartsOver()
+    public async Task ANewDayResetsAndReshuffles()
     {
         var db = TempDb();
         var day = new DateTime(2026, 8, 31, 10, 0, 0);
         var pool = Pool(db: db, now: () => day);
 
         var yesterday = new List<int>();
-        for (var i = 0; i < 20; i++) yesterday.Add(await pool.IssueAsync());
+        for (var i = 0; i < 180; i++) yesterday.Add(await pool.IssueAsync());
 
         day = day.AddDays(1);
         var today = new List<int>();
-        for (var i = 0; i < 20; i++) today.Add(await pool.IssueAsync());
+        for (var i = 0; i < 180; i++) today.Add(await pool.IssueAsync());
 
-        Assert.NotEqual(yesterday, today);
+        // Сброс: весь срез снова свободен. Без сброса пул донашивал бы
+        // третью ветку и повторил бы вчерашний порядок один в один.
+        Assert.Equal(180, today.Distinct().Count());
+        Assert.Equal(yesterday.OrderBy(n => n), today.OrderBy(n => n));
+        // Перешаффл: те же номера, но не на тех же местах.
+        var samePosition = yesterday.Zip(today, (a, b) => a == b).Count(x => x);
+        Assert.InRange(samePosition, 0, 10);
     }
 }
