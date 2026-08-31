@@ -90,7 +90,7 @@
   "QueueServerAddressWatermark": "10.0.0.5:8770",
   "QueuePort": "Port",
   "QueueSecret": "Secret",
-  "QueueRestartNotice": "Queue settings take effect after restarting the app.",
+  "QueueSettingsNotice": "Queue role, port, and secret take effect as soon as you save. The till number takes effect starting the next day — today's number pool is already laid out.",
   "QueueBoardLink": "Board link",
   "QueueKdsLink": "Kitchen screen link",
   "SaveConfiguration": "Save Configuration",

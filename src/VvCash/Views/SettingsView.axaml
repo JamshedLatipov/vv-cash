@@ -316,13 +316,19 @@
                             <TextBlock Text="{Binding [QueueSettings], Source={x:Static services:I18nService.Instance}}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center"/>
                         </StackPanel>
 
-                        <!-- Fix 5: смена секрета/порта/роли на работающей кассе не
-                             подхватывается на лету — Kestrel уже поднят со старыми
-                             значениями, а свой же клиент этой кассы (loopback) начал бы
-                             слать новый секрет серверу, который всё ещё требует старый.
-                             Дешёвая и честная защита — сказать об этом там, где значение
-                             правят, а не чинить перезапуск сервера в этой задаче. -->
-                        <TextBlock Text="{Binding [QueueRestartNotice], Source={x:Static services:I18nService.Instance}}"
+                        <!-- Defect fix: смена секрета/порта/роли раньше не подхватывалась
+                             на лету вовсе — Kestrel оставался поднят со старыми значениями
+                             до перезапуска кассы, отсюда и прежняя формулировка ("после
+                             перезапуска приложения"). Теперь QueueServerHost перезапускает
+                             сервер сразу на Save() (см. её remarks), так что роль/порт/
+                             секрет применяются немедленно — а номер кассы по-прежнему нет:
+                             он же класс вычетов в пуле номеров, а пул на сегодняшний день
+                             уже разложен по первой продаже дня (см. NumberPool), поэтому
+                             смена номера безопасно применяется только с началом следующего
+                             дня, чем бы её ни просить подхватить раньше. Текст ключа
+                             QueueSettingsNotice в i18n/*.json обязан говорить именно это,
+                             а не «перезапустите приложение». -->
+                        <TextBlock Text="{Binding [QueueSettingsNotice], Source={x:Static services:I18nService.Instance}}"
                                    FontSize="12" Foreground="{StaticResource Slate500Brush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                         <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12">

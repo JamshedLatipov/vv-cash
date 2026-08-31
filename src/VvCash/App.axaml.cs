@@ -28,15 +28,15 @@ public partial class App : Application
 
     // Held on the App instance, not a local in OnFrameworkInitializationCompleted: nothing
     // else in that method closes over this one, and a bare local with no reference keeping
-    // it alive would be a live Kestrel listener one GC away from disappearing mid-run. The
-    // App instance itself lives for the whole process, same guarantee Services relies on.
-    private QueueServer? _queueServer;
-
-    /// <summary>Same lifetime reasoning as _queueServer right above: kept on the App
-    /// instance so nothing GC's a live background Task mid-run. See QueueFlushLoop's own
-    /// remarks for why the process still exits cleanly with neither of these two ever
-    /// explicitly stopped.</summary>
-    private QueueFlushLoop? _queueFlushLoop;
+    // it alive would be a live Kestrel listener one GC away from disappearing mid-run (the
+    // DI container's own singleton cache would keep it alive too, but SettingsRequested
+    // below reads its LastError on every open and a field reads more plainly than a fresh
+    // GetRequiredService call each time). Owns QueueServer's and QueueFlushLoop's lifecycle
+    // for the rest of the process, reconciling both against IQueueSettings.QueueRole on
+    // every settings save — see QueueServerHost's own remarks for why a one-shot check here
+    // at startup used to leave an administrator who flipped the role on a live till with
+    // nothing listening until they closed and reopened the register.
+    private QueueServerHost? _queueServerHost;
 
     public override void Initialize()
     {
@@ -67,38 +67,17 @@ public partial class App : Application
             var initSettingsService = Services.GetRequiredService<ISettingsService>();
             I18nService.Instance.Initialize(string.IsNullOrEmpty(initSettingsService.Language) ? "ru" : initSettingsService.Language);
 
-            // Queue server (Task 23). Only the till this shop designated QueueRole.Server
-            // runs one; every other till (QueueRole.Off or Client) leaves _queueServer null.
-            // Fire-and-forget on purpose, like the printer/customer-display hardware this
-            // app already shrugs off failures from: an occupied port or an empty secret is a
-            // misconfiguration for the settings screen to surface (QueueServer.LastError),
-            // not a reason the till itself must refuse to open — see StartAsync's own remarks
-            // for why it swallows its own failure instead of throwing. Nothing here needs to
-            // await storage initialisation either: every one of QueueStorage's public methods
-            // initialises itself on first use (see QueueStorage.InitializeAsync), the same
-            // lazy-init guard OfflineStorageService uses, so there is no separate readiness
-            // step to wait on before the server can start answering requests.
-            var queueSettings = Services.GetRequiredService<IQueueSettings>();
-            if (queueSettings.QueueRole == QueueRole.Server)
-            {
-                _queueServer = new QueueServer(
-                    Services.GetRequiredService<IQueueStorage>(),
-                    queueSettings.QueuePort,
-                    queueSettings.QueueSecret);
-                _ = _queueServer.StartAsync();
-            }
-
-            // Background flush loop (Task 25). Whenever the queue is on at all — Server
-            // included: the server till talks to itself over its own loopback transport
-            // (see ConfigureServices' remarks on IQueueTransport), so its own outbox still
-            // needs retrying the same way a client's does. Off leaves this null, matching
-            // _queueServer above and IQueueClient's own fail-open design — nothing here
-            // needs the buffer flushed if the queue was never turned on.
-            if (queueSettings.QueueRole != QueueRole.Off)
-            {
-                _queueFlushLoop = new QueueFlushLoop(Services.GetRequiredService<IQueueClient>());
-                _queueFlushLoop.Start();
-            }
+            // Queue server lifecycle (defect fix: switching the role to Server from the
+            // settings screen used to open no port until the till was restarted — see
+            // QueueServerHost's own remarks). Resolved eagerly here, not left to first use:
+            // its constructor is what performs this startup reconciliation, fire-and-forget,
+            // the same way QueueServer.StartAsync itself swallows its own failure instead of
+            // throwing (an occupied port or an empty secret is a misconfiguration for the
+            // settings screen to surface, not a reason the till itself must refuse to open).
+            // From here on QueueServerHost keeps both QueueServer and QueueFlushLoop in sync
+            // with IQueueSettings.QueueRole on every later settings save too, not just this
+            // one at startup.
+            _queueServerHost = Services.GetRequiredService<QueueServerHost>();
 
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
@@ -289,11 +268,15 @@ public partial class App : Application
                 var offlineStorage = Services.GetRequiredService<IOfflineStorageService>();
                 var featuresForSettings = Services.GetRequiredService<ICashFeatureService>();
                 var paymentCategories = Services.GetRequiredService<IPaymentCategoryService>();
-                // Fix 4: LastError лежит на _queueServer (не создаётся вовсе, если роль
-                // этой кассы не Server — см. его remarks выше), а не в DI-контейнере,
-                // поэтому передаётся сюда явно, а не читается вторым сервисом.
+                // LastError now lives on the live QueueServerHost singleton, which keeps
+                // reconciling the actual server against settings for the whole run of the
+                // process — not a value frozen the one time this used to be checked at
+                // startup. Read fresh on every open, same as before: an administrator who
+                // fixes the secret, saves (Save always navigates away — see GoBack in
+                // SettingsViewModel.Save), and reopens this screen sees the CURRENT error,
+                // because by then QueueServerHost has already reconciled to it.
                 var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage, featuresForSettings, paymentCategories,
-                    queueServerError: _queueServer?.LastError);
+                    queueServerError: _queueServerHost?.LastError);
                 settingsVm.NavigationRequest = mainVm.NavigateTo;
                 mainVm.NavigateTo(settingsVm);
             };
@@ -504,6 +487,13 @@ public partial class App : Application
                 settings.TillIndex,
                 () => DateTime.Now);
         });
+
+        // Owns QueueServer's and QueueFlushLoop's lifecycle end to end — see its own
+        // remarks. Plain constructor injection (ISettingsService, IQueueStorage,
+        // IQueueClient are all registered above); OnFrameworkInitializationCompleted
+        // resolves it eagerly right after the container is built, because its
+        // constructor is what performs the startup reconciliation.
+        services.AddSingleton<QueueServerHost>();
 
         // ViewModels
         services.AddTransient<LoginViewModel>();

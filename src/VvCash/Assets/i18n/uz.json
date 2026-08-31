@@ -90,7 +90,7 @@
   "QueueServerAddressWatermark": "10.0.0.5:8770",
   "QueuePort": "Port",
   "QueueSecret": "Maxfiy kalit",
-  "QueueRestartNotice": "Navbat sozlamalari ilova qayta ishga tushirilgach kuchga kiradi.",
+  "QueueSettingsNotice": "Navbat roli, porti va siri saqlangach darhol kuchga kiradi. Kassa raqami faqat ertangi kundan kuchga kiradi — bugungi raqamlar puli allaqachon taqsimlangan.",
   "QueueBoardLink": "Taxta havolasi",
   "QueueKdsLink": "Oshxona ekrani havolasi",
   "SaveConfiguration": "Sozlamalarni saqlash",
