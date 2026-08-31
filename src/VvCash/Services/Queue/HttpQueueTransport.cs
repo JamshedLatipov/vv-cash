@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
@@ -28,14 +29,28 @@ public class HttpQueueTransport : IQueueTransport
     /// и стопорил бы.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
 
-    /// <summary>Те же Web-настройки JSON (camelCase), что сервер применяет и к
-    /// ответам Results.Ok, и к рассылке по /ws (см. QueueServer.BroadcastJsonOptions).
-    /// Без явного options здесь тело POST ушло бы в PascalCase — сервер его всё
+    /// <summary>Те же настройки JSON, что сервер применяет ко всему, что
+    /// пересекает провод (см. QueueServer.WireJsonOptions) — camelCase имена
+    /// полей и перечисления именами, а не числами. Без явного options здесь
+    /// тело POST ушло бы в PascalCase с State числом — сервер запрос всё
     /// равно разберёт (ReadFromJsonAsync у ASP.NET Core регистронезависим по
-    /// умолчанию), но по проводу тогда бегали бы два разных представления
-    /// одного и того же заказа, что просто лишний повод для путаницы при
-    /// разборе логов или трафика.</summary>
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    /// умолчанию, а JsonStringEnumConverter принимает и число на входе), но
+    /// GetClosedAsync ниже читает ответ сервера обратно тем же options, и
+    /// если бы сервер вдруг начал отдавать state числом, а этот файл ждал бы
+    /// строку — тут перестало бы что-то путаться молча, а не сразу.
+    /// Два раздельных статических поля (здесь и в QueueServer) — не третий
+    /// источник правды, а неизбежность: это два разных проекта одной сборки,
+    /// делить между ними статическое поле буквально нечем, кроме как через
+    /// значения этого поля оставаться идентичными, за чем и следит
+    /// HttpQueueTransportTest.</summary>
+    private static readonly JsonSerializerOptions JsonOptions = BuildJsonOptions();
+
+    private static JsonSerializerOptions BuildJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 
     private readonly HttpClient _http;
     private readonly Func<string> _address;

@@ -7,6 +7,7 @@ using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
@@ -134,12 +135,14 @@ public class QueueServerSocketTest : IAsyncLifetime
 
     /// <summary>Смена состояния — второй эндпоинт, который обязан рассылать,
     /// и здесь же заодно проверяем, что рассылка после неё несёт актуальное
-    /// состояние заказа, а не тот же New, с которым его завели. State уходит в
-    /// JSON числом (тот же формат, что и у GET /orders — конвертера в строку
-    /// нигде не настроено, см. QueueServerTest), поэтому сравниваем через
-    /// десериализацию, а не поиском строки "InProgress" в сыром тексте. Имена
+    /// состояние заказа, а не тот же New, с которым его завели. Сначала —
+    /// проверка сырого текста ДО разбора: кухонный экран и табло сравнивают
+    /// order.state со строками ("InProgress"...) без промежуточного C#-типа,
+    /// который тихо принял бы и число вместо имени, поэтому именно сырой
+    /// текст и есть то, что страница на самом деле видит. Десериализация
+    /// ниже — уже вторая, более сильная проверка того же самого. Имена
     /// полей в пуше — camelCase, те же самые Web-настройки JSON, что и у
-    /// GET /orders (см. BroadcastJsonOptions в QueueServer), поэтому
+    /// GET /orders (см. WireJsonOptions в QueueServer), поэтому
     /// десериализация здесь просит регистронезависимое сопоставление имён.</summary>
     [Fact]
     public async Task AStateChangeIsAlsoPushedToSubscribers()
@@ -156,13 +159,29 @@ public class QueueServerSocketTest : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, move.StatusCode);
 
         var payload = await ReceiveTextAsync(socket, cts.Token);
+
+        Assert.Contains("\"state\":\"InProgress\"", payload);
+
         var pushed = JsonSerializer.Deserialize<List<QueueOrder>>(payload, CaseInsensitive)!;
 
         var pushedOrder = Assert.Single(pushed, o => o.Id == order.Id);
         Assert.Equal(QueueOrderState.InProgress, pushedOrder.State);
     }
 
-    private static readonly JsonSerializerOptions CaseInsensitive = new() { PropertyNameCaseInsensitive = true };
+    /// <summary>Регистронезависимые имена полей и перечисления именами, а не
+    /// числами — то же самое, чем на самом деле читает провод настоящий
+    /// клиент (см. QueueServerTest.ClientJsonOptions, HttpQueueTransport.
+    /// JsonOptions). Обычный PropertyNameCaseInsensitive без конвертера enum
+    /// разбирал число, но не строку "InProgress", в которую теперь
+    /// сериализуется QueueOrderState на проводе.</summary>
+    private static readonly JsonSerializerOptions CaseInsensitive = BuildCaseInsensitiveOptions();
+
+    private static JsonSerializerOptions BuildCaseInsensitiveOptions()
+    {
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 
     /// <summary>Вкладка браузера закрывается без протокольного прощания —
     /// Abort() рвёт соединение так же резко, как обычный крестик в углу

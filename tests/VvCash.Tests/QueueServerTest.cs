@@ -6,6 +6,8 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Services.Queue;
@@ -43,6 +45,23 @@ public class QueueServerTest : IAsyncLifetime
     private static string TempDb() =>
         Path.Combine(Path.GetTempPath(), $"vv-queue-{Path.GetRandomFileName()}.db");
 
+    /// <summary>То же, чем на самом деле читает провод настоящий клиент
+    /// (HttpQueueTransport.JsonOptions, QueueServer.WireJsonOptions) — Web
+    /// defaults плюс перечисления именами. ReadFromJsonAsync без явных
+    /// options по умолчанию тоже берёт Web defaults (так уже совпадали имена
+    /// полей camelCase/PascalCase до этой правки), но конвертер строкового
+    /// enum сам по себе не появляется — после того как сервер начал отдавать
+    /// state именем, а не числом, читать его без этого поля здесь стало
+    /// нечем.</summary>
+    private static readonly JsonSerializerOptions ClientJsonOptions = BuildClientJsonOptions();
+
+    private static JsonSerializerOptions BuildClientJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
+
     /// <summary>Порт, который прямо сейчас никто не слушает — получаем его тем
     /// же способом, каким его выдал бы порт 0 в QueueServer, чтобы тест ниже
     /// мог назвать порт заранее (StartAsync с пустым секретом его не откроет
@@ -73,7 +92,7 @@ public class QueueServerTest : IAsyncLifetime
     {
         var response = await _client.GetAsync("orders");
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<List<QueueOrder>>())!;
+        return (await response.Content.ReadFromJsonAsync<List<QueueOrder>>(ClientJsonOptions))!;
     }
 
     // ---- Task 13: hosting ----
@@ -197,7 +216,7 @@ public class QueueServerTest : IAsyncLifetime
         var response = await Move(order.Id, "InProgress");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var updated = await response.Content.ReadFromJsonAsync<QueueOrder>();
+        var updated = await response.Content.ReadFromJsonAsync<QueueOrder>(ClientJsonOptions);
         Assert.Equal(QueueOrderState.InProgress, updated!.State);
     }
 
@@ -237,8 +256,8 @@ public class QueueServerTest : IAsyncLifetime
         var readyResponse = await Move(order.Id, "Ready");
         var closedResponse = await Move(order.Id, "Closed");
 
-        var ready = await readyResponse.Content.ReadFromJsonAsync<QueueOrder>();
-        var closed = await closedResponse.Content.ReadFromJsonAsync<QueueOrder>();
+        var ready = await readyResponse.Content.ReadFromJsonAsync<QueueOrder>(ClientJsonOptions);
+        var closed = await closedResponse.Content.ReadFromJsonAsync<QueueOrder>(ClientJsonOptions);
 
         Assert.NotNull(ready!.ReadyAt);
         Assert.Null(ready.ClosedAt);
@@ -265,7 +284,7 @@ public class QueueServerTest : IAsyncLifetime
             await client.PostAsync($"orders/{order.Id}/state", new StringContent("InProgress", Encoding.UTF8));
 
             var response = await client.PostAsync($"orders/{order.Id}/state", new StringContent("Ready", Encoding.UTF8));
-            var updated = await response.Content.ReadFromJsonAsync<QueueOrder>();
+            var updated = await response.Content.ReadFromJsonAsync<QueueOrder>(ClientJsonOptions);
 
             Assert.Equal(fixedNow, updated!.ReadyAt);
         }
@@ -273,5 +292,50 @@ public class QueueServerTest : IAsyncLifetime
         {
             await server.StopAsync();
         }
+    }
+
+    // ---- Tasks 18-21 follow-up: state travels as a name, not a number ----
+    //
+    // Обнаружено при живой проверке табло и кухни на настоящем сервере
+    // (см. коммит с исправлением): страницы сравнивают order.state со
+    // строками ("New", "Ready"...), а QueueOrderState — обычный enum без
+    // JsonConverter, так что "голый" System.Text.Json отдавал его числом
+    // (0, 1, 2...). Ни один из тестов выше это не ловил — Listing() и
+    // ReadFromJsonAsync<QueueOrder>() десериализуют число обратно в тот же
+    // enum ничуть не хуже, чем строку, и разница исчезает раньше, чем до неё
+    // доходит Assert. Тесты ниже читают тело ответа как сырой текст и
+    // смотрят на него ДО разбора в QueueOrder — только так и видно, что
+    // реально едет по проводу.
+
+    /// <summary>GET /orders — сырой текст ответа, не десериализованный список.
+    /// Кухонный экран и табло делают ровно то же самое: JSON.parse без
+    /// промежуточного C#-типа, который бы тихо принял число вместо имени.</summary>
+    [Fact]
+    public async Task ThePostedOrdersStateTravelsOnTheWireAsAName()
+    {
+        var order = Order();
+        await _client.PostAsJsonAsync("orders", order);
+
+        var raw = await (await _client.GetAsync("orders")).Content.ReadAsStringAsync();
+
+        Assert.Contains("\"state\":\"New\"", raw);
+        Assert.DoesNotContain("\"state\":0", raw);
+    }
+
+    /// <summary>Тот же снаряд, только по ответу POST /orders/{id}/state — этот
+    /// эндпоинт первым и принимает состояние именем в теле запроса ("Ready"),
+    /// так что отдавать то же самое поле числом в ответе было бы особенно
+    /// показательной непоследовательностью.</summary>
+    [Fact]
+    public async Task TheStateTransitionResponseCarriesTheStateAsAName()
+    {
+        var order = Order();
+        await _client.PostAsJsonAsync("orders", order);
+
+        var response = await Move(order.Id, "InProgress");
+        var raw = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("\"state\":\"InProgress\"", raw);
+        Assert.DoesNotContain("\"state\":1", raw);
     }
 }

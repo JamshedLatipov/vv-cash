@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
@@ -48,14 +49,37 @@ public class QueueServer
     private readonly List<WebSocket> _subscribers = new();
     private readonly object _subscribersLock = new();
 
-    /// <summary>Те же настройки JSON, что ASP.NET Core минимал-API применяет к
-    /// Results.Ok по умолчанию (JsonSerializerDefaults.Web — camelCase имена
-    /// полей). GET /orders их получает бесплатно через сам Results.Ok, а
-    /// вебсокет собирает тело руками — без этого поля здесь оказался бы
-    /// голый JsonSerializer.Serialize с именами полей в PascalCase, и
-    /// кухонный экран получал бы от HTTP и от WS два разных представления
-    /// одного и того же заказа: "id" в одном канале и "Id" в другом.</summary>
-    private static readonly JsonSerializerOptions BroadcastJsonOptions = new(JsonSerializerDefaults.Web);
+    /// <summary>Одни и те же настройки JSON для всего, что здесь пересекает
+    /// провод: GET/POST /orders, POST /orders/{id}/state и рассылку по /ws.
+    /// Раньше Results.Ok(orders) в GET /orders брал их из DI-конфигурации
+    /// ASP.NET Core неявно, а рассылка — из этого же поля явно, и хотя оба
+    /// пути совпадали по JsonSerializerDefaults.Web (camelCase имена полей),
+    /// ни один из них не задавал перечисления строкой — State уезжал по HTTP
+    /// числом (0, 1, 2…), а по /ws, отдельно собранному вручную здесь же, —
+    /// тоже числом, но раз уж эндпоинт состояния принимает имя состояния
+    /// текстом на входе ("Ready"), отдавать то же поле числом на выходе было
+    /// одной и той же скрытой рассинхронизацией в обоих местах разом: кухонный
+    /// экран сравнивал бы state с "New" и никогда не находил совпадения,
+    /// потому что state — это 0, а не "New". Теперь Results.Json(value,
+    /// WireJsonOptions) используется явно везде, где отдаётся QueueOrder —
+    /// и в HTTP, и в WS, — одним и тем же объектом настроек, чтобы третьего
+    /// места, которое тихо разойдётся с этими двумя, было неоткуда взяться.</summary>
+    private static readonly JsonSerializerOptions WireJsonOptions = BuildWireJsonOptions();
+
+    private static JsonSerializerOptions BuildWireJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        // Enum именем ("New"), не числом: тот же принцип, что и у имён полей
+        // выше — как эндпоинт состояния читает имя на входе, так и любой
+        // читатель заказа (кухонный экран, табло, лог, curl во время звонка
+        // в магазин) должен получать то же самое имя на выходе, а не число,
+        // которое сдвинется при первой же вставке значения в середину enum.
+        // JsonStringEnumConverter при этом всё ещё читает число на входе —
+        // ничего, что уже шлёт state числом (архивные записи в исходящем
+        // буфере кассы-клиента), после этой правки не ломается.
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 
     /// <summary>Тайм-аут на отправку одному подписчику при рассылке. Экран
     /// может быть жив (State всё ещё Open), но зависнуть и не вычитывать
@@ -200,12 +224,12 @@ public class QueueServer
                 orders = orders.Where(o => o.State == state).ToList();
             }
 
-            return Results.Ok(orders);
+            return Results.Json(orders, WireJsonOptions);
         });
 
         app.MapPost("/orders", async (HttpContext context) =>
         {
-            var order = await context.Request.ReadFromJsonAsync<QueueOrder>();
+            var order = await context.Request.ReadFromJsonAsync<QueueOrder>(WireJsonOptions);
             if (order == null) return Results.BadRequest();
 
             await _storage.SaveOrderAsync(order);
@@ -265,7 +289,7 @@ public class QueueServer
             // формы, от которой вся эта фича защищает, — сообщением о смене,
             // которой не было.
             await BroadcastOrdersAsync();
-            return Results.Ok(order);
+            return Results.Json(order, WireJsonOptions);
         });
 
         // Кухонный экран и табло зала подключаются сюда и просто ждут — им
@@ -370,7 +394,7 @@ public class QueueServer
     private async Task SendOrdersAsync(WebSocket socket, CancellationToken token)
     {
         var orders = await _storage.GetOrdersAsync();
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, BroadcastJsonOptions);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, WireJsonOptions);
         await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, token);
     }
 
@@ -389,7 +413,7 @@ public class QueueServer
         }
 
         var orders = await _storage.GetOrdersAsync();
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, BroadcastJsonOptions);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, WireJsonOptions);
 
         List<WebSocket>? dead = null;
         foreach (var socket in snapshot)

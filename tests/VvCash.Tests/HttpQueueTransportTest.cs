@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,6 +66,44 @@ public class HttpQueueTransportTest : IAsyncLifetime
             WasCalled = true;
             throw new InvalidOperationException("Транспорт не должен был трогать сеть с пустым адресом.");
         }
+    }
+
+    /// <summary>Ловит тело исходящего запроса как есть, без похода в
+    /// настоящий сервер — то, что нужно, чтобы проверить именно то, что
+    /// HttpQueueTransport кладёт на провод, а не то, что настоящий
+    /// QueueServer потом сумеет разобрать несмотря на расхождение.</summary>
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        public string? RequestBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestBody = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.Accepted);
+        }
+    }
+
+    /// <summary>Обнаружено при живой проверке табло и кухни: QueueOrderState
+    /// без явного конвертера уезжает по проводу числом (0, 1, 2...), а обе
+    /// страницы сравнивают order.state со строками ("New"...). Здесь —
+    /// граница транспорта: сырое тело запроса, которое реально уйдёт в сеть,
+    /// а не заказ, прогнанный туда-обратно через тот же самый сериализатор
+    /// (round trip через один и тот же баг ничего не поймает).</summary>
+    [Fact]
+    public async Task PostOrderAsyncSendsTheStateAsANameNotANumber()
+    {
+        var handler = new CapturingHandler();
+        using var http = new HttpClient(handler);
+        var transport = new HttpQueueTransport(http, () => "127.0.0.1:1", () => "secret");
+
+        await transport.PostOrderAsync(Order(520));
+
+        Assert.NotNull(handler.RequestBody);
+        Assert.Contains("\"state\":\"New\"", handler.RequestBody);
+        Assert.DoesNotContain("\"state\":0", handler.RequestBody);
     }
 
     [Fact]
@@ -149,6 +188,12 @@ public class HttpQueueTransportTest : IAsyncLifetime
 
         var single = Assert.Single(closed);
         Assert.Equal(tillZeroClosed.Id, single.Id);
+        // Круг замкнулся: сервер теперь отдаёт state именем, а не числом
+        // (см. QueueServer.WireJsonOptions) — этот Equal проходит только
+        // если HttpQueueTransport.JsonOptions (второй конец того же
+        // провода) умеет это имя прочитать обратно в QueueOrderState.Closed,
+        // а не молча оставляет поле в default(QueueOrderState) = New.
+        Assert.Equal(QueueOrderState.Closed, single.State);
     }
 
     /// <summary>Проведёт заказ по всей цепочке состояний до Closed —
