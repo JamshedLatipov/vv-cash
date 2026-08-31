@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Services.Hardware;
 using Xunit;
@@ -83,5 +84,19 @@ public class QueueDocumentsTest
         Assert.Contains("A-7", text);
         Assert.Contains("Ann", text);
         Assert.Contains("Happy hour", text);
+    }
+
+    /// <summary>ConnectionType вне диапазона enum уводит SendAsync в свою ветку
+    /// default: и бросает, не тронув транспорт ни на байт. Тот же приём, что в
+    /// CompositePrinterServiceTest: тесту нужно «не делает ввода-вывода».</summary>
+    [Fact]
+    public async Task TicketAndKitchenOrderReportFailureRatherThanThrowing()
+    {
+        var printer = new EscPosPrinterService(
+            (PrinterConnectionType)99, "nowhere", EscPosCodePages.Default);
+
+        Assert.False(await printer.PrintTicketAsync("305", "14:22", "Market 1"));
+        Assert.False(await printer.PrintKitchenOrderAsync(
+            new SaleReceiptData(OneCoffee(), 24m, 0m, 24m), "305"));
     }
 }

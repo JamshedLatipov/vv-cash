@@ -71,6 +71,10 @@ public class ReturnsViewModelTest
             return Task.FromResult(true);
         }
         public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
+        public Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null)
+            => Task.FromResult(true);
+        public Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber)
+            => Task.FromResult(true);
     }
 
     private sealed class FakeSettings : ISettingsService

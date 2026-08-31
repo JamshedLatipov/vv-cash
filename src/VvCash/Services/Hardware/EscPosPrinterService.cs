@@ -15,6 +15,7 @@ public class EscPosPrinterService : IPrinterService
     private readonly PrinterConnectionType _connectionType;
     private readonly string _connectionString;
     private readonly EscPosCodePage _codePage;
+    private readonly PrintRole _roles;
     private PrinterStatus _status = PrinterStatus.Ready;
 
     public PrinterStatus Status => _status;
@@ -24,6 +25,11 @@ public class EscPosPrinterService : IPrinterService
     /// теста: строка, которая доносит настройку до боевой кассы, иначе не
     /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
     public EscPosCodePage CodePage => _codePage;
+
+    /// <summary>Какие документы печатает этот аппарат. Значение по умолчанию —
+    /// Receipt: служба, собранная на экране настроек ради пробной печати, ролями
+    /// не пользуется вовсе, и заставлять её их объявлять незачем.</summary>
+    public PrintRole Roles => _roles;
 
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
     private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
@@ -39,11 +45,12 @@ public class EscPosPrinterService : IPrinterService
     public static readonly byte[] CmdDrawerKick = { 0x1B, 0x70, 0x00, 0x19, 0xFA };
 
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
-        EscPosCodePage codePage)
+        EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt)
     {
         _connectionType = connectionType;
         _connectionString = connectionString;
         _codePage = codePage;
+        _roles = roles;
     }
 
     /// <summary>Builds the sale receipt bytes. Static and separate from sending
@@ -247,6 +254,40 @@ public class EscPosPrinterService : IPrinterService
         }
     }
 
+    public async Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null)
+    {
+        try
+        {
+            await SendAsync(BuildTicket(_codePage, number, time, warehouseName));
+            SetStatus(PrinterStatus.Ready);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Ticket print error: {ex.Message}");
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
+    }
+
+    public async Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber)
+    {
+        try
+        {
+            await SendAsync(BuildSaleReceipt(_codePage, sale.Items, sale.Subtotal, sale.Discount, sale.Total,
+                sale.DiscountName, sale.DocumentNumber, sale.WarehouseName, sale.SellerName, sale.SaleDate,
+                queueNumber));
+            SetStatus(PrinterStatus.Ready);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Kitchen order print error: {ex.Message}");
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
+    }
+
     private static void Write(MemoryStream ms, byte[] data) => ms.Write(data, 0, data.Length);
 
     /// <summary>ESC @ и следом ESC t n. Одним методом, а не двумя командами по
@@ -285,7 +326,10 @@ public class EscPosPrinterService : IPrinterService
     private static string Truncate(string s, int width)
         => s.Length <= width ? s : s.Substring(0, width);
 
-    private async Task SendAsync(byte[] data)
+    /// <summary>protected virtual, а не private: иначе маршрутизацию документов по
+    /// ролям нельзя проверить, не открыв сокет. Боевой код это не меняет — ветки
+    /// транспорта остаются здесь же, ниже.</summary>
+    protected virtual async Task SendAsync(byte[] data)
     {
         switch (_connectionType)
         {

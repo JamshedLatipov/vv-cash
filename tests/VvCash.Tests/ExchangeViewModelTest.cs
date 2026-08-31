@@ -168,6 +168,10 @@ public class ExchangeViewModelTest
             LastWarehouseName = warehouseName; LastSellerName = sellerName; LastSaleDate = saleDate;
             return Task.FromResult(true);
         }
+        public Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null)
+            => Task.FromResult(true);
+        public Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber)
+            => Task.FromResult(true);
     }
 
     private sealed class FakeCashFeatureService : ICashFeatureService

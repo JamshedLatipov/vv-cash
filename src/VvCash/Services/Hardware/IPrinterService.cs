@@ -49,4 +49,13 @@ public interface IPrinterService
         System.Collections.Generic.IEnumerable<VvCash.Models.ReturnReceiptLine> issued,
         decimal difference, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null);
+
+    /// <param name="number">Номер очереди как он печатается — строка, а не int:
+    /// форматирование уже сделано вызывающим.</param>
+    /// <param name="time">Время выдачи, уже отформатированное. Пусто — строки нет.</param>
+    /// <param name="warehouseName">Точка. Пусто — строки нет.</param>
+    Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null);
+
+    /// <summary>Бегунок на кухню: тот же чек, что и клиенту, плюс номер в шапке.</summary>
+    Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber);
 }
