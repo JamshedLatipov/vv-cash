@@ -68,6 +68,12 @@ public class QueueStorage : IQueueStorage
         command.CommandText = @"
                 -- IssuedSeq: на какой по счёту выдаче номер ушёл. NULL — номер свободен.
                 -- ReleasedAtSeq: на какой выдаче вернулся. NULL — ни разу не возвращался.
+                -- IssuedFor: Guid заказа, которому сейчас выдан номер (текстом). NULL,
+                -- когда номер свободен. Это то, по чему ReleaseAsync отличает настоящее
+                -- закрытие от стале-заявки на уже переизданный номер — см. докстринг
+                -- NumberPool.ReleaseAsync. Добавлена по итогам ревью после IssuedSeq/
+                -- ReleasedAtSeq, поэтому и в CREATE TABLE, и отдельным ALTER ниже — на
+                -- уже стоящих queue.db этой колонки ещё нет (см. AddColumnIfMissingAsync).
                 -- Position — место в перемешанном порядке; именно оно, а не Number,
                 -- определяет очерёдность выдачи, и именно поэтому по двум талонам
                 -- нельзя посчитать оборот.
@@ -75,7 +81,8 @@ public class QueueStorage : IQueueStorage
                     Number INTEGER PRIMARY KEY,
                     Position INTEGER NOT NULL,
                     IssuedSeq INTEGER,
-                    ReleasedAtSeq INTEGER
+                    ReleasedAtSeq INTEGER,
+                    IssuedFor TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS QueueState (
@@ -110,6 +117,39 @@ public class QueueStorage : IQueueStorage
             ";
 
         await command.ExecuteNonQueryAsync();
+
+        // NumberPool существовала до колонки IssuedFor: на уже стоящих у разработчиков
+        // и на точках queue.db файлах CREATE TABLE IF NOT EXISTS выше — no-op, колонки
+        // как не было, так и нет. EnsureTodaysPoolAsync (NumberPool.cs) не чинит это
+        // само собой при смене дня — DELETE+INSERT пересоздают только строки таблицы,
+        // не её схему, — так что миграция нужна здесь, на каждой инициализации, тем же
+        // приёмом, что OfflineStorageService уже применяет к своим таблицам.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE NumberPool ADD COLUMN IssuedFor TEXT;");
+    }
+
+    /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it
+    /// is. Same idiom as OfflineStorageService.AddColumnIfMissingAsync — first needed in
+    /// this file for NumberPool.IssuedFor (see its own remarks in the schema above).
+    /// A bare catch-all here would swallow a locked database or a corrupt schema just as
+    /// quietly, and the register would carry on to fail later on a read with no
+    /// connection to the actual problem — so only "already migrated" is treated as
+    /// success; anything else is logged loudly instead.</summary>
+    private static async Task AddColumnIfMissingAsync(SqliteCommand command, string alter)
+    {
+        try
+        {
+            command.CommandText = alter;
+            await command.ExecuteNonQueryAsync();
+        }
+        catch (SqliteException ex) when (
+            ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+            // Already migrated. The expected outcome on every queue.db but a fresh one.
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[QueueStorage] Migration failed ({alter}): {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     public async Task<string?> GetStateAsync(string key)

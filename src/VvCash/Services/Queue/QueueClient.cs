@@ -55,27 +55,43 @@ public class QueueClient : IQueueClient
         _now = now;
     }
 
+    /// <summary>Issues a queue number for a till whose QueueRole is Off but that still
+    /// has a ticket or kitchen-order printer configured (see PosViewModel's
+    /// ProceedToPayAsync remarks on why that is a working, common configuration): the
+    /// printers need a number to put on paper, but there is nothing to enqueue an order
+    /// into — no server for it to reach, no outbox anything would ever drain (Off leaves
+    /// QueueFlushLoop unstarted — see App.axaml.cs). Mints its own throwaway order id
+    /// purely so NumberPool has something to stamp IssuedFor with (see NumberPool's own
+    /// docstring on why that identity matters); nothing outside this call ever learns
+    /// that id, so the number simply sits issued until the pool's cooldown/exhaustion
+    /// branches recycle it — the same degenerate-but-expected fate the design doc
+    /// describes for a kitchen screen that never closes anything.
+    ///
+    /// Same fail-open swallow as EnqueueAsync's own number step, sharing its
+    /// implementation via TryIssueNumberAsync below.</summary>
+    public Task<int?> IssueNumberAsync() => TryIssueNumberAsync(Guid.NewGuid());
+
     public async Task<QueueOrder?> EnqueueAsync(SaleReceiptData sale)
     {
-        int number;
-        try
-        {
-            number = await _pool.IssueAsync();
-        }
-        catch (Exception ex)
+        // Minted before the number is asked for, not after: NumberPool.IssueAsync needs
+        // the order's own id to stamp NumberPool.IssuedFor with (see its docstring for
+        // why that identity is what makes ReleaseAsync safe against a stale replay), so
+        // the id has to exist before that call, not after it the way this used to read.
+        var orderId = Guid.NewGuid();
+        var number = await TryIssueNumberAsync(orderId);
+        if (number == null)
         {
             // Без номера заказу не бывать — нечего ни буферизовать, ни
             // отправлять. Продажа всё равно не встанет: чек и талон печатаются
             // независимо от очереди (см. класс-докстринг), а вызывающему здесь
             // просто нечего показать на экране кухни.
-            Console.WriteLine($"[QueueClient] Could not issue a queue number: {ex.GetType().Name}: {ex.Message}");
             return null;
         }
 
         var order = new QueueOrder
         {
-            Id = Guid.NewGuid(),
-            Number = number,
+            Id = orderId,
+            Number = number.Value,
             TillIndex = _tillIndex,
             State = QueueOrderState.New,
             CreatedAt = _now(),
@@ -161,12 +177,55 @@ public class QueueClient : IQueueClient
             await _storage.DeleteOutboxAsync(id);
         }
 
-        // Только заказы этой кассы: чужой номер живёт в чужом пуле.
+        // Только заказы этой кассы: чужой номер живёт в чужом пуле. closed.Id, not just
+        // closed.Number: the server reports the same closed order again on every poll
+        // (nothing ever deletes a closed order — GET /orders returns everything ever
+        // stored), so ReleaseAsync has to be told WHICH order is asking, to tell a
+        // genuine close apart from a stale replay for a number already re-issued to
+        // someone else — see NumberPool.ReleaseAsync's own docstring for the collision
+        // this used to allow.
         foreach (var closed in await _transport.GetClosedAsync(_tillIndex))
         {
-            await _pool.ReleaseAsync(closed.Number);
+            await _pool.ReleaseAsync(closed.Number, closed.Id);
         }
     }
 
-    public Task<int> PendingCountAsync() => _storage.GetOutboxCountAsync(OrderKind);
+    /// <summary>Shared by IssueNumberAsync and EnqueueAsync: issue a number for
+    /// <paramref name="orderId"/>, swallowing (logging, not throwing) a queue.db that is
+    /// locked, full or corrupt — the one thing every caller of this needs, since none of
+    /// them has anything to show for a number that could not be issued.</summary>
+    private async Task<int?> TryIssueNumberAsync(Guid orderId)
+    {
+        try
+        {
+            return await _pool.IssueAsync(orderId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[QueueClient] Could not issue a queue number: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Same treatment as EnqueueAsync's own catches above, and for the same
+    /// reason: a locked, full or corrupt queue.db must not throw out of here. This one
+    /// matters even more than EnqueueAsync's — it is called from an async-void payment
+    /// callback (PosViewModel's ProceedToPayAsync -> MixedPaymentViewModel's completion
+    /// lambda) with no try around it and no unhandled-exception handler anywhere in
+    /// Program.cs, so an uncaught SqliteException here reaches Avalonia's synchronization
+    /// context and takes the whole process down — after the money is taken and the
+    /// receipt is printed, before the cart is cleared. A count that cannot be read is a
+    /// missing badge, not a dead till.</summary>
+    public async Task<int> PendingCountAsync()
+    {
+        try
+        {
+            return await _storage.GetOutboxCountAsync(OrderKind);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[QueueClient] Could not read the pending queue count: {ex.GetType().Name}: {ex.Message}");
+            return 0;
+        }
+    }
 }

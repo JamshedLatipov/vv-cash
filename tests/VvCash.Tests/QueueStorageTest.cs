@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using VvCash.Models;
 using VvCash.Services.Queue;
 using Xunit;
@@ -177,5 +178,88 @@ public class QueueStorageTest
         Assert.Equal(QueueOrderState.Ready, stored!.State);
         Assert.Equal(readyAt, stored.ReadyAt);
         Assert.Null(stored.ClosedAt);
+    }
+
+    /// <summary>Critical 2's fix adds NumberPool.IssuedFor, which a queue.db already
+    /// sitting on a developer's (or a shop's) machine predates. Builds a database in
+    /// exactly that pre-migration shape — NumberPool without the column, one row already
+    /// issued — and checks that InitializeAsync adds the column without throwing, keeps
+    /// the existing row intact, and that NumberPool itself (issue, then release by the
+    /// same order id) works normally afterwards. Same idiom as
+    /// OfflineStorageServiceTest.InitializeAsync_UpgradingFromRealColumns_RebuildsAsTextAndKeepsRows,
+    /// which QueueStorage's own AddColumnIfMissingAsync now follows too.</summary>
+    [Fact]
+    public async Task ANumberPoolFromBeforeIssuedForStillOpensAndMigrates()
+    {
+        var dbPath = TempDb();
+        try
+        {
+            await SeedPreIssuedForDatabaseAsync(dbPath);
+
+            var storage = new QueueStorage(dbPath);
+            await storage.InitializeAsync();
+
+            using var check = new SqliteConnection($"Data Source={dbPath}");
+            await check.OpenAsync();
+
+            // The column exists now...
+            using (var cmd = check.CreateCommand())
+            {
+                cmd.CommandText = "SELECT type FROM pragma_table_info('NumberPool') WHERE name = 'IssuedFor';";
+                Assert.Equal("TEXT", (await cmd.ExecuteScalarAsync()) as string);
+            }
+
+            // ...and the pre-migration row survived untouched.
+            using (var cmd = check.CreateCommand())
+            {
+                cmd.CommandText = "SELECT Position, IssuedSeq, ReleasedAtSeq FROM NumberPool WHERE Number = 305;";
+                using var rd = await cmd.ExecuteReaderAsync();
+                Assert.True(await rd.ReadAsync());
+                Assert.Equal(0, rd.GetInt32(0));
+                Assert.Equal(3, rd.GetInt32(1));
+                Assert.True(rd.IsDBNull(2));
+            }
+
+            // NumberPool built on the same file keeps working: it can issue a fresh
+            // number and later release that same number by the order id it issued it
+            // to, exercising exactly the column this migration added.
+            var pool = new NumberPool(storage, tillIndex: 0, "secret", () => new DateTime(2026, 8, 31, 10, 0, 0));
+            var orderId = Guid.NewGuid();
+            var number = await pool.IssueAsync(orderId);
+            await pool.ReleaseAsync(number, orderId);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(dbPath + suffix)) File.Delete(dbPath + suffix);
+        }
+    }
+
+    /// <summary>Raw schema exactly as QueueStorage created it before IssuedFor existed —
+    /// no IssuedFor column at all — with one number already issued (IssuedSeq = 3, like a
+    /// till mid-shift) so the migration runs against a table that already has data, not
+    /// an empty one.</summary>
+    private static async Task SeedPreIssuedForDatabaseAsync(string dbPath)
+    {
+        using var connection = new SqliteConnection($"Data Source={dbPath}");
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            CREATE TABLE NumberPool (
+                Number INTEGER PRIMARY KEY,
+                Position INTEGER NOT NULL,
+                IssuedSeq INTEGER,
+                ReleasedAtSeq INTEGER
+            );
+            INSERT INTO NumberPool (Number, Position, IssuedSeq, ReleasedAtSeq)
+                VALUES (305, 0, 3, NULL);
+            CREATE TABLE QueueState (
+                Key TEXT PRIMARY KEY,
+                Value TEXT
+            );
+        ";
+        await command.ExecuteNonQueryAsync();
     }
 }

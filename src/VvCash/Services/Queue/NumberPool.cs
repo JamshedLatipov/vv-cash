@@ -59,7 +59,7 @@ public class NumberPool : INumberPool
         _now = now;
     }
 
-    public async Task<int> IssueAsync()
+    public async Task<int> IssueAsync(Guid orderId)
     {
         await _storage.InitializeAsync();
 
@@ -82,10 +82,14 @@ public class NumberPool : INumberPool
             using (var update = connection.CreateCommand())
             {
                 update.Transaction = transaction;
+                // IssuedFor — see the class docstring on ReleaseAsync's guard: this is
+                // the value that later tells a genuine close of THIS order apart from a
+                // stale replay of some earlier order that used to hold the same number.
                 update.CommandText =
-                    "UPDATE NumberPool SET IssuedSeq = $seq, ReleasedAtSeq = NULL WHERE Number = $n";
+                    "UPDATE NumberPool SET IssuedSeq = $seq, ReleasedAtSeq = NULL, IssuedFor = $orderId WHERE Number = $n";
                 update.Parameters.AddWithValue("$seq", seq);
                 update.Parameters.AddWithValue("$n", number);
+                update.Parameters.AddWithValue("$orderId", orderId.ToString());
                 await update.ExecuteNonQueryAsync();
             }
 
@@ -100,7 +104,33 @@ public class NumberPool : INumberPool
         }
     }
 
-    public async Task ReleaseAsync(int number)
+    /// <summary>Release guard fixed in this review round. It used to be
+    /// <c>WHERE Number = $n AND IssuedSeq IS NOT NULL</c>, on the claim that a stale
+    /// release for a number already re-issued to someone else "simply finds no row" —
+    /// wrong: a re-issued number still has <c>IssuedSeq IS NOT NULL</c> (it is issued,
+    /// just to somebody else), so the stale release matched it and went through anyway.
+    ///
+    /// Why it fired in a shop: QueueServer's GET /orders returns every order ever
+    /// stored — nothing filters by day and nothing ever deletes — so
+    /// QueueClient.FlushAsync replays ReleaseAsync for every order this till has ever
+    /// closed, every 15 seconds, forever. The very next re-issue of that number gave it
+    /// to a new customer; the next flush's stale replay then freed it again from under
+    /// them, and a third customer could be handed the same live number while the second
+    /// customer's order was still open. Reproduced end to end against these classes: a
+    /// number issued, legitimately released, re-issued to someone else, then freed again
+    /// by the stale replay — see QueueClientTest and NumberPoolTest for the scenario as
+    /// a test.
+    ///
+    /// The fix: release by the identity of the order holding the number, not by the
+    /// number's own IssuedSeq state. <c>WHERE Number = $n AND IssuedFor = $orderId</c>
+    /// only matches while THIS order is still the current holder, so a stale replay for
+    /// an order that no longer holds the number (because it was already released, or
+    /// because the number moved on to someone else) finds no row — automatically, with
+    /// no separate "already released" check needed, since a real release already clears
+    /// IssuedFor along with IssuedSeq. A repeated release of the SAME still-live order is
+    /// still the no-op INumberPool promises, for the same reason: the first release
+    /// already cleared IssuedFor, so the repeat's WHERE no longer matches either.</summary>
+    public async Task ReleaseAsync(int number, Guid orderId)
     {
         await _storage.InitializeAsync();
 
@@ -120,23 +150,12 @@ public class NumberPool : INumberPool
             using (var update = connection.CreateCommand())
             {
                 update.Transaction = transaction;
-                // IssuedSeq IS NOT NULL — не косметика: сервер называет закрытые
-                // заказы этой кассы на каждом опросе (см. QueueFlushLoop, раз в
-                // 15 секунд), и ничего их оттуда не убирает, так что один и тот
-                // же номер сюда прилетает снова и снова. Без этого условия повтор
-                // переставлял бы ReleasedAtSeq на текущий seq при каждом проходе,
-                // окно кулдауна не открывалось бы никогда, и после исчерпания
-                // свежих номеров касса скатывалась бы на третью ветку
-                // IssueAsync — ту, что выдаёт номер, ещё числящийся на чьём-то
-                // талоне. Тот же щит защищает и от другого захода на ту же
-                // коллизию: устаревший «закрыт» по заказу, чей номер уже
-                // переиздан кому-то новому, теперь просто не находит строку для
-                // обновления, вместо того чтобы освободить чужой активный номер.
                 update.CommandText =
-                    "UPDATE NumberPool SET IssuedSeq = NULL, ReleasedAtSeq = $seq " +
-                    "WHERE Number = $n AND IssuedSeq IS NOT NULL";
+                    "UPDATE NumberPool SET IssuedSeq = NULL, ReleasedAtSeq = $seq, IssuedFor = NULL " +
+                    "WHERE Number = $n AND IssuedFor = $orderId";
                 update.Parameters.AddWithValue("$seq", seq);
                 update.Parameters.AddWithValue("$n", number);
+                update.Parameters.AddWithValue("$orderId", orderId.ToString());
                 await update.ExecuteNonQueryAsync();
             }
 

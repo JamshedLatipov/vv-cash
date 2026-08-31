@@ -55,8 +55,8 @@ public class QueueClientTest
     /// обязан пережить, а не уронить продажу.</summary>
     private sealed class ThrowingPool : INumberPool
     {
-        public Task<int> IssueAsync() => throw new InvalidOperationException("queue.db is locked");
-        public Task ReleaseAsync(int number) => Task.CompletedTask;
+        public Task<int> IssueAsync(Guid orderId) => throw new InvalidOperationException("queue.db is locked");
+        public Task ReleaseAsync(int number, Guid orderId) => Task.CompletedTask;
     }
 
     private static string TempDb() =>
@@ -178,10 +178,11 @@ public class QueueClientTest
         Assert.Null(order);
     }
 
-    /// <summary>Хранилище, которое падает на записи в буфер. Запертый или
-    /// переполненный queue.db — ровно тот случай, ради которого EnqueueAsync
-    /// вообще ловит исключения, и единственный способ его проверить, не
-    /// угадывая тайминги настоящего SQLite.</summary>
+    /// <summary>Хранилище, которое падает на записи в буфер и на чтении счётчика
+    /// буфера. Запертый или переполненный queue.db — ровно тот случай, ради
+    /// которого EnqueueAsync (и, после Critical 1, PendingCountAsync) вообще
+    /// ловят исключения, и единственный способ это проверить, не угадывая
+    /// тайминги настоящего SQLite.</summary>
     private sealed class ThrowingStorage : IQueueStorage
     {
         public Task InitializeAsync() => Task.CompletedTask;
@@ -194,7 +195,8 @@ public class QueueClientTest
         public Task<IReadOnlyList<(Guid Id, string Payload)>> GetOutboxAsync(string kind)
             => Task.FromResult<IReadOnlyList<(Guid, string)>>(Array.Empty<(Guid, string)>());
 
-        public Task<int> GetOutboxCountAsync(string kind) => Task.FromResult(0);
+        public Task<int> GetOutboxCountAsync(string kind)
+            => throw new InvalidOperationException("queue.db is locked");
 
         public Task DeleteOutboxAsync(Guid id) => Task.CompletedTask;
         public Task MarkOutboxRejectedAsync(Guid id, string reason) => Task.CompletedTask;
@@ -227,6 +229,27 @@ public class QueueClientTest
 
         Assert.NotNull(order);
         Assert.InRange(order!.Number, 100, 999);
+    }
+
+    /// <summary>Critical 1. PendingCountAsync used to be a bare pass-through to SQLite —
+    /// unlike EnqueueAsync right above, which already swallows and logs everything. It is
+    /// called from PosViewModel.ProceedToPayAsync's payment callback, an async void
+    /// lambda with no try in its body and no unhandled-exception handler anywhere in
+    /// Program.cs — reached only after CreateExpenseDocumentDetailedAsync and
+    /// PrintReceiptAsync have already run. A locked, full or corrupt queue.db threw an
+    /// SqliteException straight through this method and out of that lambda, taking the
+    /// whole process down after the money was taken and the receipt was printed. A count
+    /// that cannot be read is a missing badge, not a dead till.</summary>
+    [Fact]
+    public async Task APendingCountReadFailureReturnsZeroInsteadOfThrowing()
+    {
+        var storage = new QueueStorage(TempDb());
+        var pool = new NumberPool(storage, 0, "secret", Now);
+        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
+
+        var count = await client.PendingCountAsync();
+
+        Assert.Equal(0, count);
     }
 
     /// <summary>A refusal is about this one order, not about the rest of the
@@ -290,26 +313,93 @@ public class QueueClientTest
     /// over, not once. This is the test that makes NumberPool cooldown bug
     /// visible from the client side: run against the unguarded ReleaseAsync,
     /// the repeat release re-stamps the cooldown anchor and the final assert
-    /// below fails.</summary>
+    /// below fails.
+    ///
+    /// Same order reported twice, not a re-issue in between — the release-by-identity
+    /// guard makes this a no-op automatically (the first release already clears
+    /// IssuedFor for that order, so the repeat matches no row), same as before Critical
+    /// 2's fix. Contrast with AStaleClosedOrderReplayDoesNotFreeANumberIssuedToSomeoneElse
+    /// below, where the number IS re-issued in between and the old guard actually failed.</summary>
     [Fact]
     public async Task RepeatedFlushesOfTheSameClosedOrderDoNotStallItsCooldown()
     {
         var (client, transport, pool) = Build();
 
         var issued = new List<int>();
-        for (var i = 0; i < 180; i++) issued.Add(await pool.IssueAsync());
+        var issuedIds = new List<Guid>();
+        for (var i = 0; i < 180; i++)
+        {
+            var id = Guid.NewGuid();
+            issuedIds.Add(id);
+            issued.Add(await pool.IssueAsync(id));
+        }
         var target = issued[0];
+        var targetId = issuedIds[0];
 
-        transport.ClosedOrders = new List<QueueOrder> { new() { Number = target } };
+        transport.ClosedOrders = new List<QueueOrder> { new() { Id = targetId, Number = target } };
         await client.FlushAsync(); // real release, anchored at seq 180
 
-        for (var i = 0; i < 10; i++) await pool.IssueAsync(); // seq -> 190
+        for (var i = 0; i < 10; i++) await pool.IssueAsync(Guid.NewGuid()); // seq -> 190
 
         await client.FlushAsync(); // stale repeat of the same closed order
 
         for (var i = 0; i < NumberPool.CooldownIssues - 10 - 1; i++) // seq 191..229
-            Assert.NotEqual(target, await pool.IssueAsync());
+            Assert.NotEqual(target, await pool.IssueAsync(Guid.NewGuid()));
 
-        Assert.Equal(target, await pool.IssueAsync()); // seq 230
+        Assert.Equal(target, await pool.IssueAsync(Guid.NewGuid())); // seq 230
+    }
+
+    /// <summary>Critical 2, reproduced through the actual code path where it happens in
+    /// production: QueueClient.FlushAsync releasing numbers by whatever GetClosedAsync
+    /// reports, against a server that never deletes a closed order. Mirrors the
+    /// reviewer's own reproduction (issue, release, re-issue to someone else, replay the
+    /// stale release, assert the live number does not move) — see
+    /// NumberPoolTest.AStaleReleaseForAReissuedNumberDoesNotFreeALiveOrder for the same
+    /// scenario at the pool level, including why the final assertion checks the
+    /// NumberPool row directly rather than issuing more numbers and hoping one of them
+    /// exposes it (with the slice this exhausted, the third, oldest-first
+    /// SelectNumberToIssueAsync branch can legitimately keep handing out other
+    /// already-issued numbers for a long stretch regardless of whether the guard bug
+    /// fired, so it would not reliably distinguish the fixed guard from the broken one).</summary>
+    [Fact]
+    public async Task AStaleClosedOrderReplayDoesNotFreeANumberIssuedToSomeoneElse()
+    {
+        var db = TempDb();
+        var (client, transport, _) = Build(db);
+
+        // Exhaust the till's 180-number slice first, same reasoning as the cooldown
+        // tests: with fresh numbers still available the pool would just hand one of
+        // those out instead of recycling `first`'s number, and the scenario would not
+        // fire at all.
+        var orders = new List<QueueOrder>();
+        for (var i = 0; i < 180; i++) orders.Add((await client.EnqueueAsync(Sale()))!);
+        var first = orders[0];
+
+        transport.ClosedOrders = new List<QueueOrder> { new() { Id = first.Id, Number = first.Number } };
+        await client.FlushAsync(); // real release, anchored at the current seq
+
+        for (var i = 0; i < NumberPool.CooldownIssues - 1; i++) await client.EnqueueAsync(Sale());
+        var second = await client.EnqueueAsync(Sale()); // the CooldownIssues-th issue after release
+        Assert.Equal(first.Number, second!.Number); // sanity: same ticket number, new customer
+        Assert.True(await IsStillIssuedAsync(db, first.Number)); // sanity: it is live right now
+
+        // The server never deletes closed orders, so `first`'s stale "closed" is
+        // replayed on the next 15-second flush — transport.ClosedOrders still names it.
+        await client.FlushAsync();
+
+        // `second` is the live holder now; the stale replay for `first` must not free
+        // the number out from under them before their own real close.
+        Assert.True(await IsStillIssuedAsync(db, first.Number));
+    }
+
+    private static async Task<bool> IsStillIssuedAsync(string db, int number)
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={db}");
+        await connection.OpenAsync();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT IssuedSeq FROM NumberPool WHERE Number = $n";
+        cmd.Parameters.AddWithValue("$n", number);
+        var result = await cmd.ExecuteScalarAsync();
+        return result != null && result != DBNull.Value;
     }
 }
