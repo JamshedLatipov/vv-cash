@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -17,6 +18,7 @@ using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
+using VvCash.Services.Queue;
 using VvCash.Services.Update;
 
 namespace VvCash.ViewModels;
@@ -78,6 +80,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ISellerRosterService _rosterService;
     private readonly IAuthService _authService;
     private readonly ICashFeatureService _features;
+
+    /// <summary>Постановка заказа в очередь (Task 22). Nullable: кассу можно собрать вовсе
+    /// без очереди (см. IQueueClient docstring — тот же принцип, что и у остальных
+    /// hardware-заглушек этого класса). Не IDisposable и ничего не подписывает, так что
+    /// Dispose() этого класса ему ничего не должен — в отличие от _printerService и
+    /// остальных полей выше, которых Dispose() ниже явно отписывает.</summary>
+    private readonly IQueueClient? _queueClient;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private CancellationTokenSource? _searchCts;
@@ -838,7 +847,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ISellerRosterService rosterService,
         IAuthService authService,
         ICashFeatureService features,
-        UpdateViewModel update)
+        UpdateViewModel update,
+        IQueueClient? queueClient = null)
     {
         _promotionProvider = promotionProvider;
         _productService = productService;
@@ -863,6 +873,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _authService = authService;
         _features = features;
         Update = update;
+        _queueClient = queueClient;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
@@ -2324,6 +2335,52 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             warehouseName: null,
                             sellerName: _sellerSession.Current?.FullName,
                             saleDate: DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
+
+                        // Task 22: постановка в очередь и печать талона/бегунка. Номер
+                        // выдаётся, когда точке есть на чём его выдать — то есть когда
+                        // настроен хоть один включённый принтер с ролью Ticket или
+                        // KitchenOrder, — а не когда включена сама сетевая очередь
+                        // (QueueRole): точка с QueueRole.Off и талонным принтером — рабочая
+                        // конфигурация, таких в сети половина. _queueClient всё равно может
+                        // быть null: кассу можно собрать вовсе без очереди.
+                        //
+                        // Строго после PrintReceiptAsync и строго до ClearCart(): бегунку
+                        // нужны строки корзины, а после ClearCart() их уже нет. Копия
+                        // (.ToList()), а не живой _cartService.Items, по той же причине —
+                        // не держать ссылку на список, который ClearCart() ниже опустошит.
+                        var needsQueueNumber = _settingsService.Printers.Any(p => p.IsEnabled
+                            && (p.Roles.HasFlag(PrintRole.Ticket) || p.Roles.HasFlag(PrintRole.KitchenOrder)));
+
+                        if (needsQueueNumber && _queueClient is not null)
+                        {
+                            var queueSale = new SaleReceiptData(
+                                _cartService.Items.ToList(),
+                                Subtotal, TotalDiscount, TotalAmount,
+                                _cartService.AppliedDiscountName,
+                                outcome.DocumentNumber,
+                                null,
+                                _sellerSession.Current?.FullName,
+                                DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
+
+                            var queueOrder = await _queueClient.EnqueueAsync(queueSale);
+
+                            // EnqueueAsync возвращает null только тогда, когда не удалось
+                            // получить сам номер (см. IQueueClient docstring) — печатать
+                            // талон и бегунок тогда нечем: талон без номера хуже, чем его
+                            // отсутствие, а бегунок без номера теряет смысл, ради которого
+                            // его вообще заводили. Чек клиенту уже напечатан строкой выше и
+                            // от этого никак не зависит.
+                            if (queueOrder != null)
+                            {
+                                var queueNumber = queueOrder.Number.ToString(CultureInfo.InvariantCulture);
+                                await _printerService.PrintTicketAsync(
+                                    queueNumber,
+                                    time: queueOrder.CreatedAt.ToString("HH:mm"),
+                                    warehouseName: null);
+                                await _printerService.PrintKitchenOrderAsync(queueSale, queueNumber);
+                            }
+                        }
+
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;
