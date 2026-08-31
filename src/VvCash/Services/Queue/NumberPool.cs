@@ -16,8 +16,17 @@ namespace VvCash.Services.Queue;
 public class NumberPool : INumberPool
 {
     /// <summary>Количество касс в торговой точке. Номер принадлежит кассе с
-    /// индексом (Number % Tills).</summary>
-    private const int Tills = 5;
+    /// индексом (Number % Tills). Internal, а не private: SettingsService клэмпит
+    /// TillIndex этим же значением — держать два числа в согласии руками означало
+    /// бы, что при рассинхроне номера просто начинают выдаваться на две кассы
+    /// сразу, без единой ошибки на этот счёт.
+    ///
+    /// Менять на живой точке нельзя: срез на сегодня уже выдан каждой кассе и
+    /// зашит в её NumberPool до конца дня (см. EnsureTodaysPoolAsync), поэтому
+    /// смена этого числа посреди смены сталкивает срезы касс до следующей смены
+    /// дня, а не применяется сразу. Значение не должно становиться настройкой,
+    /// которую можно поменять на бегу.</summary>
+    internal const int Tills = 5;
 
     private const int FirstNumber = 100;
     private const int LastNumber = 999;

@@ -158,18 +158,14 @@ public class SettingsService : ISettingsService, IQueueSettings
         set => _data.QueueSecret = value ?? string.Empty;
     }
 
-    /// <summary>Зажимается в 0..Tills-1, а не принимается как есть: значение из
-    /// settings.json правится руками, и вне диапазона касса начнёт делить по
-    /// чужому классу вычетов пула. Tills здесь — своя константа, а не
-    /// NumberPool.Tills (там она private, и трогать NumberPool нельзя); держать
-    /// в согласии — на совести того, кто меняет обе.</summary>
+    /// <summary>Зажимается в 0..NumberPool.Tills-1, а не принимается как есть:
+    /// значение из settings.json правится руками, и вне диапазона касса начнёт
+    /// делить по чужому классу вычетов пула.</summary>
     public int TillIndex
     {
-        get => Math.Clamp(_data.TillIndex, 0, Tills - 1);
+        get => Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
         set => _data.TillIndex = value;
     }
-
-    private const int Tills = 5;
 
     /// <summary>Creates the service against the standard per-user settings file. Pass
     /// <paramref name="settingsFilePath"/> to point at a different one (e.g. a temp file
@@ -245,7 +241,7 @@ public class SettingsService : ISettingsService, IQueueSettings
                 {
                     _data.QueueSecret = string.Empty;
                 }
-                _data.TillIndex = Math.Clamp(_data.TillIndex, 0, Tills - 1);
+                _data.TillIndex = Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
             }
             catch (Exception ex)
             {
