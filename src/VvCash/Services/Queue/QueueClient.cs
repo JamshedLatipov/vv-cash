@@ -34,13 +34,19 @@ public class QueueClient : IQueueClient
     /// заменить.</summary>
     private const string RefusedReason = "Сервер отказал в приёме заказа.";
 
-    private readonly QueueStorage _storage;
+    /// <summary>Интерфейс, а не конкретный QueueStorage: клиенту нужны только
+    /// четыре метода буфера, и ни один из них не требует ConnectionString — за
+    /// ним к классу ходит NumberPool, а не эта служба. Практическая цена
+    /// конкретного типа была в том, что «запись в буфер упала» становилась
+    /// непроверяемой: подсунуть падающее хранилище некуда, а ронять настоящий
+    /// SQLite ради теста — гадание по таймингам.</summary>
+    private readonly IQueueStorage _storage;
     private readonly INumberPool _pool;
     private readonly IQueueTransport _transport;
     private readonly int _tillIndex;
     private readonly Func<DateTime> _now;
 
-    public QueueClient(QueueStorage storage, INumberPool pool, IQueueTransport transport, int tillIndex, Func<DateTime> now)
+    public QueueClient(IQueueStorage storage, INumberPool pool, IQueueTransport transport, int tillIndex, Func<DateTime> now)
     {
         _storage = storage;
         _pool = pool;

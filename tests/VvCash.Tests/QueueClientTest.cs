@@ -178,6 +178,44 @@ public class QueueClientTest
         Assert.Null(order);
     }
 
+    /// <summary>Хранилище, которое падает на записи в буфер. Запертый или
+    /// переполненный queue.db — ровно тот случай, ради которого EnqueueAsync
+    /// вообще ловит исключения, и единственный способ его проверить, не
+    /// угадывая тайминги настоящего SQLite.</summary>
+    private sealed class ThrowingStorage : IQueueStorage
+    {
+        public Task InitializeAsync() => Task.CompletedTask;
+        public Task<string?> GetStateAsync(string key) => Task.FromResult<string?>(null);
+        public Task SetStateAsync(string key, string value) => Task.CompletedTask;
+
+        public Task SaveOutboxAsync(Guid id, string kind, string payload)
+            => throw new InvalidOperationException("queue.db is locked");
+
+        public Task<IReadOnlyList<(Guid Id, string Payload)>> GetOutboxAsync(string kind)
+            => Task.FromResult<IReadOnlyList<(Guid, string)>>(Array.Empty<(Guid, string)>());
+
+        public Task DeleteOutboxAsync(Guid id) => Task.CompletedTask;
+        public Task MarkOutboxRejectedAsync(Guid id, string reason) => Task.CompletedTask;
+    }
+
+    /// <summary>Номер уже выдан, а буфер записать не удалось. Продажа всё равно
+    /// доводится до конца: номер у клиента на руках, бумага вышла, и отдать
+    /// кассиру исключение на уже прошедшей продаже — худшее из возможного.
+    /// Заказ до сервера не доедет, и это осознанная потеря: выбор здесь между
+    /// потерянным заказом и сорванной продажей.</summary>
+    [Fact]
+    public async Task AFailureWritingTheBufferStillCompletesTheSale()
+    {
+        var storage = new QueueStorage(TempDb());
+        var pool = new NumberPool(storage, 0, "secret", Now);
+        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
+
+        var order = await client.EnqueueAsync(Sale());
+
+        Assert.NotNull(order);
+        Assert.InRange(order!.Number, 100, 999);
+    }
+
     /// <summary>A refusal is about this one order, not about the rest of the
     /// buffer - unlike Unreachable, it must not stop later orders from going
     /// out, and the refused row must not come back on a later flush either.</summary>
