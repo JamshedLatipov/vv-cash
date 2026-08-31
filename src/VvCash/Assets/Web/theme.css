@@ -1,0 +1,79 @@
+/* Палитра кассы, зеркалом Assets/Styles/Colors.axaml. Источник правды — тот
+   файл; здесь только переносится в CSS custom properties для экранов кухни и
+   табло. Расхождение между ними ловит tests/VvCash.Tests/WebThemeTest.cs:
+   без него первый же перекрашенный в приложении цвет молча оставляет эти
+   страницы на вчерашнем — две палитры расходятся тихо, потому что ни одна
+   сборка на обе разом не смотрит. Значит: любая правка цвета здесь идёт
+   только вместе с правкой в Colors.axaml (или наоборот), а тест — зелёный. */
+:root {
+    --primary: #0075e2;
+    --primary-dark: #0063c7;
+    --primary-light: #e6f1fc;
+    --background: #f6f8f8;
+    --card: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --danger-light: #fee2e2;
+    /* Совпадает с BorderDarkColor в Colors.axaml, не с BorderColor: тот
+       (#f1f5f9) на экране кассы отделяет карточки друг от друга на общем
+       фоне; здесь, на отдельном экране без соседних карточек той же плотности,
+       нужен более заметный контур — тот же, что использует Controls.axaml
+       для BorderBrush в интерактивных элементах (QtyButton, CategoryButton). */
+    --border: #e2e8f0;
+
+    /* Радиусы скруглений — из Assets/Styles/Controls.axaml: 8px у вторичных
+       кнопок и полей ввода, 12px у первичных кнопок и карточек товара, 16px у
+       CategoryButton. Три чаще всего повторяющихся значения, не все пять. */
+    --radius-s: 8px;
+    --radius-m: 12px;
+    --radius-l: 16px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    background: var(--background);
+    color: var(--text-primary);
+    /* Inter — шрифт приложения (Avalonia.Fonts.Inter, встроен в саму кассу).
+       Никакой загрузки шрифта из сети и никакого <link> на Google Fonts:
+       точка может быть офлайн в момент, когда кто-то открывает эту страницу
+       с телефона или планшета, и экран обязан подняться в любом случае. Если
+       Inter не установлен как системный шрифт на устройстве — а на большинстве
+       телевизоров и планшетов это так, — браузer молча уходит по цепочке
+       дальше, к тому же выбору, что делает остальная ОС. */
+    font-family: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-l);
+}
+
+.muted {
+    color: var(--text-muted);
+}
+
+/* Полоса «нет связи». Красная и во весь верх — тот самый принцип «неправое
+   табло обязано об этом кричать», а не тихо стоять на вчерашних цифрах. */
+.stale {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--danger);
+    color: #fff;
+    padding: 10px 16px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+}

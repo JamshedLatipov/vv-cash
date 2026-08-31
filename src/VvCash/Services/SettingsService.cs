@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using VvCash.Models;
+using VvCash.Services.Queue;
 
 namespace VvCash.Services;
 
@@ -23,9 +24,23 @@ public class SettingsData
     public string CustomerDisplayPort { get; set; } = string.Empty;
     public int CustomerDisplayBaudRate { get; set; } = 9600;
     public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+
+    public QueueRole QueueRole { get; set; } = QueueRole.Off;
+    public string QueueServerAddress { get; set; } = string.Empty;
+
+    /// <summary>Порт сервера очереди. Именованная константа, а не троекратно
+    /// повторённое число: тот же 8770 нужен и здесь как значение по умолчанию,
+    /// и в геттере SettingsService.QueuePort как то, во что превращается 0 или
+    /// отрицательное, и в Load() как нормализация уже прочитанного файла —
+    /// три места, а не одно, где 8770 может незаметно разойтись само с собой.</summary>
+    internal const int DefaultQueuePort = 8770;
+
+    public int QueuePort { get; set; } = DefaultQueuePort;
+    public string QueueSecret { get; set; } = string.Empty;
+    public int TillIndex { get; set; }
 }
 
-public class SettingsService : ISettingsService
+public class SettingsService : ISettingsService, IQueueSettings
 {
     private readonly string _settingsFilePath;
     private SettingsData _data = new SettingsData();
@@ -124,6 +139,42 @@ public class SettingsService : ISettingsService
         set => _data.CustomerDisplayCodePageId = value;
     }
 
+    public QueueRole QueueRole
+    {
+        get => _data.QueueRole;
+        set => _data.QueueRole = value;
+    }
+
+    public string QueueServerAddress
+    {
+        get => _data.QueueServerAddress;
+        set => _data.QueueServerAddress = value ?? string.Empty;
+    }
+
+    /// <summary>Ноль и отрицательное читаются как SettingsData.DefaultQueuePort —
+    /// тем же приёмом, что SyncIntervalMinutes и CustomerDisplayBaudRate выше:
+    /// settings.json правят руками.</summary>
+    public int QueuePort
+    {
+        get => _data.QueuePort <= 0 ? SettingsData.DefaultQueuePort : _data.QueuePort;
+        set => _data.QueuePort = value;
+    }
+
+    public string QueueSecret
+    {
+        get => _data.QueueSecret;
+        set => _data.QueueSecret = value ?? string.Empty;
+    }
+
+    /// <summary>Зажимается в 0..NumberPool.Tills-1, а не принимается как есть:
+    /// значение из settings.json правится руками, и вне диапазона касса начнёт
+    /// делить по чужому классу вычетов пула.</summary>
+    public int TillIndex
+    {
+        get => Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
+        set => _data.TillIndex = value;
+    }
+
     /// <summary>Creates the service against the standard per-user settings file. Pass
     /// <paramref name="settingsFilePath"/> to point at a different one (e.g. a temp file
     /// in tests); left null/empty, DI and production code get the usual
@@ -186,6 +237,19 @@ public class SettingsService : ISettingsService
                 {
                     _data.CustomerDisplayCodePageId = string.Empty;
                 }
+                if (_data.QueueServerAddress == null)
+                {
+                    _data.QueueServerAddress = string.Empty;
+                }
+                if (_data.QueuePort <= 0)
+                {
+                    _data.QueuePort = SettingsData.DefaultQueuePort;
+                }
+                if (_data.QueueSecret == null)
+                {
+                    _data.QueueSecret = string.Empty;
+                }
+                _data.TillIndex = Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
             }
             catch (Exception ex)
             {

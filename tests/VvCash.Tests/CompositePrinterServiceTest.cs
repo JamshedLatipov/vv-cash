@@ -119,4 +119,26 @@ public class CompositePrinterServiceTest
         Assert.Same(EscPosCodePages.Cp1251, composite.Printers[0].CodePage);
         Assert.Same(EscPosCodePages.Default, composite.Printers[1].CodePage);
     }
+
+    /// <summary>Тот же пробел, что и с кодовой страницей выше, только для ролей:
+    /// PrinterRoutingTest всегда подставляет свою фабрику и до умолчательной не
+    /// доходит. Убери config.Roles из фабрики по умолчанию — и это единственное,
+    /// что заметит подмену.</summary>
+    [Fact]
+    public void EachPrinterGetsTheRolesFromItsOwnConfig()
+    {
+        var settings = new FakeSettings
+        {
+            Printers =
+            {
+                new() { Name = "a", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.1:9100", IsEnabled = true,
+                        Roles = PrintRole.Ticket | PrintRole.KitchenOrder }
+            }
+        };
+
+        var composite = new CompositePrinterService(settings);
+
+        Assert.Equal(PrintRole.Ticket | PrintRole.KitchenOrder, composite.Printers[0].Roles);
+    }
 }

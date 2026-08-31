@@ -12,6 +12,7 @@ using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
+using VvCash.Services.Queue;
 using VvCash.ViewModels;
 using Xunit;
 
@@ -242,6 +243,90 @@ public class PosViewModelSellerGateTest
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
         public Task<bool> PrintExchangeReceiptAsync(IEnumerable<ReturnReceiptLine> returned, IEnumerable<ReturnReceiptLine> issued, decimal difference, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
+
+        /// <summary>Task 22: what PrintTicketAsync was actually called with, so tests can
+        /// check the queue number reached the ticket printer, not just EnqueueAsync.</summary>
+        public List<(string Number, string? Time, string? WarehouseName)> Tickets { get; } = new();
+
+        /// <summary>Same for the kitchen order (бегунок).</summary>
+        public List<(SaleReceiptData Sale, string QueueNumber)> KitchenOrders { get; } = new();
+
+        /// <summary>Settable so a test can simulate a kitchen printer that is out of paper
+        /// or offline (Task 22: must not stop the sale).</summary>
+        public bool KitchenFails { get; set; }
+
+        public Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null)
+        {
+            Tickets.Add((number, time, warehouseName));
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber)
+        {
+            KitchenOrders.Add((sale, queueNumber));
+            return Task.FromResult(!KitchenFails);
+        }
+    }
+
+    /// <summary>Task 22: records what PosViewModel handed to EnqueueAsync, and hands back a
+    /// fixed QueueOrder by default — tests that need the "no number could be issued" path
+    /// (see IQueueClient's own docstring on when EnqueueAsync returns null) set Result to
+    /// null explicitly.
+    ///
+    /// Important 3/9: IssueNumberAsync is the QueueRole.Off-with-a-printer path (see
+    /// PosViewModel.ProceedToPayAsync) — tracked separately from Enqueued so a test can
+    /// tell "the order went into the outbox" (EnqueueAsync/Enqueued) apart from "only a
+    /// number was pulled for the printer" (IssueNumberAsync/IssueNumberAsyncCallCount).
+    /// Defaults to Result's own Number, since production issues the same pool through
+    /// both paths — set IssueNumberAsyncResult directly for a test that needs the two to
+    /// disagree.</summary>
+    private class FakeQueueClient : IQueueClient
+    {
+        public List<SaleReceiptData> Enqueued { get; } = new();
+        public int IssueNumberAsyncCallCount { get; private set; }
+        public int? IssueNumberAsyncResult { get; set; }
+
+        public QueueOrder? Result { get; set; } = new QueueOrder
+        {
+            Id = Guid.NewGuid(),
+            Number = 305,
+            TillIndex = 0,
+            State = QueueOrderState.New,
+            CreatedAt = DateTime.Now
+        };
+
+        public Task<int?> IssueNumberAsync()
+        {
+            IssueNumberAsyncCallCount++;
+            return Task.FromResult(IssueNumberAsyncResult ?? Result?.Number);
+        }
+
+        public Task<QueueOrder?> EnqueueAsync(SaleReceiptData sale)
+        {
+            Enqueued.Add(sale);
+            return Task.FromResult(Result);
+        }
+
+        public Task FlushAsync() => Task.CompletedTask;
+
+        // Task 25: not what this test file exercises (see PendingQueueOrdersCount's
+        // own tests, if any land in a queue-specific file) — zero keeps the badge off
+        // by default for every seller-gate scenario here.
+        public Task<int> PendingCountAsync() => Task.FromResult(0);
+    }
+
+    /// <summary>Important 3/9: stands in for IQueueSettings — a deliberately separate
+    /// interface from ISettingsService (see IQueueSettings' own docstring on why), so
+    /// PosViewModel's queue-role decision needs its own fake rather than growing
+    /// FakeSettingsService. Defaults to QueueRole.Off, matching SettingsService's own
+    /// default and an unconfigured till.</summary>
+    private class FakeQueueSettings : IQueueSettings
+    {
+        public QueueRole QueueRole { get; set; } = QueueRole.Off;
+        public string QueueServerAddress { get; set; } = string.Empty;
+        public int QueuePort { get; set; } = 8770;
+        public string QueueSecret { get; set; } = string.Empty;
+        public int TillIndex { get; set; }
     }
 
     private class FakeCustomerDisplayService : ICustomerDisplayService
@@ -596,6 +681,9 @@ public class PosViewModelSellerGateTest
         public FakeQuoteService QuoteService { get; } = new();
         public FakeProductService ProductService { get; } = new();
         public HttpClient HttpClient { get; } = new();
+        public FakePrinterService PrinterService { get; } = new();
+        public FakeQueueClient QueueClient { get; } = new();
+        public FakeQueueSettings QueueSettings { get; } = new();
     }
 
     private static PosViewModel CreateViewModel(out Deps deps, Action<Deps>? configure = null)
@@ -606,7 +694,7 @@ public class PosViewModelSellerGateTest
             deps.ProductService,
             new FakeCategoryService(),
             deps.CartService,
-            new FakePrinterService(),
+            deps.PrinterService,
             new FakeCustomerDisplayService(),
             deps.ShiftService,
             new FakeOfflineStorageService(),
@@ -629,7 +717,9 @@ public class PosViewModelSellerGateTest
                 new NoUpdateService(),
                 new NoInstallerLauncher(),
                 deps.CartService,
-                new FixedVersionProvider()));
+                new FixedVersionProvider()),
+            deps.QueueClient,
+            deps.QueueSettings);
     }
 
     private sealed class NoUpdateService : VvCash.Services.Update.IUpdateService
@@ -3252,5 +3342,200 @@ public class PosViewModelSellerGateTest
         vm.OpenExchangeCommand.Execute(null);
 
         Assert.Equal(0, raisedCount);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Task 22, revised by the Important 3/9 review round: enqueue the order and print its
+    // documents on a sale. Two separate questions, not one: a number is needed when there
+    // is something to print it on (a ticket and/or kitchen-order printer configured and
+    // enabled) OR when QueueRole itself is on (the hall board / KDS need to see the order
+    // even if nothing local prints it); the order goes into the outbox — EnqueueAsync,
+    // tracked by FakeQueueClient.Enqueued — ONLY when QueueRole is on. QueueRole.Off with
+    // a ticket printer is a working configuration that half the estate runs: the printer
+    // still gets a number (IssueNumberAsync), but nothing is ever created to send, because
+    // nothing would ever drain it (QueueFlushLoop does not run when Off — see
+    // App.axaml.cs). All tests below drive a full payment through PayCommand ->
+    // MixedPaymentViewModel.ConfirmPaymentCommand, the same route the other Pay() tests in
+    // this file use, so the assertions exercise the real wiring rather than calling a
+    // private method directly.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Pay_WithTicketAndKitchenPrintersConfiguredAndQueueOn_EnqueuesOnceAndPrintsBothCarryingTheNumber()
+    {
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.QueueSettings.QueueRole = QueueRole.Client;
+            d.SettingsService.Printers.Add(new PrinterConfig
+            {
+                IsEnabled = true,
+                Roles = PrintRole.Ticket | PrintRole.KitchenOrder
+            });
+        });
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Single(deps.QueueClient.Enqueued);
+        var ticket = Assert.Single(deps.PrinterService.Tickets);
+        Assert.Equal("305", ticket.Number);
+        var kitchen = Assert.Single(deps.PrinterService.KitchenOrders);
+        Assert.Equal("305", kitchen.QueueNumber);
+    }
+
+    [Fact]
+    public void Pay_QueueOffWithTicketPrinter_PrintsANumberedTicketButNeverTouchesTheOutbox()
+    {
+        // The defect this guards: with the old single-condition trigger, QueueRole.Off
+        // plus a ticket printer enqueued into the outbox on every sale — the transport
+        // returned Unreachable (empty server address) and QueueFlushLoop never runs when
+        // Off, so nothing ever drained it and the unsent badge climbed forever.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.QueueSettings.QueueRole = QueueRole.Off;
+            d.SettingsService.Printers.Add(new PrinterConfig { IsEnabled = true, Roles = PrintRole.Ticket });
+        });
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        var ticket = Assert.Single(deps.PrinterService.Tickets);
+        Assert.Equal("305", ticket.Number);
+        Assert.Equal(1, deps.QueueClient.IssueNumberAsyncCallCount);
+        // The outbox — EnqueueAsync — was never touched.
+        Assert.Empty(deps.QueueClient.Enqueued);
+    }
+
+    [Fact]
+    public void Pay_QueueOnWithNoTicketOrKitchenPrinter_StillEnqueuesForTheScreen()
+    {
+        // The other half of the defect: a kitchen screen with no kitchen printer is a
+        // configuration the spec names explicitly. With the old trigger, no printer held
+        // Ticket/KitchenOrder, so no number was ever issued and no order ever created —
+        // the KDS loaded, authenticated, and stayed empty forever with no explanation.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.QueueSettings.QueueRole = QueueRole.Client;
+            d.SettingsService.Printers.Add(new PrinterConfig { IsEnabled = true, Roles = PrintRole.Receipt });
+        });
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        // The order reaches the outbox (and, in production, the server and the KDS)
+        // even though no printer on this till holds Ticket/KitchenOrder.
+        Assert.Single(deps.QueueClient.Enqueued);
+
+        // PosViewModel still calls PrintTicketAsync/PrintKitchenOrderAsync unconditionally
+        // once it has a number — same as before this fix — and leaves it to
+        // CompositePrinterService's own role filter to turn that into an actual no-op
+        // when no configured printer holds the role (see CompositePrinterServiceTest).
+        // FakePrinterService is a plain recorder with no such filtering, so it still logs
+        // the call; that is not what this test is about.
+    }
+
+    [Fact]
+    public void Pay_WithOnlyAReceiptPrinter_IssuesNoNumberButStillCompletesTheSale()
+    {
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.QueueSettings.QueueRole = QueueRole.Off;
+            d.SettingsService.Printers.Add(new PrinterConfig
+            {
+                IsEnabled = true,
+                Roles = PrintRole.Receipt
+            });
+        });
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        Assert.Empty(deps.QueueClient.Enqueued);
+        Assert.Equal(0, deps.QueueClient.IssueNumberAsyncCallCount);
+        Assert.Empty(deps.PrinterService.Tickets);
+        Assert.Empty(deps.PrinterService.KitchenOrders);
+
+        // The point is that having nothing to queue must not affect the sale itself — the
+        // cart actually clearing is the proof of that, not merely that nothing threw.
+        Assert.Empty(vm.CartItems);
+    }
+
+    [Fact]
+    public void Pay_WithFailingKitchenPrinter_DoesNotStopTheSale()
+    {
+        // QueueRole left at its Off default: this exercises the IssueNumberAsync path
+        // (a printer wants a number, the network queue itself is not involved), and the
+        // point under test — a failing kitchen printer must not stop the sale — holds on
+        // either path, so which one runs here does not matter to the assertions below.
+        using var vm = CreateViewModel(out var deps, d =>
+            d.SettingsService.Printers.Add(new PrinterConfig
+            {
+                IsEnabled = true,
+                Roles = PrintRole.KitchenOrder
+            }));
+        deps.PrinterService.KitchenFails = true;
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        // The kitchen slip was attempted and failed...
+        Assert.Single(deps.PrinterService.KitchenOrders);
+        // ...but the sale completed anyway.
+        Assert.Empty(vm.CartItems);
+        Assert.Equal("Payment processed. Thank you!", vm.StatusMessage);
+    }
+
+    [Fact]
+    public void PrintReceipt_ReprintCommand_IssuesNoNewNumber()
+    {
+        // The reprint button (PrintReceiptCommand) must never touch the queue: hooking it
+        // there would hand out a fresh number and fire a second kitchen order on every
+        // reprint. Deliberately does NOT complete a sale first — Pay's own success branch
+        // clears the cart, and PrintReceiptCommand is a no-op on an empty cart, so a
+        // reprint after a completed sale could never prove anything either way.
+        using var vm = CreateViewModel(out var deps, d =>
+            d.SettingsService.Printers.Add(new PrinterConfig
+            {
+                IsEnabled = true,
+                Roles = PrintRole.Ticket | PrintRole.KitchenOrder
+            }));
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        vm.PrintReceiptCommand.Execute(null);
+
+        Assert.Empty(deps.QueueClient.Enqueued);
+        Assert.Empty(deps.PrinterService.Tickets);
+        Assert.Empty(deps.PrinterService.KitchenOrders);
     }
 }

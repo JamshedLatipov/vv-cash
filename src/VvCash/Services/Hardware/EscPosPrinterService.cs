@@ -15,6 +15,7 @@ public class EscPosPrinterService : IPrinterService
     private readonly PrinterConnectionType _connectionType;
     private readonly string _connectionString;
     private readonly EscPosCodePage _codePage;
+    private readonly PrintRole _roles;
     private PrinterStatus _status = PrinterStatus.Ready;
 
     public PrinterStatus Status => _status;
@@ -24,6 +25,11 @@ public class EscPosPrinterService : IPrinterService
     /// теста: строка, которая доносит настройку до боевой кассы, иначе не
     /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
     public EscPosCodePage CodePage => _codePage;
+
+    /// <summary>Какие документы печатает этот аппарат. Значение по умолчанию —
+    /// Receipt: служба, собранная на экране настроек ради пробной печати, ролями
+    /// не пользуется вовсе, и заставлять её их объявлять незачем.</summary>
+    public PrintRole Roles => _roles;
 
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
     private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
@@ -39,11 +45,12 @@ public class EscPosPrinterService : IPrinterService
     public static readonly byte[] CmdDrawerKick = { 0x1B, 0x70, 0x00, 0x19, 0xFA };
 
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
-        EscPosCodePage codePage)
+        EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt)
     {
         _connectionType = connectionType;
         _connectionString = connectionString;
         _codePage = codePage;
+        _roles = roles;
     }
 
     /// <summary>Builds the sale receipt bytes. Static and separate from sending
@@ -53,7 +60,8 @@ public class EscPosPrinterService : IPrinterService
         IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
         string? discountName = null,
         string? documentNumber = null, string? warehouseName = null,
-        string? sellerName = null, string? saleDate = null)
+        string? sellerName = null, string? saleDate = null,
+        string? queueNumber = null)
     {
         using var ms = new MemoryStream();
         WriteInit(ms, codePage);
@@ -61,6 +69,17 @@ public class EscPosPrinterService : IPrinterService
         Write(ms, CmdDoubleSizeOn);
         WriteLine(ms, "VV CASH POS", codePage);
         Write(ms, CmdDoubleSizeOff);
+        // Бегунок — это тот же чек с номером в шапке, а не отдельный документ:
+        // расходиться с чеком при первой правке раскладки ему незачем. Пусто —
+        // печатается клиентский чек, и номера на нём нет по решению спеки.
+        if (!string.IsNullOrWhiteSpace(queueNumber))
+        {
+            Write(ms, CmdDoubleSizeOn);
+            Write(ms, CmdBoldOn);
+            WriteLine(ms, $"# {queueNumber}", codePage);
+            Write(ms, CmdBoldOff);
+            Write(ms, CmdDoubleSizeOff);
+        }
         // The same four facts the return and exchange receipts carry, and for the same
         // reason: without them a sale receipt brought back to the till cannot be matched
         // to its document. Each is omitted when absent rather than printed empty — an
@@ -194,6 +213,31 @@ public class EscPosPrinterService : IPrinterService
         return ms.ToArray();
     }
 
+    /// <summary>Талон клиенту: номер и ничего лишнего. Отдельный документ, а не
+    /// строка на чеке — клиент отдаёт талон, получая заказ, а чек оставляет себе.
+    /// Время и точка печатаются, когда переданы: талон из кассы без склада в
+    /// настройках не должен нести пустую строку.</summary>
+    public static byte[] BuildTicket(EscPosCodePage codePage, string number,
+        string? time = null, string? warehouseName = null)
+    {
+        using var ms = new MemoryStream();
+        WriteInit(ms, codePage);
+        Write(ms, CmdAlignCenter);
+        WriteLine(ms, "----------------------------", codePage);
+        Write(ms, CmdDoubleSizeOn);
+        Write(ms, CmdBoldOn);
+        WriteLine(ms, number, codePage);
+        Write(ms, CmdBoldOff);
+        Write(ms, CmdDoubleSizeOff);
+        WriteLine(ms, "----------------------------", codePage);
+        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, warehouseName!, codePage);
+        if (!string.IsNullOrWhiteSpace(time)) WriteLine(ms, time!, codePage);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdLineFeed);
+        Write(ms, CmdCut);
+        return ms.ToArray();
+    }
+
     public async Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total)
     {
         try
@@ -205,6 +249,40 @@ public class EscPosPrinterService : IPrinterService
         catch (Exception ex)
         {
             Console.WriteLine($"Pre-receipt print error: {ex.Message}");
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
+    }
+
+    public async Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null)
+    {
+        try
+        {
+            await SendAsync(BuildTicket(_codePage, number, time, warehouseName));
+            SetStatus(PrinterStatus.Ready);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Ticket print error: {ex.Message}");
+            SetStatus(PrinterStatus.Error);
+            return false;
+        }
+    }
+
+    public async Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber)
+    {
+        try
+        {
+            await SendAsync(BuildSaleReceipt(_codePage, sale.Items, sale.Subtotal, sale.Discount, sale.Total,
+                sale.DiscountName, sale.DocumentNumber, sale.WarehouseName, sale.SellerName, sale.SaleDate,
+                queueNumber));
+            SetStatus(PrinterStatus.Ready);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Kitchen order print error: {ex.Message}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -248,7 +326,10 @@ public class EscPosPrinterService : IPrinterService
     private static string Truncate(string s, int width)
         => s.Length <= width ? s : s.Substring(0, width);
 
-    private async Task SendAsync(byte[] data)
+    /// <summary>protected virtual, а не private: иначе маршрутизацию документов по
+    /// ролям нельзя проверить, не открыв сокет. Боевой код это не меняет — ветки
+    /// транспорта остаются здесь же, ниже.</summary>
+    protected virtual async Task SendAsync(byte[] data)
     {
         switch (_connectionType)
         {

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Кухня</title>
+    <script>
+        // Тот же приём, что у табло (board.html) — секрет из адреса страницы
+        // оседает в localStorage и дальше подставляется и в ссылку на стиль,
+        // и в адрес вебсокета, и в каждый POST на смену состояния.
+        const fromUrl = new URLSearchParams(location.search).get('secret');
+        if (fromUrl) localStorage.setItem('secret', fromUrl);
+        const secret = localStorage.getItem('secret') || '';
+        document.write(`<link rel="stylesheet" href="theme.css?secret=${encodeURIComponent(secret)}">`);
+    </script>
+</head>
+<body>
+<div id="stale" class="stale">Нет связи с кассой</div>
+<main id="orders"></main>
+
+<style>
+    main {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+        padding: 16px;
+    }
+    /* Крупно и с запасом по всем сторонам: на кухне руки мокрые и в
+       перчатках, а промах по мелкой кнопке стоит целого заказа — поэтому
+       вся карточка целиком, не только кнопка внутри неё, и есть цель тапа. */
+    article {
+        padding: 20px;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+        min-height: 200px;
+        display: flex;
+        flex-direction: column;
+        border-width: 2px;
+        transition: transform 0.1s ease-out;
+    }
+    article:active {
+        transform: scale(0.98);
+    }
+    article header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+    .number {
+        font-size: 3.5rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+    }
+    .time {
+        font-size: 1.5rem;
+    }
+    .lines {
+        list-style: none;
+        margin: 16px 0 0;
+        padding: 0;
+        font-size: 1.35rem;
+        flex: 1;
+    }
+    .lines li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border, #e2e8f0);
+    }
+    .lines li:last-child {
+        border-bottom: none;
+    }
+    .next {
+        margin-top: 16px;
+        padding: 14px;
+        text-align: center;
+        font-size: 1.4rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border-radius: var(--radius-m, 12px);
+        background: var(--primary-light, #e6f1fc);
+        color: var(--primary, #0075e2);
+    }
+    article[data-state="New"] {
+        border-color: var(--border, #e2e8f0);
+    }
+    article[data-state="InProgress"] {
+        border-color: var(--primary, #0075e2);
+    }
+    article[data-state="InProgress"] .next {
+        background: var(--primary, #0075e2);
+        color: #fff;
+    }
+    article[data-state="Ready"] {
+        border-color: var(--success, #22c55e);
+    }
+    article[data-state="Ready"] .next {
+        background: var(--success, #22c55e);
+        color: #fff;
+    }
+    /* Долгое нажатие копит подсветку кромкой цвета отмены — тот же жест,
+       что через мгновение спросит подтверждение, показан заранее, чтобы
+       случайно продержанный палец было видно и можно было отпустить раньше
+       confirm(). */
+    article.holding {
+        border-color: var(--danger, #ef4444);
+        box-shadow: inset 0 0 0 2px var(--danger, #ef4444);
+    }
+    /* Тап не засчитан сервером (401 после смены секрета, 409 при конфликте
+       состояний) — короткая вспышка кромкой того же цвета отмены, снятая
+       через flashFailed() в скрипте ниже. Transition, а не keyframes: снятие
+       класса должно плавно вернуть карточку к обычной рамке её state, а не
+       обрезаться жёстко. */
+    article.failed {
+        border-color: var(--danger, #ef4444);
+        box-shadow: inset 0 0 0 2px var(--danger, #ef4444);
+        transition: border-color 0.3s ease-out, box-shadow 0.3s ease-out;
+    }
+    .empty {
+        grid-column: 1 / -1;
+        text-align: center;
+        padding: 64px 16px;
+        font-size: 1.5rem;
+        color: var(--text-muted, #94a3b8);
+    }
+</style>
+
+<script>
+    const NEXT = { New: 'InProgress', InProgress: 'Ready', Ready: 'Closed' };
+    const LABEL = { New: 'Взять в работу', InProgress: 'Отметить готовым', Ready: 'Выдать' };
+
+    // Тело — голое имя состояния ("Ready"), не JSON: сервер
+    // (QueueServer.MapPost "/orders/{id:guid}/state") читает сырой текст
+    // запроса и сразу пробует Enum.TryParse. JSON.stringify('Ready') дал бы
+    // строку c кавычками ("Ready" целиком, включая символы " "), которую
+    // TryParse не разберёт, и любой тап тихо превращался бы в 400 — заказ
+    // оставался бы в прежнем состоянии, а кухня не поняла бы, почему.
+    //
+    // Small fix (post-review): раньше fetch() не проверял response.ok вовсе —
+    // после смены секрета на сервере (401) или конфликта состояний между двумя
+    // экранами (409) карточка просто оставалась лежать, не сдвинувшись, без
+    // единого признака, что тап не засчитан. Повар в мокрых перчатках не может
+    // прочитать консоль браузера — единственный доступный ему сигнал — сама
+    // карточка, поэтому неудачный тап теперь коротко подсвечивает её красным
+    // (тот же приём, что и .holding у отмены) вместо молчания.
+    async function move(id, to) {
+        const card = document.querySelector(`article[data-id="${id}"]`);
+        try {
+            const response = await fetch(`orders/${id}/state?secret=${encodeURIComponent(secret)}`, {
+                method: 'POST',
+                body: to
+            });
+            if (!response.ok) {
+                flashFailed(card);
+            }
+        } catch {
+            // Сеть отвалилась ровно между тапом и ответом — сокет это и так
+            // покажет баннером "Нет связи с кассой" через onclose, но карточка
+            // тоже подсвечивается: до того как баннер появится, тап не должен
+            // выглядеть так, будто он сработал.
+            flashFailed(card);
+        }
+    }
+
+    /// Коротко подсвечивает карточку кромкой цвета отмены — тот же визуальный
+    /// язык, что и .holding при долгом нажатии, но без задержки: тап не
+    /// принят, и это должно быть видно сразу, а не только по тому, что номер
+    /// не переехал в следующую колонку.
+    function flashFailed(card) {
+        if (!card) return;
+        card.classList.add('failed');
+        setTimeout(() => card.classList.remove('failed'), 700);
+    }
+
+    function formatTime(iso) {
+        return new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function escapeHtml(text) {
+        return String(text)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;');
+    }
+
+    function render(orders) {
+        // Живые — те, что кухня ещё должна видеть. Closed и Cancelled сюда
+        // не попадают и поэтому пропадают с экрана в тот же снимок, где
+        // сервер их так пометил — без отдельного "скрыть карточку" шага.
+        const live = orders
+            .filter(o => o.state === 'New' || o.state === 'InProgress' || o.state === 'Ready')
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+        const container = document.getElementById('orders');
+
+        if (live.length === 0) {
+            container.innerHTML = '<div class="empty">Заказов нет</div>';
+            return;
+        }
+
+        container.innerHTML = live.map(o => `
+            <article class="card" data-id="${o.id}" data-state="${o.state}">
+                <header>
+                    <span class="number">${o.number}</span>
+                    <span class="time muted">${formatTime(o.createdAt)}</span>
+                </header>
+                <ul class="lines">
+                    ${o.lines.map(l => `<li><span>${escapeHtml(l.name)}</span><span class="muted">${escapeHtml(l.quantity)}</span></li>`).join('')}
+                </ul>
+                <div class="next">${LABEL[o.state]}</div>
+            </article>`).join('');
+    }
+
+    // Короткий тап двигает заказ на шаг вперёд; долгое нажатие (1.2с) вместо
+    // этого спрашивает про отмену. Отмена нарочно неудобна: рукав или локоть,
+    // случайно задевший карточку, должен уметь только сдвинуть заказ вперёд
+    // (и то безопасно — на кухне это заметят по неверной колонке), но не
+    // стереть его совсем без явного, длинного и подтверждённого действия.
+    let holdTimer = null;
+    let holdCard = null;
+    let firedByHold = false;
+
+    function cancelHold() {
+        if (holdTimer) clearTimeout(holdTimer);
+        holdTimer = null;
+        if (holdCard) holdCard.classList.remove('holding');
+        holdCard = null;
+    }
+
+    document.getElementById('orders').addEventListener('pointerdown', event => {
+        const card = event.target.closest('article');
+        if (!card) return;
+        firedByHold = false;
+        holdCard = card;
+        holdTimer = setTimeout(() => {
+            firedByHold = true;
+            card.classList.remove('holding');
+            const number = card.querySelector('.number').textContent;
+            if (confirm(`Отменить заказ № ${number}?`)) {
+                move(card.dataset.id, 'Cancelled');
+            }
+        }, 1200);
+        // Небольшая задержка перед подсветкой кромки — короткий тап не
+        // должен успеть мигнуть красным по пути к обычному переходу.
+        setTimeout(() => {
+            if (holdCard === card && holdTimer) card.classList.add('holding');
+        }, 300);
+    });
+
+    document.getElementById('orders').addEventListener('pointerup', event => {
+        const card = event.target.closest('article');
+        cancelHold();
+        if (!card || firedByHold) return;
+        move(card.dataset.id, NEXT[card.dataset.state]);
+    });
+
+    // Палец увели с карточки (обычный жест скролла или промах) — долгое
+    // нажатие не должно засчитаться и тем более не должно после этого
+    // сработать как обычный тап.
+    document.getElementById('orders').addEventListener('pointerleave', event => {
+        if (event.target.closest('article') === holdCard) cancelHold();
+    }, true);
+    document.getElementById('orders').addEventListener('pointercancel', cancelHold);
+
+    let delay = 500;
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+    function connect() {
+        const socket = new WebSocket(
+            `${wsProtocol}//${location.host}/ws?secret=${encodeURIComponent(secret)}`);
+
+        socket.onopen = () => {
+            delay = 500;
+            document.getElementById('stale').hidden = true;
+        };
+        socket.onmessage = event => render(JSON.parse(event.data));
+        socket.onclose = () => {
+            document.getElementById('stale').hidden = false;
+            setTimeout(connect, delay);
+            delay = Math.min(delay * 2, 15000);
+        };
+    }
+
+    connect();
+</script>
+</body>
+</html>

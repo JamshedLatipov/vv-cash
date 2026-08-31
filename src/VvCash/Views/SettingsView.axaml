@@ -217,7 +217,7 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
-                                        <Grid ColumnDefinitions="*, *, *, Auto, Auto" RowDefinitions="Auto, Auto, Auto">
+                                        <Grid ColumnDefinitions="*, *, *, Auto, Auto" RowDefinitions="Auto, Auto, Auto, Auto">
                                             <!-- Labels row -->
                                             <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [Name], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
                                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [Type], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
@@ -264,6 +264,14 @@
                                                     </StackPanel>
                                                 </Button>
                                             </StackPanel>
+                                            <!-- Роли принтера: какие документы на него уходят. Тремя
+                                                 независимыми галками, а не одной ComboBox — принтер обычно
+                                                 держит больше одной роли (например, чек и бегунок сразу). -->
+                                            <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0" VerticalAlignment="Center">
+                                                <CheckBox Content="{Binding [PrintsReceipt], Source={x:Static services:I18nService.Instance}}" IsChecked="{Binding PrintsReceipt, Mode=TwoWay}"/>
+                                                <CheckBox Content="{Binding [PrintsTicket], Source={x:Static services:I18nService.Instance}}" IsChecked="{Binding PrintsTicket, Mode=TwoWay}"/>
+                                                <CheckBox Content="{Binding [PrintsKitchenOrder], Source={x:Static services:I18nService.Instance}}" IsChecked="{Binding PrintsKitchenOrder, Mode=TwoWay}"/>
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -294,6 +302,84 @@
                                     </StackPanel>
                                 </Button>
                             </Grid>
+                        </Border>
+
+                        <!-- Очередь заказов и кухня (Task 24). Роль и номер кассы видны
+                             всегда — номер кассы решает, из какого диапазона пула номеров
+                             продаёт эта касса, и это касается и сервера тоже (он тоже
+                             продаёт), поэтому поле не спрятано за условием роли. Адрес
+                             сервера имеет смысл только у клиента; порт и секрет — только
+                             у сервера (см. SettingsViewModel.IsQueueClientFieldsVisible /
+                             IsQueueServerFieldsVisible). -->
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,24,0,12">
+                            <material:MaterialIcon Kind="ServerNetwork" Width="24" Height="24" Foreground="{StaticResource Slate700Brush}"/>
+                            <TextBlock Text="{Binding [QueueSettings], Source={x:Static services:I18nService.Instance}}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Slate800Brush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Fix 5: смена секрета/порта/роли на работающей кассе не
+                             подхватывается на лету — Kestrel уже поднят со старыми
+                             значениями, а свой же клиент этой кассы (loopback) начал бы
+                             слать новый секрет серверу, который всё ещё требует старый.
+                             Дешёвая и честная защита — сказать об этом там, где значение
+                             правят, а не чинить перезапуск сервера в этой задаче. -->
+                        <TextBlock Text="{Binding [QueueRestartNotice], Source={x:Static services:I18nService.Instance}}"
+                                   FontSize="12" Foreground="{StaticResource Slate500Brush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                        <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12">
+                            <StackPanel Spacing="12">
+                                <Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [QueueRole], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <!-- Номер кассы — её класс вычетов в пуле номеров очереди.
+                                         Виден всегда, не только у клиента: сервер тоже продаёт и
+                                         тоже выдаёт номера из своего диапазона. Две кассы с
+                                         одинаковым номером начнут выдавать покупателям
+                                         одинаковые номера. -->
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [TillNumber], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+
+                                    <ComboBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding QueueRoles}" SelectedItem="{Binding QueueRole, Mode=TwoWay}" Classes="PrinterCombo" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding TillIndexText, Mode=TwoWay}" Classes="PrinterInput"/>
+                                </Grid>
+
+                                <StackPanel IsVisible="{Binding IsQueueClientFieldsVisible}">
+                                    <TextBlock Text="{Binding [QueueServerAddress], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding QueueServerAddress, Mode=TwoWay}" Classes="PrinterInput" Watermark="{Binding [QueueServerAddressWatermark], Source={x:Static services:I18nService.Instance}}"/>
+                                </StackPanel>
+
+                                <Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto" IsVisible="{Binding IsQueueServerFieldsVisible}">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [QueuePort], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [QueueSecret], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+
+                                    <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding QueuePortText, Mode=TwoWay}" Classes="PrinterInput" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding QueueSecret, Mode=TwoWay}" Classes="PrinterInput" PasswordChar="•"/>
+                                </Grid>
+
+                                <!-- Fix 4: причина, по которой сервер очереди этой кассы не
+                                     поднялся (QueueServer.LastError) — занятый порт, пустой
+                                     секрет. Спека дважды обещает, что этот экран её покажет;
+                                     до этой правки LastError не читался нигде вне комментария,
+                                     и касса в этом состоянии видела бы только то, что /kds и
+                                     /board не грузятся, без единого слова о причине. -->
+                                <Border IsVisible="{Binding HasQueueServerError}" Background="#FEF2F2" BorderBrush="#FCA5A5" BorderThickness="1"
+                                        CornerRadius="8" Padding="10,8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <material:MaterialIcon Kind="AlertCircleOutline" Width="18" Height="18" Foreground="#B91C1C" VerticalAlignment="Top" Margin="0,2,0,0"/>
+                                        <TextBlock Text="{Binding QueueServerError}" Foreground="#B91C1C" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Fix 4, вторая половина: 401-ответ сервера очереди отсылает
+                                     за ссылкой "в настройки очереди на кассе-сервере", а самого
+                                     поля со ссылкой на этом экране не было — некому было
+                                     скопировать адрес и открыть его на телевизоре или планшете
+                                     зала/кухни. IsReadOnly, не TextBlock: ссылку нужно выделить
+                                     и скопировать, а не перепечатать вручную вместе с секретом. -->
+                                <StackPanel IsVisible="{Binding HasQueueScreenLinks}" Spacing="6">
+                                    <TextBlock Text="{Binding [QueueBoardLink], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}"/>
+                                    <TextBox Text="{Binding BoardUrl}" IsReadOnly="True" Classes="PrinterInput"/>
+                                    <TextBlock Text="{Binding [QueueKdsLink], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,4,0,0"/>
+                                    <TextBox Text="{Binding KdsUrl}" IsReadOnly="True" Classes="PrinterInput"/>
+                                </StackPanel>
+                            </StackPanel>
                         </Border>
 
                         <!-- Тот же баннер, что и внизу экрана, у той же пары свойств —

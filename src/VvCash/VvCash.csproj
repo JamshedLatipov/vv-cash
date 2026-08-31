@@ -41,7 +41,28 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Kestrel для локального сервера очереди. Publish self-contained, значит
+         рантайм ASP.NET Core уезжает внутрь сборки: +27,9 МБ на win-x64 и
+         +26,2 МБ на win-x86, со 113 до 141 МБ — измерено сравнением публикаций
+         до и после, а не оценкой. Это цена каждого автообновления на каждой
+         кассе, и она принята сознательно: HttpListener из BCL не весит ничего,
+         но требует netsh http add urlacl под конкретный порт при установке, а
+         смена порта в настройках после этого молча перестаёт работать. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Экраны очереди едут внутри сборки, а не файлами рядом с exe: иначе
+         автообновление разъедется с кодом, и на точке после обновления
+         останется вчерашняя страница поверх сегодняшнего QueueServer.
+         Assets/Web/* уже накрыт AvaloniaResource выше (Assets/**) — это не
+         конфликт: AvaloniaResource и EmbeddedResource это два независимых
+         списка элементов сборки с разными типами, один даёт avares://,
+         другой — Assembly.GetManifestResourceStream, файл спокойно состоит
+         в обоих. -->
+    <EmbeddedResource Include="Assets/Web/*" />
   </ItemGroup>
   <ItemGroup>
     <!-- Lets VvCash.Tests reach CompositePrinterService.Printers, the read-only

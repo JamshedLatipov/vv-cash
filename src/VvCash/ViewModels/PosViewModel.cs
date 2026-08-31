@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -17,6 +18,7 @@ using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Discounts;
 using VvCash.Services.Hardware;
+using VvCash.Services.Queue;
 using VvCash.Services.Update;
 
 namespace VvCash.ViewModels;
@@ -78,6 +80,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly ISellerRosterService _rosterService;
     private readonly IAuthService _authService;
     private readonly ICashFeatureService _features;
+
+    /// <summary>Постановка заказа в очередь (Task 22). Nullable: кассу можно собрать вовсе
+    /// без очереди (см. IQueueClient docstring — тот же принцип, что и у остальных
+    /// hardware-заглушек этого класса). Не IDisposable и ничего не подписывает, так что
+    /// Dispose() этого класса ему ничего не должен — в отличие от _printerService и
+    /// остальных полей выше, которых Dispose() ниже явно отписывает.</summary>
+    private readonly IQueueClient? _queueClient;
+
+    /// <summary>Important 3/9 fix: whether a number is needed and whether the order goes
+    /// into the outbox are two different questions, and this is what answers the second
+    /// one (see ProceedToPayAsync's own remarks at the call site for the first).
+    /// Nullable for the same reason _queueClient is — a register can be built without a
+    /// queue at all — and a null value reads the same as QueueRole.Off: no settings, no
+    /// network queue to speak of.</summary>
+    private readonly IQueueSettings? _queueSettings;
     private CancellationTokenSource? _syncCancellationTokenSource;
     private System.Threading.CancellationTokenSource? _quoteCts;
     private CancellationTokenSource? _searchCts;
@@ -129,6 +146,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private int _unsyncedDocumentsCount;
 
     public bool HasUnsyncedDocuments => UnsyncedDocumentsCount > 0;
+
+    /// <summary>Task 25: заказов в исходящем буфере очереди этой кассы —
+    /// поставлены, но ещё не подтверждены соседней кассой-сервером.
+    /// Отдельный счётчик от UnsyncedDocumentsCount выше, не сложенный с ним:
+    /// не дошедший до бэкенда чек и не дошедший до соседней кассы заказ чинят
+    /// разные люди разными действиями (см. IQueueClient.PendingCountAsync),
+    /// и один номер над обоими отправил бы кассира не туда.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPendingQueueOrders))]
+    private int _pendingQueueOrdersCount;
+
+    public bool HasPendingQueueOrders => PendingQueueOrdersCount > 0;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasParkedSales))]
@@ -838,7 +867,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ISellerRosterService rosterService,
         IAuthService authService,
         ICashFeatureService features,
-        UpdateViewModel update)
+        UpdateViewModel update,
+        IQueueClient? queueClient = null,
+        IQueueSettings? queueSettings = null)
     {
         _promotionProvider = promotionProvider;
         _productService = productService;
@@ -863,6 +894,8 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _authService = authService;
         _features = features;
         Update = update;
+        _queueClient = queueClient;
+        _queueSettings = queueSettings;
 
         OpenCustomerRegistrationCommand = new AsyncRelayCommand(OpenCustomerRegistration);
         CloseApplicationCommand = new RelayCommand(CloseApplication);
@@ -932,6 +965,17 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                 // Ping the server every 10 seconds to update IsSystemOnline status
                 await _syncService.CheckSystemOnlineAsync();
 
+                // Task 25: same 10-second tick keeps the outbox badge current. This is a
+                // local SQLite count, not a network call — QueueFlushLoop (App.axaml.cs)
+                // is what actually drains the buffer on its own 15-second timer; this only
+                // re-reads what is left in it, so the cashier's badge does not lag behind
+                // a flush that happened to land between two ticks here.
+                if (_queueClient != null)
+                {
+                    var pendingCount = await _queueClient.PendingCountAsync();
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => PendingQueueOrdersCount = pendingCount);
+                }
+
                 int intervalMinutes = _settingsService.SyncIntervalMinutes;
                 if (intervalMinutes <= 0) intervalMinutes = 10;
 
@@ -995,6 +1039,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
         _expenseDocumentService.UnsyncedDocumentsCountChanged += OnUnsyncedDocumentsCountChanged;
         UnsyncedDocumentsCount = await _expenseDocumentService.GetUnsyncedDocumentsCountAsync();
+
+        // Task 25: initial read of the queue outbox count. _queueClient has no
+        // count-changed event to subscribe to (unlike _expenseDocumentService above) —
+        // StartBackgroundSync's own loop keeps this current afterwards, on the same
+        // 10-second cadence it already polls IsSystemOnline on.
+        if (_queueClient != null)
+        {
+            PendingQueueOrdersCount = await _queueClient.PendingCountAsync();
+        }
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
         _shiftService.SessionRevoked += OnShiftSessionRevoked;
@@ -2324,6 +2377,102 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             warehouseName: null,
                             sellerName: _sellerSession.Current?.FullName,
                             saleDate: DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
+
+                        // Task 22 (Important 3/9 review round): постановка в очередь и
+                        // печать талона/бегунка — два разных вопроса, которые раньше
+                        // отвечал один and-less булев флаг, и это было неверно с обеих
+                        // сторон:
+                        //
+                        //  - QueueRole.Off + талонный принтер — конфигурация, которую
+                        //    комментарии в этом же коде называют половиной парка — со
+                        //    старым флагом ставила заказ в исходящий буфер на каждой
+                        //    продаже. Транспорт отвечал Unreachable (адрес сервера пуст),
+                        //    а QueueFlushLoop при Off вообще не запускается (см.
+                        //    App.axaml.cs) — значок недоставленного рос на единицу с
+                        //    каждой продажей и не убывал никогда.
+                        //  - Кухонный экран без кухонного принтера — конфигурация, которую
+                        //    спека называет явно, — со старым флагом не заводила заказ
+                        //    вовсе: ни один принтер не держит Ticket/KitchenOrder, значит
+                        //    флаг был false, и экран кухни молча пустовал.
+                        //
+                        // Отсюда два разных условия. Номер нужен, когда есть на чём его
+                        // напечатать (талонный или кухонный принтер) ИЛИ когда сетевая
+                        // очередь включена (табло/KDS должны увидеть заказ, даже если на
+                        // самой кассе печатать его нечем). В буфер и на сервер заказ уходит
+                        // ТОЛЬКО когда очередь включена — печать по отдельному номеру
+                        // (IssueNumberAsync) не создаёт заказ и не трогает буфер, потому что
+                        // при Off его всё равно некому доставить и некому вычистить оттуда.
+                        var queueRoleOn = _queueSettings != null && _queueSettings.QueueRole != QueueRole.Off;
+                        var hasPrinterForQueueNumber = _settingsService.Printers.Any(p => p.IsEnabled
+                            && (p.Roles.HasFlag(PrintRole.Ticket) || p.Roles.HasFlag(PrintRole.KitchenOrder)));
+                        var needsQueueNumber = hasPrinterForQueueNumber || queueRoleOn;
+
+                        if (needsQueueNumber && _queueClient is not null)
+                        {
+                            // Строго после PrintReceiptAsync и строго до ClearCart():
+                            // бегунку нужны строки корзины, а после ClearCart() их уже нет.
+                            // Копия (.ToList()), а не живой _cartService.Items, по той же
+                            // причине — не держать ссылку на список, который ClearCart()
+                            // ниже опустошит.
+                            var queueSale = new SaleReceiptData(
+                                _cartService.Items.ToList(),
+                                Subtotal, TotalDiscount, TotalAmount,
+                                _cartService.AppliedDiscountName,
+                                outcome.DocumentNumber,
+                                null,
+                                _sellerSession.Current?.FullName,
+                                DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
+
+                            int? queueNumberValue;
+                            string queueNumberTime;
+                            if (queueRoleOn)
+                            {
+                                // Очередь включена: заказ должен доехать до сервера, чтобы
+                                // его увидели KDS и табло — даже если на этой кассе печатать
+                                // талон/бегунок нечем (тот самый случай "кухонный экран без
+                                // кухонного принтера").
+                                var queueOrder = await _queueClient.EnqueueAsync(queueSale);
+                                queueNumberValue = queueOrder?.Number;
+                                queueNumberTime = queueOrder?.CreatedAt.ToString("HH:mm") ?? DateTime.Now.ToString("HH:mm");
+                            }
+                            else
+                            {
+                                // Очередь выключена: серверу этот заказ показать некому, так
+                                // что не создаём его вовсе — только номер для бумаги.
+                                queueNumberValue = await _queueClient.IssueNumberAsync();
+                                queueNumberTime = DateTime.Now.ToString("HH:mm");
+                            }
+
+                            // Null только тогда, когда не удалось получить сам номер (см.
+                            // IQueueClient docstring) — печатать талон и бегунок тогда
+                            // нечем: талон без номера хуже, чем его отсутствие, а бегунок
+                            // без номера теряет смысл, ради которого его вообще заводили.
+                            // Чек клиенту уже напечатан строкой выше и от этого никак не
+                            // зависит. Принтеры сами отфильтруют себя по роли
+                            // (CompositePrinterService), так что вызывать их безопасно и
+                            // тогда, когда ни один принтер не держит Ticket/KitchenOrder —
+                            // именно так заказ доезжает до KDS без бумаги на этой кассе.
+                            if (queueNumberValue != null)
+                            {
+                                var queueNumber = queueNumberValue.Value.ToString(CultureInfo.InvariantCulture);
+                                await _printerService.PrintTicketAsync(
+                                    queueNumber,
+                                    time: queueNumberTime,
+                                    warehouseName: null);
+                                await _printerService.PrintKitchenOrderAsync(queueSale, queueNumber);
+                            }
+
+                            // Immediate feedback rather than waiting for the next 10-second
+                            // background tick (see StartBackgroundSync): EnqueueAsync above
+                            // just wrote to (and may have already drained) the outbox, and
+                            // this runs on the UI thread already, so there is no dispatcher
+                            // hop needed the way that background poll requires. Safe to call
+                            // even on the Off/IssueNumberAsync branch above, which never
+                            // touches the outbox — it will simply read back whatever was
+                            // already there.
+                            PendingQueueOrdersCount = await _queueClient.PendingCountAsync();
+                        }
+
                         _cartService.ClearCart();
                         _cartService.ClearCustomerDiscount();
                         SelectedCustomer = null;

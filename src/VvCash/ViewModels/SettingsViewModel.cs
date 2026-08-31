@@ -12,6 +12,7 @@ using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
 using VvCash.Services.Hardware;
+using VvCash.Services.Queue;
 
 namespace VvCash.ViewModels;
 
@@ -41,6 +42,34 @@ public partial class PrinterConfigViewModel : ObservableObject
     /// значения не нашлось в ItemsSource.</summary>
     [ObservableProperty]
     private EscPosCodePage? _selectedCodePage = EscPosCodePages.Default;
+
+    /// <summary>Роли держатся набором флагов, а на экране — тремя независимыми
+    /// галками: «печатает чеки и бегунки» это обычная настройка, а не исключение.
+    /// Хранить их тремя bool и собирать флаги на сохранении было бы вторым
+    /// источником правды — здесь один, а галки его проекции.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PrintsReceipt))]
+    [NotifyPropertyChangedFor(nameof(PrintsTicket))]
+    [NotifyPropertyChangedFor(nameof(PrintsKitchenOrder))]
+    private PrintRole _roles = PrintRole.Receipt;
+
+    public bool PrintsReceipt
+    {
+        get => Roles.HasFlag(PrintRole.Receipt);
+        set => Roles = value ? Roles | PrintRole.Receipt : Roles & ~PrintRole.Receipt;
+    }
+
+    public bool PrintsTicket
+    {
+        get => Roles.HasFlag(PrintRole.Ticket);
+        set => Roles = value ? Roles | PrintRole.Ticket : Roles & ~PrintRole.Ticket;
+    }
+
+    public bool PrintsKitchenOrder
+    {
+        get => Roles.HasFlag(PrintRole.KitchenOrder);
+        set => Roles = value ? Roles | PrintRole.KitchenOrder : Roles & ~PrintRole.KitchenOrder;
+    }
 
     public ObservableCollection<string> AvailableConnections { get; } = new();
 
@@ -164,6 +193,92 @@ public partial class SettingsViewModel : ViewModelBase
 
     public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
 
+    /// <summary>Task 24: пять настроек очереди заказов и кухни (см.
+    /// IQueueSettings). Читаются/пишутся через приведение _settingsService к
+    /// IQueueSettings, которую та же SettingsService реализует наравне с
+    /// ISettingsService — тем же приёмом, что App.axaml.cs использует для
+    /// NumberPool/QueueServer, а не через второй впрыснутый сервис.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsQueueServerFieldsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsQueueClientFieldsVisible))]
+    private QueueRole _queueRole = QueueRole.Off;
+
+    /// <summary>Значения роли для ComboBox — как ConnectionTypes у принтера
+    /// чуть выше: без DisplayMemberBinding, так что на экране это те же
+    /// "Off"/"Server"/"Client", что и в самом enum (тот же нелокализованный
+    /// приём, что и у ConnectionTypes).</summary>
+    public Array QueueRoles => Enum.GetValues(typeof(QueueRole));
+
+    /// <summary>Порт и секрет сервера очереди видны только тогда, когда эта
+    /// касса сама назначена сервером: клиенту нечего слушать, и показывать
+    /// эти поля значило бы предлагать настроить порт, который эта касса
+    /// никогда не откроет (см. QueueServer.StartAsync).</summary>
+    public bool IsQueueServerFieldsVisible => QueueRole == QueueRole.Server;
+
+    /// <summary>Адрес кассы-сервера имеет смысл только у клиента — сервер
+    /// сам себя по этому адресу не набирает (см. App.axaml.cs: сервер ходит
+    /// к себе по 127.0.0.1, минуя QueueServerAddress вовсе).</summary>
+    public bool IsQueueClientFieldsVisible => QueueRole == QueueRole.Client;
+
+    [ObservableProperty]
+    private string _queueServerAddress = string.Empty;
+
+    /// <summary>Строкой, а не int — тот же приём, что SyncIntervalText и
+    /// CustomerDisplayBaudRateText выше: TextBox с частично набранным числом
+    /// не должен ронять привязку.</summary>
+    [ObservableProperty]
+    private string _queuePortText = SettingsData.DefaultQueuePort.ToString();
+
+    [ObservableProperty]
+    private string _queueSecret = string.Empty;
+
+    /// <summary>Номер этой кассы в пуле номеров очереди (см.
+    /// IQueueSettings.TillIndex) — строкой по той же причине, что и
+    /// QueuePortText выше. Виден на экране ВСЕГДА, а не только у клиента:
+    /// сервер тоже продаёт и тоже выдаёт номера из своего диапазона (класс
+    /// вычетов Number % NumberPool.Tills). Две кассы с одинаковым номером
+    /// начнут выдавать покупателям одинаковые номера — по этой же причине
+    /// IQueueSettings.TillIndex зажимает его в 0..NumberPool.Tills-1, а не
+    /// принимает как есть.</summary>
+    [ObservableProperty]
+    private string _tillIndexText = "0";
+
+    /// <summary>Fix 4: причина, по которой сервер очереди этой кассы не поднялся —
+    /// занятый порт, пустой секрет. QueueServer.LastError уже нёс её, но экран
+    /// настроек нигде её не читал, хотя спека дважды обещает, что он её покажет —
+    /// касса в этом состоянии видела бы, что /kds и /board просто не грузятся, без
+    /// единого слова о причине. Приходит готовой строкой через конструктор, а не
+    /// вычисляется здесь: единственный живой QueueServer создаётся один раз в
+    /// App.axaml.cs (см. его remarks про время жизни поля) и не виден отсюда
+    /// никаким другим путём, а плодить второй впрыснутый сервис ради одного
+    /// строкового поля — то, чего Task 24 уже избежал приведением к
+    /// IQueueSettings чуть выше. Null, когда эта касса не Server вовсе (сервер и
+    /// не пытался стартовать) или когда последняя попытка была успешной.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasQueueServerError))]
+    private string _queueServerError = string.Empty;
+
+    public bool HasQueueServerError => !string.IsNullOrWhiteSpace(QueueServerError);
+
+    /// <summary>Fix 4, вторая половина: 401-ответ сервера очереди отсылает за
+    /// ссылкой "в настройки очереди на кассе-сервере" (см. QueueServer —
+    /// сообщение при отсутствующем секрете), а самого поля со ссылкой там не
+    /// было. Строится один раз в конструкторе из того, что реально сохранено в
+    /// настройках (QueuePort/QueueSecret), а не из QueuePortText/QueueSecret —
+    /// тех самых полей на экране, которые можно тут же начать редактировать: Fix 5
+    /// объясняет, почему это разные вещи — запущенный сейчас Kestrel слушает
+    /// СТАРЫЙ порт и требует СТАРЫЙ секрет до перезапуска, и ссылка обязана вести
+    /// туда, куда реально можно достучаться прямо сейчас, а не туда, что
+    /// оператор только что напечатал и ещё не сохранил. Пусто, если роль этой
+    /// кассы не Server (тогда сервер здесь не поднимается вовсе — нечего
+    /// показывать) или секрет пуст (StartAsync в этом случае и не открывает
+    /// порт — см. его remarks, ссылка была бы ссылкой в никуда).</summary>
+    public string BoardUrl { get; private set; } = string.Empty;
+
+    public string KdsUrl { get; private set; } = string.Empty;
+
+    public bool HasQueueScreenLinks => !string.IsNullOrEmpty(BoardUrl);
+
     /// <summary>Payment categories offered for the exchange payout, loaded from
     /// GET /documents/payment/categories/. Empty when the register is offline or the
     /// role lacks documents.PaymentCategoryList — in which case the previously saved id
@@ -210,7 +325,15 @@ public partial class SettingsViewModel : ViewModelBase
 
     public SettingsViewModel(ViewModelBase previousViewModel, ISettingsService settingsService,
         IOfflineStorageService offlineStorageService, ICashFeatureService features,
-        IPaymentCategoryService? paymentCategories = null)
+        IPaymentCategoryService? paymentCategories = null,
+        // Fix 4: см. remarks на QueueServerError выше для того, откуда это
+        // берётся и почему параметром, а не вторым сервисом.
+        string? queueServerError = null,
+        // Тестовый шов для BoardUrl/KdsUrl ниже — production-код (App.axaml.cs) не
+        // передаёт его и получает DefaultLocalNetworkAddress без изменений; тесты
+        // подставляют фиксированный хост, чтобы не зависеть от того, какие сетевые
+        // интерфейсы подняты на машине, где они выполняются.
+        Func<string>? localNetworkAddress = null)
     {
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
@@ -242,6 +365,31 @@ public partial class SettingsViewModel : ViewModelBase
         if (!string.IsNullOrWhiteSpace(CustomerDisplayPort) && !AvailableDisplayPorts.Contains(CustomerDisplayPort))
             AvailableDisplayPorts.Add(CustomerDisplayPort);
 
+        // Task 24: cast rather than a second injected service — see this block's own
+        // class-level remarks just above the properties it fills in.
+        if (_settingsService is IQueueSettings queueSettings)
+        {
+            QueueRole = queueSettings.QueueRole;
+            QueueServerAddress = queueSettings.QueueServerAddress;
+            QueuePortText = queueSettings.QueuePort.ToString();
+            QueueSecret = queueSettings.QueueSecret;
+            TillIndexText = queueSettings.TillIndex.ToString();
+
+            QueueServerError = queueServerError ?? string.Empty;
+
+            // Только для Server и только с непустым секретом — те же два условия,
+            // под которыми QueueServer.StartAsync вообще открывает порт (см. его
+            // remarks). Из QueuePort/QueueSecret настроек, а не из QueuePortText/
+            // QueueSecret на экране — см. remarks на BoardUrl выше.
+            if (queueSettings.QueueRole == QueueRole.Server && !string.IsNullOrWhiteSpace(queueSettings.QueueSecret))
+            {
+                var host = (localNetworkAddress ?? DefaultLocalNetworkAddress)();
+                var secret = Uri.EscapeDataString(queueSettings.QueueSecret);
+                BoardUrl = $"http://{host}:{queueSettings.QueuePort}/board?secret={secret}";
+                KdsUrl = $"http://{host}:{queueSettings.QueuePort}/kds?secret={secret}";
+            }
+        }
+
         foreach (var printer in _settingsService.Printers)
         {
             var vm = new PrinterConfigViewModel
@@ -250,13 +398,55 @@ public partial class SettingsViewModel : ViewModelBase
                 ConnectionType = printer.ConnectionType,
                 ConnectionString = printer.ConnectionString,
                 IsEnabled = printer.IsEnabled,
-                SelectedCodePage = EscPosCodePages.Resolve(printer.CodePageId)
+                SelectedCodePage = EscPosCodePages.Resolve(printer.CodePageId),
+                Roles = printer.Roles
             };
             vm.UpdateAvailableConnections();
             Printers.Add(vm);
         }
 
         _ = LoadPaymentCategoriesAsync();
+    }
+
+    /// <summary>Fix 4: наилучший вариант LAN-адреса этой машины для ссылок
+    /// BoardUrl/KdsUrl — телевизору или планшету другого устройства нечем
+    /// достучаться до localhost/127.0.0.1 этой кассы, ему нужен адрес в
+    /// локальной сети точки. Первый не loopback, рабочий (Up) IPv4-адрес —
+    /// тот же практический выбор, которым точку обычно и описывают в
+    /// инструкции (одна активная сеть на месте продаж); адреса
+    /// автоконфигурации (169.254.x.x — сеть не поднялась вовсе) пропускаются,
+    /// поскольку такой адрес недостижим ни для кого другого на точке.
+    /// "localhost", если подходящего адреса не нашлось или перечисление
+    /// интерфейсов само упало (редко, но бывает на части виртуалок) — хуже,
+    /// чем настоящий LAN-адрес, но лучше, чем пустая ссылка или упавший экран
+    /// настроек.</summary>
+    internal static string DefaultLocalNetworkAddress()
+    {
+        try
+        {
+            foreach (var ni in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                if (ni.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
+
+                foreach (var addr in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (addr.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                    if (System.Net.IPAddress.IsLoopback(addr.Address)) continue;
+
+                    var bytes = addr.Address.GetAddressBytes();
+                    if (bytes[0] == 169 && bytes[1] == 254) continue; // APIPA
+
+                    return addr.Address.ToString();
+                }
+            }
+        }
+        catch
+        {
+            // Сбой перечисления интерфейсов не должен ронять экран настроек ради
+            // одной удобной ссылки — см. remarks выше.
+        }
+        return "localhost";
     }
 
     private async Task LoadPaymentCategoriesAsync()
@@ -503,6 +693,26 @@ public partial class SettingsViewModel : ViewModelBase
         if (SelectedDisplayCodePage != null)
             _settingsService.CustomerDisplayCodePageId = SelectedDisplayCodePage.Id;
 
+        // Task 24: same cast as the constructor above.
+        if (_settingsService is IQueueSettings queueSettings)
+        {
+            queueSettings.QueueRole = QueueRole;
+            queueSettings.QueueServerAddress = QueueServerAddress;
+            // Пропуск записи при нечитаемом вводе — тот же приём, что и у
+            // SyncIntervalText/CustomerDisplayBaudRateText выше, но без их
+            // отката к дефолту: SettingsService.QueuePort уже сам подменяет
+            // 0 и отрицательное на DefaultQueuePort (см. его геттер), так
+            // что откатывать здесь ещё раз нечего.
+            if (int.TryParse(QueuePortText, out var queuePort) && queuePort > 0)
+                queueSettings.QueuePort = queuePort;
+            queueSettings.QueueSecret = QueueSecret;
+            // Не зажимается здесь — IQueueSettings.TillIndex зажимает сам на
+            // чтении (0..NumberPool.Tills-1), так что записывать можно как
+            // распарсилось.
+            if (int.TryParse(TillIndexText, out var tillIndex))
+                queueSettings.TillIndex = tillIndex;
+        }
+
         // Only when the list actually loaded: an offline settings visit shows an empty
         // dropdown and a null selection, and writing that through would silently
         // disable exchanges on a register that was configured correctly.
@@ -526,7 +736,8 @@ public partial class SettingsViewModel : ViewModelBase
             // и цена промаха здесь несравнима — откат на CP866 это ровно то, что
             // Resolve и так отдаёт ненастроенному принтеру, тогда как пустой формат
             // телефона молча применил бы чужой код страны к настоящим номерам.
-            CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id
+            CodePageId = (p.SelectedCodePage ?? EscPosCodePages.Default).Id,
+            Roles = p.Roles
         }).ToList();
 
         _settingsService.Save();

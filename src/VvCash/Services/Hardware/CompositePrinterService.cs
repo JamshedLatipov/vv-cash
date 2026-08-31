@@ -26,6 +26,8 @@ public class CompositePrinterService : IPrinterService
     /// достигается на UI-потоке, но это свойство четырёх чужих файлов, а не этого.</summary>
     private readonly object _rebuildGate = new();
 
+    private readonly Func<PrinterConfig, EscPosPrinterService> _factory;
+
     private PrinterStatus _overallStatus = PrinterStatus.Ready;
 
     public PrinterStatus Status => _overallStatus;
@@ -36,9 +38,16 @@ public class CompositePrinterService : IPrinterService
     /// покрывается ничем, и её пропажу ловил бы только grep.</summary>
     internal IReadOnlyList<EscPosPrinterService> Printers => _printers;
 
-    public CompositePrinterService(ISettingsService settingsService)
+    /// <summary>Фабрика существует ради проверки маршрутизации: без неё состав
+    /// принтеров создаётся внутри и подменить его нечем. По умолчанию — обычное
+    /// создание, боевой путь тот же, что был.</summary>
+    public CompositePrinterService(ISettingsService settingsService,
+        Func<PrinterConfig, EscPosPrinterService>? printerFactory = null)
     {
         _settingsService = settingsService;
+        _factory = printerFactory ?? (config => new EscPosPrinterService(
+            config.ConnectionType, config.ConnectionString,
+            EscPosCodePages.Resolve(config.CodePageId), config.Roles));
         _settingsService.SettingsChanged += OnSettingsChanged;
         InitializePrinters();
     }
@@ -74,8 +83,7 @@ public class CompositePrinterService : IPrinterService
             {
                 foreach (var config in configs)
                 {
-                    var printer = new EscPosPrinterService(config.ConnectionType, config.ConnectionString,
-                        EscPosCodePages.Resolve(config.CodePageId));
+                    var printer = _factory(config);
                     printer.StatusChanged += OnPrinterStatusChanged;
                     rebuilt.Add(printer);
                 }
@@ -138,10 +146,26 @@ public class CompositePrinterService : IPrinterService
         }
     }
 
+    /// <summary>Состав под конкретный документ. Пустой список означает «на этой
+    /// точке такой документ не печатают» — законная настройка, поэтому вызывающие
+    /// возвращают false, а не бросают.</summary>
+    private IReadOnlyList<EscPosPrinterService> For(PrintRole role)
+        => _printers.Where(p => p.Roles.HasFlag(role)).ToList();
+
+    /// <summary>Предчек, дёрг ящика, возврат и обмен не размечены ролью — на них
+    /// работает тот же аппарат, что и на чеке, — но None обязан всё равно их
+    /// гасить: PrinterConfig.Roles документирует None как способ выключить
+    /// принтер, не снимая его IsEnabled. Фильтр не For(PrintRole.Receipt) — точка,
+    /// где настроен только талонный принтер и ни одного чекового, тогда осталась
+    /// бы вовсе без возвратов; редкий лишний чек на кухонном аппарате — меньшая
+    /// беда, чем немой возврат.</summary>
+    private IReadOnlyList<EscPosPrinterService> AllButSilenced()
+        => _printers.Where(p => p.Roles != PrintRole.None).ToList();
+
     public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
         string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        var printers = _printers;
+        var printers = For(PrintRole.Receipt);
         if (printers.Count == 0)
         {
             return false; // Or true if we consider "no printers configured" as success?
@@ -155,9 +179,27 @@ public class CompositePrinterService : IPrinterService
         return tasks.Any(t => t.Result);
     }
 
+    public async Task<bool> PrintTicketAsync(string number, string? time = null, string? warehouseName = null)
+    {
+        var printers = For(PrintRole.Ticket);
+        if (printers.Count == 0) return false;
+        var tasks = printers.Select(p => p.PrintTicketAsync(number, time, warehouseName)).ToList();
+        await Task.WhenAll(tasks);
+        return tasks.Any(t => t.Result);
+    }
+
+    public async Task<bool> PrintKitchenOrderAsync(SaleReceiptData sale, string queueNumber)
+    {
+        var printers = For(PrintRole.KitchenOrder);
+        if (printers.Count == 0) return false;
+        var tasks = printers.Select(p => p.PrintKitchenOrderAsync(sale, queueNumber)).ToList();
+        await Task.WhenAll(tasks);
+        return tasks.Any(t => t.Result);
+    }
+
     public async Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total)
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0)
         {
             return false;
@@ -171,7 +213,7 @@ public class CompositePrinterService : IPrinterService
 
     public async Task<bool> OpenCashDrawerAsync()
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0) return false;
         var tasks = printers.Select(p => p.OpenCashDrawerAsync()).ToList();
         await Task.WhenAll(tasks);
@@ -182,7 +224,7 @@ public class CompositePrinterService : IPrinterService
         IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0) return false;
         var list = lines.ToList();
         var tasks = printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber, warehouseName, sellerName, saleDate)).ToList();
@@ -196,7 +238,7 @@ public class CompositePrinterService : IPrinterService
         decimal difference, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0) return false;
         var returnedList = returned.ToList();
         var issuedList = issued.ToList();

@@ -7,6 +7,7 @@ using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Queue;
 using VvCash.ViewModels;
 using Xunit;
 
@@ -16,7 +17,11 @@ namespace VvCash.Tests;
 /// bearer token and cash token are sent. Nothing validated it.</summary>
 public class SettingsViewModelTest
 {
-    private sealed class FakeSettings : ISettingsService
+    /// <summary>Implements IQueueSettings too, like the real SettingsService (see its
+    /// own class remarks) — Task 24's mapping tests below need a fake that round-trips
+    /// the five queue settings the same way this fake already round-trips everything
+    /// else.</summary>
+    private sealed class FakeSettings : ISettingsService, IQueueSettings
     {
         public string BackendUrl { get; set; } = string.Empty;
         public string CashRegisterToken { get; set; } = string.Empty;
@@ -33,6 +38,11 @@ public class SettingsViewModelTest
         public string CustomerDisplayPort { get; set; } = string.Empty;
         public int CustomerDisplayBaudRate { get; set; } = 9600;
         public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+        public QueueRole QueueRole { get; set; } = QueueRole.Off;
+        public string QueueServerAddress { get; set; } = string.Empty;
+        public int QueuePort { get; set; } = 8770;
+        public string QueueSecret { get; set; } = string.Empty;
+        public int TillIndex { get; set; }
         public int SaveCallCount { get; private set; }
         public event EventHandler? SettingsChanged;
         public void Save()
@@ -356,5 +366,184 @@ public class SettingsViewModelTest
 
         Assert.False(vm.HasError);
         Assert.NotEmpty(vm.StatusMessage);
+    }
+
+    // -----------------------------------------------------------------------------
+    // Task 24: the five queue settings. Bindings on SettingsView.axaml are reflective
+    // (AvaloniaUseCompiledBindingsByDefault is false), so a typo in a binding path
+    // compiles clean and only breaks on an actual register — the mapping in and out of
+    // IQueueSettings, and the two visibility flags that gate which fields show, get
+    // their coverage here instead.
+    // -----------------------------------------------------------------------------
+
+    [Fact]
+    public void Constructor_LoadsQueueSettingsFromTheService()
+    {
+        var settings = new FakeSettings
+        {
+            QueueRole = QueueRole.Client,
+            TillIndex = 2,
+            QueueServerAddress = "10.0.0.5:8770",
+            QueuePort = 9001,
+            QueueSecret = "s3cr3t"
+        };
+
+        var vm = BuildWith(settings);
+
+        Assert.Equal(QueueRole.Client, vm.QueueRole);
+        Assert.Equal("2", vm.TillIndexText);
+        Assert.Equal("10.0.0.5:8770", vm.QueueServerAddress);
+        Assert.Equal("9001", vm.QueuePortText);
+        Assert.Equal("s3cr3t", vm.QueueSecret);
+    }
+
+    [Fact]
+    public void Save_WritesQueueSettingsBackToTheService()
+    {
+        var vm = Build(out var settings);
+        // Save refuses early on an unacceptable BackendUrl (see the https tests above)
+        // — without this, none of the assignments below would ever run.
+        vm.BackendUrl = "https://api.example.test/v1/";
+        vm.QueueRole = QueueRole.Server;
+        vm.TillIndexText = "3";
+        vm.QueueServerAddress = "10.0.0.9:8770";
+        vm.QueuePortText = "9002";
+        vm.QueueSecret = "new-secret";
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal(1, settings.SaveCallCount);
+        Assert.Equal(QueueRole.Server, settings.QueueRole);
+        Assert.Equal(3, settings.TillIndex);
+        Assert.Equal("10.0.0.9:8770", settings.QueueServerAddress);
+        Assert.Equal(9002, settings.QueuePort);
+        Assert.Equal("new-secret", settings.QueueSecret);
+    }
+
+    /// <summary>Unreadable numeric input is skipped, not coerced to a default that
+    /// silently overwrites whatever was already configured — the same rule Save already
+    /// applies to SyncIntervalText and CustomerDisplayBaudRateText, extended to
+    /// QueuePortText and TillIndexText.</summary>
+    [Fact]
+    public void Save_SkipsUnreadablePortAndTillIndexRatherThanOverwriting()
+    {
+        var settings = new FakeSettings { QueuePort = 9500, TillIndex = 4 };
+        var vm = BuildWith(settings);
+        vm.BackendUrl = "https://api.example.test/v1/";
+        vm.QueuePortText = "not a number";
+        vm.TillIndexText = "not a number either";
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal(1, settings.SaveCallCount);
+        Assert.Equal(9500, settings.QueuePort);
+        Assert.Equal(4, settings.TillIndex);
+    }
+
+    [Theory]
+    [InlineData(QueueRole.Off, false, false)]
+    [InlineData(QueueRole.Server, true, false)]
+    [InlineData(QueueRole.Client, false, true)]
+    public void QueueRoleVisibility_GatesServerAndClientFieldsExclusively(
+        QueueRole role, bool expectServerFieldsVisible, bool expectClientFieldsVisible)
+    {
+        var vm = Build(out _);
+
+        vm.QueueRole = role;
+
+        Assert.Equal(expectServerFieldsVisible, vm.IsQueueServerFieldsVisible);
+        Assert.Equal(expectClientFieldsVisible, vm.IsQueueClientFieldsVisible);
+    }
+
+    // -----------------------------------------------------------------------------
+    // Fix 4 (post-review): QueueServer.LastError was read nowhere outside a comment —
+    // the spec promises twice that this screen shows it, and it did not. Same reflective-
+    // binding caveat as the block above: these cover the view-model side (the string the
+    // XAML binds to), not the XAML binding itself.
+    // -----------------------------------------------------------------------------
+
+    private static SettingsViewModel BuildWithQueueServerError(FakeSettings settings, string? queueServerError)
+        => new SettingsViewModel(
+            new MainViewModel(),
+            settings,
+            new FakeStorage(),
+            new FakeFeatures(),
+            new FakePaymentCategories(),
+            queueServerError: queueServerError,
+            localNetworkAddress: () => "10.0.0.7");
+
+    [Fact]
+    public void Constructor_SurfacesTheQueueServerErrorWhenTheServerFailedToStart()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, "Секрет очереди не задан.");
+
+        Assert.Equal("Секрет очереди не задан.", vm.QueueServerError);
+        Assert.True(vm.HasQueueServerError);
+    }
+
+    [Fact]
+    public void Constructor_HasNoQueueServerErrorWhenNoneWasGiven()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal(string.Empty, vm.QueueServerError);
+        Assert.False(vm.HasQueueServerError);
+    }
+
+    /// <summary>The 401 body a rejected /board or /kds request carries points the reader
+    /// at "the queue settings on the server register" for a link — this is that link.
+    /// Built from what is actually saved (QueuePort/QueueSecret), matching what the
+    /// already-running Kestrel instance actually accepts — see Fix 5 for why that is not
+    /// the same as whatever is currently typed in QueuePortText/QueueSecret.</summary>
+    [Fact]
+    public void Constructor_BuildsBoardAndKdsLinksForAConfiguredServer()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueuePort = 9001, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal("http://10.0.0.7:9001/board?secret=s3cr3t", vm.BoardUrl);
+        Assert.Equal("http://10.0.0.7:9001/kds?secret=s3cr3t", vm.KdsUrl);
+        Assert.True(vm.HasQueueScreenLinks);
+    }
+
+    [Fact]
+    public void Constructor_EscapesASecretThatNeedsItInTheScreenLinks()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueuePort = 9001, QueueSecret = "a b&c" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal("http://10.0.0.7:9001/board?secret=a%20b%26c", vm.BoardUrl);
+    }
+
+    [Fact]
+    public void Constructor_HasNoScreenLinksWhenThisTillIsNotTheServer()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Client, QueuePort = 9001, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal(string.Empty, vm.BoardUrl);
+        Assert.Equal(string.Empty, vm.KdsUrl);
+        Assert.False(vm.HasQueueScreenLinks);
+    }
+
+    /// <summary>An empty secret is the state QueueServer.StartAsync itself refuses to
+    /// open a port for (see its own remarks) — a link built anyway would point at a
+    /// server that was never listening.</summary>
+    [Fact]
+    public void Constructor_HasNoScreenLinksWhenTheSecretIsEmpty()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueuePort = 9001, QueueSecret = "" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal(string.Empty, vm.BoardUrl);
+        Assert.False(vm.HasQueueScreenLinks);
     }
 }

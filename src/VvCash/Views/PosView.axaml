@@ -649,6 +649,15 @@
                         <material:MaterialIcon Kind="CloudOffOutline" Width="14" Height="14" Foreground="#ef4444"/>
                         <TextBlock Text="{Binding UnsyncedDocumentsCount, StringFormat={}{0} unsynced orders}" Foreground="#ef4444" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
                     </StackPanel>
+                    <!-- Task 25: a separate badge from the one above on purpose — an order
+                         that has not reached the neighbouring queue server and a receipt
+                         that has not reached the backend are fixed by different people
+                         doing different things, and one number would send the cashier to
+                         the wrong place (see PosViewModel.PendingQueueOrdersCount). -->
+                    <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasPendingQueueOrders}">
+                        <material:MaterialIcon Kind="TicketOutline" Width="14" Height="14" Foreground="#ef4444"/>
+                        <TextBlock Text="{Binding PendingQueueOrdersCount, StringFormat={}{0} queue orders not sent}" Foreground="#ef4444" FontSize="10" FontWeight="Bold" LetterSpacing="1"/>
+                    </StackPanel>
                     <!-- Deliberately not Classes="IconButton": that class pins Width/Height to
                          48x48, which clipped this badge's icon+text down to a square. -->
                     <Button Padding="6,2" Background="Transparent" BorderThickness="0" CornerRadius="8"
