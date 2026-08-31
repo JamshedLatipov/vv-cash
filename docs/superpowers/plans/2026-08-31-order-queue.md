@@ -2828,7 +2828,7 @@ git commit -m "feat(queue): accept orders idempotently by their id"
         var id = Guid.NewGuid();
         await _client.PostAsJsonAsync("orders", Order(id, 305));
 
-        var response = await _client.PostAsJsonAsync($"orders/{id}/state", QueueOrderState.InProgress);
+        var response = await Move(id, nameof(QueueOrderState.InProgress));
         var orders = await _client.GetFromJsonAsync<List<QueueOrder>>("orders");
 
         Assert.True(response.IsSuccessStatusCode);
@@ -2843,7 +2843,7 @@ git commit -m "feat(queue): accept orders idempotently by their id"
         var id = Guid.NewGuid();
         await _client.PostAsJsonAsync("orders", Order(id, 305));
 
-        var response = await _client.PostAsJsonAsync($"orders/{id}/state", QueueOrderState.Closed);
+        var response = await Move(id, nameof(QueueOrderState.Closed));
         var orders = await _client.GetFromJsonAsync<List<QueueOrder>>("orders");
 
         Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
@@ -2865,9 +2865,9 @@ git commit -m "feat(queue): accept orders idempotently by their id"
         var id = Guid.NewGuid();
         await _client.PostAsJsonAsync("orders", Order(id, 305));
 
-        await _client.PostAsJsonAsync($"orders/{id}/state", QueueOrderState.InProgress);
-        await _client.PostAsJsonAsync($"orders/{id}/state", QueueOrderState.Ready);
-        await _client.PostAsJsonAsync($"orders/{id}/state", QueueOrderState.Closed);
+        await Move(id, nameof(QueueOrderState.InProgress));
+        await Move(id, nameof(QueueOrderState.Ready));
+        await Move(id, nameof(QueueOrderState.Closed));
         var orders = await _client.GetFromJsonAsync<List<QueueOrder>>("orders");
 
         Assert.NotNull(orders![0].ReadyAt);
