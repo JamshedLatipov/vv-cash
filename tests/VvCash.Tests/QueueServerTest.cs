@@ -137,6 +137,26 @@ public class QueueServerTest : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    /// <summary>Найдено живой проверкой /board без секрета в адресе и без
+    /// localStorage: голый 401 без тела оставляет вкладку браузера чисто
+    /// белой — «пустой экран с ошибкой в консоли», от которого эта задача
+    /// прямо предостерегает. Тело не влияет на API-клиентов (HttpQueueTransport
+    /// и QueueClient судят по коду ответа, тело 401 не читают), а страницы
+    /// получают хоть что-то вместо пустоты — не полноценный экран (секретную
+    /// страницу без секрета всё равно не показать, это и есть весь смысл
+    /// проверки), но не молчание.</summary>
+    [Fact]
+    public async Task ARequestWithoutTheSecretCarriesAHumanReadableBodyNotAnEmptyOne()
+    {
+        using var bareClient = new HttpClient { BaseAddress = _client.BaseAddress };
+
+        var response = await bareClient.GetAsync("board");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(body));
+    }
+
     /// <summary>Занятый порт — это неверная настройка точки, а не повод ронять
     /// кассу. Второй сервер сажаем на порт первого, который уже слушает его в
     /// рамках этого же теста — гарантированная коллизия без магических чисел.</summary>

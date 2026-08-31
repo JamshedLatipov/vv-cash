@@ -142,6 +142,19 @@ public class QueueServer
                 if (!HasValidSecret(context))
                 {
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    // Тело, а не пустой 401: без него /board и /kds, открытые
+                    // без секрета в адресе (значит и без него в localStorage —
+                    // до этого места первая же загрузка страницы ещё не
+                    // доходит), отдают браузеру пустое тело, и вкладка
+                    // остаётся чисто белой — тот самый «пустой экран с
+                    // ошибкой в консоли», который эта фича обязана не
+                    // показывать. Кассу/API-клиента (HttpQueueTransport,
+                    // QueueClient) тело не касается — оба судят по коду
+                    // ответа и тело 401/403 не читают.
+                    context.Response.ContentType = "text/plain; charset=utf-8";
+                    await context.Response.WriteAsync(
+                        "Секрет очереди не указан или неверен. Откройте эту страницу по ссылке " +
+                        "с секретом в адресе (её даёт касса-сервер в настройках очереди).");
                     return;
                 }
                 await next();
