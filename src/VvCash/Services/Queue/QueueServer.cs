@@ -144,5 +144,14 @@ public class QueueServer
     private void MapEndpoints(WebApplication app)
     {
         app.MapGet("/orders", async () => Results.Ok(await _storage.GetOrdersAsync()));
+
+        app.MapPost("/orders", async (HttpContext context) =>
+        {
+            var order = await context.Request.ReadFromJsonAsync<QueueOrder>();
+            if (order == null) return Results.BadRequest();
+
+            await _storage.SaveOrderAsync(order);
+            return Results.StatusCode(StatusCodes.Status202Accepted);
+        });
     }
 }

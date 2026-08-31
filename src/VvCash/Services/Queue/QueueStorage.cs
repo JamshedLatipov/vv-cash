@@ -245,8 +245,44 @@ public class QueueStorage : IQueueStorage
         return result;
     }
 
+    public async Task SaveOrderAsync(QueueOrder order)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        // DO NOTHING, не UPDATE — см. докстринг на IQueueStorage.SaveOrderAsync:
+        // повторно присланная копия не должна откатывать заказ, ушедший вперёд
+        // по состояниям, обратно в New.
+        command.CommandText = @"
+            INSERT INTO QueueOrders
+                (Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines)
+            VALUES
+                ($Id, $Number, $TillIndex, $State, $CreatedAt, $ReadyAt, $ClosedAt, $SaleDocumentNumber, $Lines)
+            ON CONFLICT(Id) DO NOTHING;
+        ";
+        BindOrder(command, order);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
     private const string OrderColumnsSelect =
         "SELECT Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines FROM QueueOrders";
+
+    private static void BindOrder(SqliteCommand command, QueueOrder order)
+    {
+        command.Parameters.AddWithValue("$Id", order.Id.ToString());
+        command.Parameters.AddWithValue("$Number", order.Number);
+        command.Parameters.AddWithValue("$TillIndex", order.TillIndex);
+        command.Parameters.AddWithValue("$State", order.State.ToString());
+        command.Parameters.AddWithValue("$CreatedAt", order.CreatedAt.ToString("o"));
+        command.Parameters.AddWithValue("$ReadyAt", (object?)FormatDate(order.ReadyAt) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$ClosedAt", (object?)FormatDate(order.ClosedAt) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$SaleDocumentNumber", order.SaleDocumentNumber ?? string.Empty);
+        command.Parameters.AddWithValue("$Lines", JsonSerializer.Serialize(order.Lines));
+    }
 
     private static QueueOrder ReadOrder(SqliteDataReader reader) => new()
     {
@@ -260,6 +296,8 @@ public class QueueStorage : IQueueStorage
         SaleDocumentNumber = reader.GetString(7),
         Lines = JsonSerializer.Deserialize<List<QueueOrderLine>>(reader.GetString(8)) ?? new()
     };
+
+    private static string? FormatDate(DateTime? value) => value?.ToString("o");
 
     /// <summary>Тот же приём, что OfflineStorageService применяет к ParkedSales.CreatedAt:
     /// "o" на запись и RoundtripKind на чтение — единственная пара в System.Text.Json/

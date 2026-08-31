@@ -202,6 +202,8 @@ public class QueueClientTest
         // расширенного интерфейса.
         public Task<IReadOnlyList<QueueOrder>> GetOrdersAsync()
             => Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
+
+        public Task SaveOrderAsync(QueueOrder order) => Task.CompletedTask;
     }
 
     /// <summary>Номер уже выдан, а буфер записать не удалось. Продажа всё равно

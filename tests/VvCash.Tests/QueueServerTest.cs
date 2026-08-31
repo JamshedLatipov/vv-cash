@@ -56,6 +56,16 @@ public class QueueServerTest : IAsyncLifetime
         return port;
     }
 
+    private static QueueOrder Order(Guid? id = null) => new()
+    {
+        Id = id ?? Guid.NewGuid(),
+        Number = 305,
+        TillIndex = 0,
+        State = QueueOrderState.New,
+        CreatedAt = new DateTime(2026, 8, 31, 10, 0, 0),
+        Lines = new List<QueueOrderLine> { new() { Name = "Coffee", Quantity = "2 pcs" } }
+    };
+
     private async Task<List<QueueOrder>> Listing()
     {
         var response = await _client.GetAsync("orders");
@@ -145,5 +155,31 @@ public class QueueServerTest : IAsyncLifetime
 
         using var probe = new TcpClient();
         await Assert.ThrowsAsync<SocketException>(() => probe.ConnectAsync(IPAddress.Loopback, port));
+    }
+
+    // ---- Task 14: intake & idempotency ----
+
+    [Fact]
+    public async Task APostedOrderShowsUpInTheListingAsNew()
+    {
+        var order = Order();
+
+        var post = await _client.PostAsJsonAsync("orders", order);
+
+        Assert.Equal(HttpStatusCode.Accepted, post.StatusCode);
+        var stored = Assert.Single(await Listing(), o => o.Id == order.Id);
+        Assert.Equal(order.Number, stored.Number);
+        Assert.Equal(QueueOrderState.New, stored.State);
+    }
+
+    [Fact]
+    public async Task PostingTheSameOrderTwiceLeavesExactlyOne()
+    {
+        var order = Order();
+
+        await _client.PostAsJsonAsync("orders", order);
+        await _client.PostAsJsonAsync("orders", order);
+
+        Assert.Single(await Listing(), o => o.Id == order.Id);
     }
 }

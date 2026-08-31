@@ -39,4 +39,10 @@ public interface IQueueStorage
     /// кухне и табло целиком, поэтому сортировка здесь, а не на стороне
     /// вызывающего.</summary>
     Task<IReadOnlyList<QueueOrder>> GetOrdersAsync();
+
+    /// <summary>Кладёт присланный кассой заказ. ON CONFLICT(Id) DO NOTHING, не
+    /// UPDATE: касса-клиент досылает буфер, не зная, что из него уже дошло, а
+    /// заказ к этому моменту мог успеть продвинуться по состояниям на кухне —
+    /// повторно пришедшая копия не должна откатывать его обратно в New.</summary>
+    Task SaveOrderAsync(QueueOrder order);
 }
