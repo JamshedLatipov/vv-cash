@@ -196,6 +196,12 @@ public class QueueClientTest
 
         public Task DeleteOutboxAsync(Guid id) => Task.CompletedTask;
         public Task MarkOutboxRejectedAsync(Guid id, string reason) => Task.CompletedTask;
+
+        // Ничего из Task 13-15 этот тест не касается — QueueClient не зовёт эти
+        // методы вовсе, они здесь только чтобы фейк остался валидной реализацией
+        // расширенного интерфейса.
+        public Task<IReadOnlyList<QueueOrder>> GetOrdersAsync()
+            => Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
     }
 
     /// <summary>Номер уже выдан, а буфер записать не удалось. Продажа всё равно

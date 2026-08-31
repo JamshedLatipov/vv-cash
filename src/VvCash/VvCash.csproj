@@ -41,6 +41,12 @@
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Kestrel для локального сервера очереди. Publish self-contained, значит
+         рантайм ASP.NET Core уезжает внутрь сборки: около +12 МБ, автообновление
+         донесёт его вместе с остальным. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <AvaloniaResource Include="Assets/**" />
   </ItemGroup>
   <ItemGroup>

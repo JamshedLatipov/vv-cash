@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using VvCash.Models;
 
 namespace VvCash.Services.Queue;
 
@@ -222,4 +225,46 @@ public class QueueStorage : IQueueStorage
 
         await command.ExecuteNonQueryAsync();
     }
+
+    public async Task<IReadOnlyList<QueueOrder>> GetOrdersAsync()
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"{OrderColumnsSelect} ORDER BY CreatedAt";
+
+        var result = new List<QueueOrder>();
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            result.Add(ReadOrder(reader));
+        }
+        return result;
+    }
+
+    private const string OrderColumnsSelect =
+        "SELECT Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines FROM QueueOrders";
+
+    private static QueueOrder ReadOrder(SqliteDataReader reader) => new()
+    {
+        Id = Guid.Parse(reader.GetString(0)),
+        Number = reader.GetInt32(1),
+        TillIndex = reader.GetInt32(2),
+        State = Enum.Parse<QueueOrderState>(reader.GetString(3)),
+        CreatedAt = ParseDate(reader.GetString(4))!.Value,
+        ReadyAt = reader.IsDBNull(5) ? null : ParseDate(reader.GetString(5)),
+        ClosedAt = reader.IsDBNull(6) ? null : ParseDate(reader.GetString(6)),
+        SaleDocumentNumber = reader.GetString(7),
+        Lines = JsonSerializer.Deserialize<List<QueueOrderLine>>(reader.GetString(8)) ?? new()
+    };
+
+    /// <summary>Тот же приём, что OfflineStorageService применяет к ParkedSales.CreatedAt:
+    /// "o" на запись и RoundtripKind на чтение — единственная пара в System.Text.Json/
+    /// BCL, которая переживает Local/Utc/Unspecified Kind и сотые доли секунды без
+    /// потерь и без оглядки на культуру потока, в котором это когда-нибудь прочитают.</summary>
+    private static DateTime? ParseDate(string? value) =>
+        value == null ? null : DateTime.Parse(value, null, DateTimeStyles.RoundtripKind);
 }

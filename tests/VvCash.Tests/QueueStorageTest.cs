@@ -1,5 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using VvCash.Models;
 using VvCash.Services.Queue;
 using Xunit;
 
@@ -43,5 +48,14 @@ public class QueueStorageTest
         await storage.InitializeAsync();
 
         Assert.Null(await storage.GetStateAsync("Day"));
+    }
+
+    [Fact]
+    public async Task ANewStorageListsNoOrders()
+    {
+        var storage = new QueueStorage(TempDb());
+        await storage.InitializeAsync();
+
+        Assert.Empty(await storage.GetOrdersAsync());
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using VvCash.Models;
 
 namespace VvCash.Services.Queue;
 
@@ -33,4 +34,9 @@ public interface IQueueStorage
     /// Для случая, когда повтор не поможет: сервер отказал по существу, а не
     /// был недоступен.</summary>
     Task MarkOutboxRejectedAsync(Guid id, string reason);
+
+    /// <summary>Все заказы сервера, старые первыми — то, что отдаёт GET /orders
+    /// кухне и табло целиком, поэтому сортировка здесь, а не на стороне
+    /// вызывающего.</summary>
+    Task<IReadOnlyList<QueueOrder>> GetOrdersAsync();
 }
