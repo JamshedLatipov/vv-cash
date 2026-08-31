@@ -289,7 +289,11 @@ public partial class App : Application
                 var offlineStorage = Services.GetRequiredService<IOfflineStorageService>();
                 var featuresForSettings = Services.GetRequiredService<ICashFeatureService>();
                 var paymentCategories = Services.GetRequiredService<IPaymentCategoryService>();
-                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage, featuresForSettings, paymentCategories);
+                // Fix 4: LastError лежит на _queueServer (не создаётся вовсе, если роль
+                // этой кассы не Server — см. его remarks выше), а не в DI-контейнере,
+                // поэтому передаётся сюда явно, а не читается вторым сервисом.
+                var settingsVm = new SettingsViewModel(loginVm, settingsService, offlineStorage, featuresForSettings, paymentCategories,
+                    queueServerError: _queueServer?.LastError);
                 settingsVm.NavigationRequest = mainVm.NavigateTo;
                 mainVm.NavigateTo(settingsVm);
             };

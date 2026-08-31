@@ -67,7 +67,7 @@ public class QueueStorageTest
         var storage = new QueueStorage(TempDb());
         await storage.InitializeAsync();
 
-        Assert.Empty(await storage.GetOrdersAsync());
+        Assert.Empty(await storage.GetLiveOrdersAsync());
     }
 
     [Fact]
@@ -76,9 +76,9 @@ public class QueueStorageTest
         var storage = new QueueStorage(TempDb());
         var order = Order();
 
-        await storage.SaveOrderAsync(order);
+        await storage.SaveOrderAsync(order, order.CreatedAt);
 
-        var stored = Assert.Single(await storage.GetOrdersAsync());
+        var stored = Assert.Single(await storage.GetLiveOrdersAsync());
         Assert.Equal(order.Id, stored.Id);
         Assert.Equal(order.Number, stored.Number);
         Assert.Equal(QueueOrderState.New, stored.State);
@@ -91,10 +91,10 @@ public class QueueStorageTest
         var storage = new QueueStorage(TempDb());
         var order = Order();
 
-        await storage.SaveOrderAsync(order);
-        await storage.SaveOrderAsync(order);
+        await storage.SaveOrderAsync(order, order.CreatedAt);
+        await storage.SaveOrderAsync(order, order.CreatedAt);
 
-        Assert.Single(await storage.GetOrdersAsync());
+        Assert.Single(await storage.GetLiveOrdersAsync());
     }
 
     /// <summary>"o" на запись и RoundtripKind на чтение — та же пара, что уже
@@ -115,8 +115,8 @@ public class QueueStorageTest
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("ru-RU");
 
-            await storage.SaveOrderAsync(order);
-            var stored = (await storage.GetOrdersAsync()).Single(o => o.Id == order.Id);
+            await storage.SaveOrderAsync(order, order.CreatedAt);
+            var stored = (await storage.GetLiveOrdersAsync()).Single(o => o.Id == order.Id);
 
             Assert.Equal(createdAt, stored.CreatedAt);
             Assert.Equal(createdAt.Kind, stored.CreatedAt.Kind);
@@ -137,14 +137,14 @@ public class QueueStorageTest
     {
         var storage = new QueueStorage(TempDb());
         var order = Order();
-        await storage.SaveOrderAsync(order);
+        await storage.SaveOrderAsync(order, order.CreatedAt);
 
         var advanced = await storage.GetOrderAsync(order.Id);
         advanced!.State = QueueOrderState.InProgress;
         await storage.UpdateOrderStateAsync(advanced);
 
         // Та же самая (по Id) стартовая копия, будто клиент досылает буфер заново.
-        await storage.SaveOrderAsync(order);
+        await storage.SaveOrderAsync(order, order.CreatedAt);
 
         var stored = await storage.GetOrderAsync(order.Id);
         Assert.Equal(QueueOrderState.InProgress, stored!.State);
@@ -164,7 +164,7 @@ public class QueueStorageTest
     {
         var storage = new QueueStorage(TempDb());
         var order = Order();
-        await storage.SaveOrderAsync(order);
+        await storage.SaveOrderAsync(order, order.CreatedAt);
 
         order.State = QueueOrderState.InProgress;
         await storage.UpdateOrderStateAsync(order);

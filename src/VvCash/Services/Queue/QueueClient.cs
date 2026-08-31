@@ -179,11 +179,12 @@ public class QueueClient : IQueueClient
 
         // Только заказы этой кассы: чужой номер живёт в чужом пуле. closed.Id, not just
         // closed.Number: the server reports the same closed order again on every poll
-        // (nothing ever deletes a closed order — GET /orders returns everything ever
-        // stored), so ReleaseAsync has to be told WHICH order is asking, to tell a
-        // genuine close apart from a stale replay for a number already re-issued to
-        // someone else — see NumberPool.ReleaseAsync's own docstring for the collision
-        // this used to allow.
+        // within its retention window (Fix 3 bounded that window and now purges old
+        // closed orders outright — see QueueStorage.RecentlyClosedWindow/ClosedOrderRetention
+        // — but within the window a replay is still routine, every 15 seconds), so
+        // ReleaseAsync has to be told WHICH order is asking, to tell a genuine close
+        // apart from a stale replay for a number already re-issued to someone else —
+        // see NumberPool.ReleaseAsync's own docstring for the collision this used to allow.
         foreach (var closed in await _transport.GetClosedAsync(_tillIndex))
         {
             await _pool.ReleaseAsync(closed.Number, closed.Id);

@@ -90,6 +90,16 @@ public class QueueStorage : IQueueStorage
                     Value TEXT
                 );
 
+                -- ReceivedAt: когда ЭТОТ сервер сам сохранил заказ — часы сервера,
+                -- не клиента. CreatedAt остаётся временем кассы, пробившей заказ
+                -- (это то, что видит повар на экране кухни), но решать, кого
+                -- CloseStaleOrdersAsync считает устаревшим, по нему нельзя: касса
+                -- с неверными часами тогда закрывала бы СВОИ СОБСТВЕННЫЕ только что
+                -- пробитые заказы, а полночь по календарю сервера — ЧУЖИЕ ещё
+                -- готовящиеся, независимо от часов. ReceivedAt пишется один раз, при
+                -- первой вставке (BindReceivedAt в SaveOrderAsync, под тем же ON
+                -- CONFLICT DO NOTHING, что и остальные поля) и никогда не
+                -- перезаписывается повторной присылкой того же заказа из буфера.
                 CREATE TABLE IF NOT EXISTS QueueOrders (
                     Id TEXT PRIMARY KEY,
                     Number INTEGER NOT NULL,
@@ -99,7 +109,8 @@ public class QueueStorage : IQueueStorage
                     ReadyAt TEXT,
                     ClosedAt TEXT,
                     SaleDocumentNumber TEXT,
-                    Lines TEXT NOT NULL
+                    Lines TEXT NOT NULL,
+                    ReceivedAt TEXT
                 );
 
                 -- Исходящий буфер кассы-клиента. Тот же смысл, что у
@@ -125,6 +136,12 @@ public class QueueStorage : IQueueStorage
         // не её схему, — так что миграция нужна здесь, на каждой инициализации, тем же
         // приёмом, что OfflineStorageService уже применяет к своим таблицам.
         await AddColumnIfMissingAsync(command, "ALTER TABLE NumberPool ADD COLUMN IssuedFor TEXT;");
+
+        // Same idiom, for QueueOrders.ReceivedAt (see the schema comment above): a
+        // queue.db from before this fix predates the column too. Rows written before
+        // the migration read back with ReceivedAt NULL — CloseStaleOrdersAsync falls
+        // back to CreatedAt for exactly those rows (see its own remarks).
+        await AddColumnIfMissingAsync(command, "ALTER TABLE QueueOrders ADD COLUMN ReceivedAt TEXT;");
     }
 
     /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it
@@ -286,7 +303,7 @@ public class QueueStorage : IQueueStorage
         await command.ExecuteNonQueryAsync();
     }
 
-    public async Task<IReadOnlyList<QueueOrder>> GetOrdersAsync()
+    public async Task<IReadOnlyList<QueueOrder>> GetLiveOrdersAsync()
     {
         await InitializeAsync();
 
@@ -294,7 +311,16 @@ public class QueueStorage : IQueueStorage
         await connection.OpenAsync();
 
         using var command = connection.CreateCommand();
-        command.CommandText = $"{OrderColumnsSelect} ORDER BY CreatedAt";
+        // Live = ещё не финальное состояние. Это ровно то, что нужно и кухонному
+        // экрану, и табло (оба и так отбрасывают Closed/Cancelled на своей
+        // стороне — см. их render()) — отдавать им историю целиком, которую они
+        // всё равно сразу выбросят, незачем: это тот самый трафик, который на
+        // реальной точке за полгода перерастал в доминирующий (см. докстринг
+        // интерфейса). GET /orders без явного ?state= и обе рассылки по /ws
+        // (SendOrdersAsync, BroadcastOrdersAsync) идут через этот метод.
+        command.CommandText = $"{OrderColumnsSelect} WHERE State NOT IN ($Closed, $Cancelled) ORDER BY CreatedAt";
+        command.Parameters.AddWithValue("$Closed", QueueOrderState.Closed.ToString());
+        command.Parameters.AddWithValue("$Cancelled", QueueOrderState.Cancelled.ToString());
 
         var result = new List<QueueOrder>();
         using var reader = await command.ExecuteReaderAsync();
@@ -305,7 +331,121 @@ public class QueueStorage : IQueueStorage
         return result;
     }
 
-    public async Task SaveOrderAsync(QueueOrder order)
+    /// <summary>Насколько недавно закрытые (или отменённые) заказы ещё отдаются
+    /// GET /orders?state=Closed — окно, на которое опирается
+    /// HttpQueueTransport.GetClosedAsync, чтобы вернуть номера своих закрытых
+    /// заказов в пул (см. QueueClient.FlushAsync). Щедро, а не туго: гвардия по
+    /// идентичности заказа в NumberPool.ReleaseAsync делает повторный возврат
+    /// одного и того же заказа безвредной не-операцией (см. её докстринг), а
+    /// значит цена слишком широкого окна — лишние байты в ответе, тогда как
+    /// цена слишком узкого — номер, который касса-клиент увидела бы закрытым,
+    /// уже вышел из окна к моменту, когда сеть у неё наконец восстановилась
+    /// (локалка обычно чинится за секунды — см. спеку, — но не гарантированно),
+    /// и его никто не возвращает в пул до конца дня. Сутки перекрывают любой
+    /// реалистичный обрыв связи внутри одной смены, а более старые Closed/
+    /// Cancelled всё равно ничего не отдают внутри дня — обмен номерами имеет
+    /// смысл только внутри него: у каждой кассы свой пул перемешивается заново
+    /// при первой продаже нового дня (см. NumberPool.EnsureTodaysPoolAsync), так
+    /// что заказ, закрытый вчера, никакой кассе сегодня уже не интересен.</summary>
+    internal static readonly TimeSpan RecentlyClosedWindow = TimeSpan.FromHours(24);
+
+    public async Task<IReadOnlyList<QueueOrder>> GetRecentlyClosedOrdersAsync(DateTime now)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        // Тот же приём, что и в CloseStaleOrdersAsync (см. его докстринг): окно
+        // сравнивается в C#, на уже распарсенном DateTime, а не в SQL через
+        // date()/строковое сравнение — тот же риск с Kind/оффсетом. SQL здесь
+        // сужает только до Closed/Cancelled, и это уже большая часть работы:
+        // после PurgeOldClosedOrdersAsync (см. его докстринг) старше недели
+        // такие строки просто не существуют, так что этот запрос никогда не
+        // читает историю точки целиком, сколько бы она ни проработала.
+        command.CommandText = $"{OrderColumnsSelect} WHERE State IN ($Closed, $Cancelled) ORDER BY CreatedAt";
+        command.Parameters.AddWithValue("$Closed", QueueOrderState.Closed.ToString());
+        command.Parameters.AddWithValue("$Cancelled", QueueOrderState.Cancelled.ToString());
+
+        var cutoff = now - RecentlyClosedWindow;
+        var result = new List<QueueOrder>();
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var order = ReadOrder(reader);
+            // ClosedAt отсутствовать не должно у Closed/Cancelled (оба перехода
+            // штампуют его — см. QueueServer), но заказ без него — не повод
+            // падать: тише включить в выдачу, чем потерять чей-то возврат номера.
+            if (order.ClosedAt is not DateTime closedAt || closedAt >= cutoff)
+            {
+                result.Add(order);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Сколько держать Closed/Cancelled заказ на диске, прежде чем
+    /// PurgeOldClosedOrdersAsync сотрёт его насовсем. Больше, чем
+    /// RecentlyClosedWindow выше — с большим запасом, а не впритык: если бы
+    /// период хранения совпадал с окном выдачи, заказ мог бы исчезнуть из-под
+    /// кассы-клиента ровно в момент, когда та наконец опросила сервер после
+    /// долгого обрыва. Неделя — не подбор по месту: этого с огромным запасом
+    /// хватает на любой реальный обрыв связи внутри одной смены (см.
+    /// RecentlyClosedWindow), но при этом файл БД не растёт бесконечно — при
+    /// 300 заказах в день это около двух тысяч Closed/Cancelled строк в
+    /// худшем случае, а не вся история точки.</summary>
+    internal static readonly TimeSpan ClosedOrderRetention = TimeSpan.FromDays(7);
+
+    public async Task PurgeOldClosedOrdersAsync(DateTime now)
+    {
+        await InitializeAsync();
+
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var selectCommand = connection.CreateCommand();
+        selectCommand.CommandText = "SELECT Id, ClosedAt FROM QueueOrders WHERE State IN ($Closed, $Cancelled)";
+        selectCommand.Parameters.AddWithValue("$Closed", QueueOrderState.Closed.ToString());
+        selectCommand.Parameters.AddWithValue("$Cancelled", QueueOrderState.Cancelled.ToString());
+
+        var cutoff = now - ClosedOrderRetention;
+        var deadIds = new List<string>();
+        using (var reader = await selectCommand.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                // Без ClosedAt (не должно случаться у Closed/Cancelled — см.
+                // GetRecentlyClosedOrdersAsync) возраст не оценить — оставляем
+                // строку как есть, а не удаляем по недоказанному предположению.
+                if (reader.IsDBNull(1)) continue;
+                var closedAt = ParseDate(reader.GetString(1))!.Value;
+                if (closedAt < cutoff)
+                {
+                    deadIds.Add(reader.GetString(0));
+                }
+            }
+        }
+
+        if (deadIds.Count == 0) return;
+
+        using var transaction = connection.BeginTransaction();
+
+        using var deleteCommand = connection.CreateCommand();
+        deleteCommand.Transaction = transaction;
+        deleteCommand.CommandText = "DELETE FROM QueueOrders WHERE Id = $Id";
+        var idParam = deleteCommand.Parameters.Add("$Id", SqliteType.Text);
+
+        foreach (var id in deadIds)
+        {
+            idParam.Value = id;
+            await deleteCommand.ExecuteNonQueryAsync();
+        }
+
+        await transaction.CommitAsync();
+    }
+
+    public async Task SaveOrderAsync(QueueOrder order, DateTime receivedAt)
     {
         await InitializeAsync();
 
@@ -315,15 +455,20 @@ public class QueueStorage : IQueueStorage
         using var command = connection.CreateCommand();
         // DO NOTHING, не UPDATE — см. докстринг на IQueueStorage.SaveOrderAsync:
         // повторно присланная копия не должна откатывать заказ, ушедший вперёд
-        // по состояниям, обратно в New.
+        // по состояниям, обратно в New. Это же и защищает ReceivedAt: повторная
+        // присылка того же Id несёт новый $ReceivedAt (время ЭТОГО вызова), но
+        // DO NOTHING не даёт ему затереть то время, что сервер записал при
+        // первой вставке — а именно оно и есть «когда сервер впервые увидел
+        // этот заказ», на чём стоит CloseStaleOrdersAsync.
         command.CommandText = @"
             INSERT INTO QueueOrders
-                (Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines)
+                (Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines, ReceivedAt)
             VALUES
-                ($Id, $Number, $TillIndex, $State, $CreatedAt, $ReadyAt, $ClosedAt, $SaleDocumentNumber, $Lines)
+                ($Id, $Number, $TillIndex, $State, $CreatedAt, $ReadyAt, $ClosedAt, $SaleDocumentNumber, $Lines, $ReceivedAt)
             ON CONFLICT(Id) DO NOTHING;
         ";
         BindOrder(command, order);
+        command.Parameters.AddWithValue("$ReceivedAt", receivedAt.ToString("o"));
 
         await command.ExecuteNonQueryAsync();
     }
@@ -364,7 +509,26 @@ public class QueueStorage : IQueueStorage
         await command.ExecuteNonQueryAsync();
     }
 
-    public async Task CloseStaleOrdersAsync(DateTime today)
+    /// <summary>Насколько старым должен быть заказ (по ReceivedAt — часам сервера,
+    /// не по CreatedAt клиента, и не по календарной границе), прежде чем
+    /// CloseStaleOrdersAsync его закроет. Выбрано намеренно, не подобрано по
+    /// месту, и вот почему четыре часа:
+    ///
+    /// Формат точки — быстрое обслуживание (кофе, выпечка; талон с номером,
+    /// бегунок на кухню), а не ресторан с многочасовой подачей: путь заказа от
+    /// оплаты до выдачи — минуты, не часы. Даже с большим запасом на затор на
+    /// кухне в час пик — это по-прежнему часы, а не сутки, так что четыре часа
+    /// не заденут ни один настоящий заказ, который ещё готовится, включая
+    /// пробитый под самое закрытие смены (23:58 плюс четыре часа — это глубокая
+    /// ночь, до которой ни одна настоящая точка этого профиля не работает).
+    ///
+    /// В другую сторону: если кухня забыла закрыть заказ, к утру следующей
+    /// смены (обычно 8-12 часов спустя) он уже давно за порогом и уходит первым
+    /// же вызовом — либо стартом сервера, либо первым POST /orders нового дня —
+    /// а не висит занятым весь день, как было бы с более длинным периодом.</summary>
+    internal static readonly TimeSpan StaleOrderGracePeriod = TimeSpan.FromHours(4);
+
+    public async Task CloseStaleOrdersAsync(DateTime now)
     {
         await InitializeAsync();
 
@@ -373,54 +537,75 @@ public class QueueStorage : IQueueStorage
 
         // Кандидаты — всё ещё рабочее состояние. Closed и Cancelled — уже
         // конечные исходы (см. докстринг интерфейса) и здесь не трогаются
-        // вовсе, поэтому даже не выбираются.
+        // вовсе, поэтому даже не выбираются. Только Id и два штампа времени —
+        // не весь OrderColumnsSelect: решение о устарелости не нуждается ни в
+        // Number, ни в Lines, а тянуть и разбирать их для каждой живой строки
+        // на каждом POST /orders было бы работой без всякой цели.
         using var selectCommand = connection.CreateCommand();
         selectCommand.CommandText =
-            $"{OrderColumnsSelect} WHERE State NOT IN ($Closed, $Cancelled)";
+            "SELECT Id, CreatedAt, ReceivedAt FROM QueueOrders WHERE State NOT IN ($Closed, $Cancelled)";
         selectCommand.Parameters.AddWithValue("$Closed", QueueOrderState.Closed.ToString());
         selectCommand.Parameters.AddWithValue("$Cancelled", QueueOrderState.Cancelled.ToString());
 
-        // Отбор по календарному дню — в C#, на уже распарсенном DateTime, а
-        // не в SQL: CreatedAt на диске несёт тот Kind/оффсет, с которым его
-        // записал BindOrder (обычно местное время кассы — см. докстринг
-        // интерфейса), а SQL-функция date() сначала нормализует строку к UTC
-        // по этому оффсету и лишь потом берёт календарную дату. Для заказа,
-        // пробитого рано утром по местному времени с положительным оффсетом,
-        // это два разных дня.
-        var stale = new List<QueueOrder>();
+        // Возраст, не календарная граница — в C#, на уже распарсенном DateTime.
+        // Судья — ReceivedAt (когда ЭТОТ сервер сам сохранил заказ), не
+        // CreatedAt: то приезжает с кассы-клиента и несёт её собственные,
+        // возможно неверные, часы (см. докстринг интерфейса и схему таблицы
+        // выше) — судить по нему значило бы, что касса с часами на день назад
+        // сама закрывает себе только что пробитые заказы, а не то, что
+        // календарная граница сервера сметает ещё готовящееся у всех сразу
+        // ровно в полночь. ReceivedAt отсутствует только у строк, записанных до
+        // миграции этой колонки (см. AddColumnIfMissingAsync) или руками в
+        // обход SaveOrderAsync (как в части тестов) — там честный откат к
+        // CreatedAt, то же значение, по которому судила версия до этой правки.
+        var staleIds = new List<string>();
         using (var reader = await selectCommand.ExecuteReaderAsync())
         {
             while (await reader.ReadAsync())
             {
-                var order = ReadOrder(reader);
-                if (order.CreatedAt.Date < today.Date)
+                var createdAt = ParseDate(reader.GetString(1))!.Value;
+                var receivedAt = reader.IsDBNull(2) ? createdAt : ParseDate(reader.GetString(2))!.Value;
+                if (now - receivedAt >= StaleOrderGracePeriod)
                 {
-                    stale.Add(order);
+                    staleIds.Add(reader.GetString(0));
                 }
             }
         }
 
-        if (stale.Count == 0) return;
+        if (staleIds.Count == 0) return;
+
+        // Одна транзакция на весь пакет: без неё крах посреди рассылки UPDATE'ов
+        // (что угодно между первой и последней строкой — не обязательно сбой
+        // самого SQLite) оставил бы день рассортированным наполовину — часть
+        // вчерашних заказов закрыта, часть всё ещё числится рабочей, и не
+        // осталось ни одного признака, где сweep остановился, чтобы доделать
+        // его на следующем вызове, а не начать заново с уже закрытыми заказами
+        // в списке кандидатов (WHERE State NOT IN исключил бы их и без того,
+        // но полагаться на это как на замену транзакции — везение, не гарантия).
+        using var transaction = connection.BeginTransaction();
 
         // Одна команда на всех: State и ClosedAt одинаковы для каждой строки
-        // (см. докстринг интерфейса — ClosedAt = today, тот же today, что и
-        // граница календарного дня выше), меняется только $Id, поэтому
-        // параметры заводятся один раз до цикла, а не на каждой итерации.
+        // (ClosedAt = now, то же now, что и граница возраста выше), меняется
+        // только $Id, поэтому параметры заводятся один раз до цикла, а не на
+        // каждой итерации.
         using var updateCommand = connection.CreateCommand();
+        updateCommand.Transaction = transaction;
         updateCommand.CommandText = @"
             UPDATE QueueOrders
             SET State = $State, ClosedAt = $ClosedAt
             WHERE Id = $Id;
         ";
         updateCommand.Parameters.AddWithValue("$State", QueueOrderState.Closed.ToString());
-        updateCommand.Parameters.AddWithValue("$ClosedAt", FormatDate(today));
+        updateCommand.Parameters.AddWithValue("$ClosedAt", FormatDate(now));
         var idParam = updateCommand.Parameters.Add("$Id", SqliteType.Text);
 
-        foreach (var order in stale)
+        foreach (var id in staleIds)
         {
-            idParam.Value = order.Id.ToString();
+            idParam.Value = id;
             await updateCommand.ExecuteNonQueryAsync();
         }
+
+        await transaction.CommitAsync();
     }
 
     private const string OrderColumnsSelect =

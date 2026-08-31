@@ -454,4 +454,96 @@ public class SettingsViewModelTest
         Assert.Equal(expectServerFieldsVisible, vm.IsQueueServerFieldsVisible);
         Assert.Equal(expectClientFieldsVisible, vm.IsQueueClientFieldsVisible);
     }
+
+    // -----------------------------------------------------------------------------
+    // Fix 4 (post-review): QueueServer.LastError was read nowhere outside a comment —
+    // the spec promises twice that this screen shows it, and it did not. Same reflective-
+    // binding caveat as the block above: these cover the view-model side (the string the
+    // XAML binds to), not the XAML binding itself.
+    // -----------------------------------------------------------------------------
+
+    private static SettingsViewModel BuildWithQueueServerError(FakeSettings settings, string? queueServerError)
+        => new SettingsViewModel(
+            new MainViewModel(),
+            settings,
+            new FakeStorage(),
+            new FakeFeatures(),
+            new FakePaymentCategories(),
+            queueServerError: queueServerError,
+            localNetworkAddress: () => "10.0.0.7");
+
+    [Fact]
+    public void Constructor_SurfacesTheQueueServerErrorWhenTheServerFailedToStart()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, "Секрет очереди не задан.");
+
+        Assert.Equal("Секрет очереди не задан.", vm.QueueServerError);
+        Assert.True(vm.HasQueueServerError);
+    }
+
+    [Fact]
+    public void Constructor_HasNoQueueServerErrorWhenNoneWasGiven()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal(string.Empty, vm.QueueServerError);
+        Assert.False(vm.HasQueueServerError);
+    }
+
+    /// <summary>The 401 body a rejected /board or /kds request carries points the reader
+    /// at "the queue settings on the server register" for a link — this is that link.
+    /// Built from what is actually saved (QueuePort/QueueSecret), matching what the
+    /// already-running Kestrel instance actually accepts — see Fix 5 for why that is not
+    /// the same as whatever is currently typed in QueuePortText/QueueSecret.</summary>
+    [Fact]
+    public void Constructor_BuildsBoardAndKdsLinksForAConfiguredServer()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueuePort = 9001, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal("http://10.0.0.7:9001/board?secret=s3cr3t", vm.BoardUrl);
+        Assert.Equal("http://10.0.0.7:9001/kds?secret=s3cr3t", vm.KdsUrl);
+        Assert.True(vm.HasQueueScreenLinks);
+    }
+
+    [Fact]
+    public void Constructor_EscapesASecretThatNeedsItInTheScreenLinks()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueuePort = 9001, QueueSecret = "a b&c" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal("http://10.0.0.7:9001/board?secret=a%20b%26c", vm.BoardUrl);
+    }
+
+    [Fact]
+    public void Constructor_HasNoScreenLinksWhenThisTillIsNotTheServer()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Client, QueuePort = 9001, QueueSecret = "s3cr3t" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal(string.Empty, vm.BoardUrl);
+        Assert.Equal(string.Empty, vm.KdsUrl);
+        Assert.False(vm.HasQueueScreenLinks);
+    }
+
+    /// <summary>An empty secret is the state QueueServer.StartAsync itself refuses to
+    /// open a port for (see its own remarks) — a link built anyway would point at a
+    /// server that was never listening.</summary>
+    [Fact]
+    public void Constructor_HasNoScreenLinksWhenTheSecretIsEmpty()
+    {
+        var settings = new FakeSettings { QueueRole = QueueRole.Server, QueuePort = 9001, QueueSecret = "" };
+
+        var vm = BuildWithQueueServerError(settings, queueServerError: null);
+
+        Assert.Equal(string.Empty, vm.BoardUrl);
+        Assert.False(vm.HasQueueScreenLinks);
+    }
 }

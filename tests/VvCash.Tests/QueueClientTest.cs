@@ -201,16 +201,21 @@ public class QueueClientTest
         public Task DeleteOutboxAsync(Guid id) => Task.CompletedTask;
         public Task MarkOutboxRejectedAsync(Guid id, string reason) => Task.CompletedTask;
 
-        // Ничего из Task 13-15 и Task 25 этот тест не касается — QueueClient не
-        // зовёт эти методы вовсе, они здесь только чтобы фейк остался валидной
+        // Ничего из Task 13-15, Task 25 и Fix 3 этот тест не касается — QueueClient
+        // не зовёт эти методы вовсе, они здесь только чтобы фейк остался валидной
         // реализацией расширенного интерфейса.
-        public Task<IReadOnlyList<QueueOrder>> GetOrdersAsync()
+        public Task<IReadOnlyList<QueueOrder>> GetLiveOrdersAsync()
             => Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
 
-        public Task SaveOrderAsync(QueueOrder order) => Task.CompletedTask;
+        public Task<IReadOnlyList<QueueOrder>> GetRecentlyClosedOrdersAsync(DateTime now)
+            => Task.FromResult<IReadOnlyList<QueueOrder>>(Array.Empty<QueueOrder>());
+
+        public Task PurgeOldClosedOrdersAsync(DateTime now) => Task.CompletedTask;
+
+        public Task SaveOrderAsync(QueueOrder order, DateTime receivedAt) => Task.CompletedTask;
         public Task<QueueOrder?> GetOrderAsync(Guid id) => Task.FromResult<QueueOrder?>(null);
         public Task UpdateOrderStateAsync(QueueOrder order) => Task.CompletedTask;
-        public Task CloseStaleOrdersAsync(DateTime today) => Task.CompletedTask;
+        public Task CloseStaleOrdersAsync(DateTime now) => Task.CompletedTask;
     }
 
     /// <summary>Номер уже выдан, а буфер записать не удалось. Продажа всё равно

@@ -127,7 +127,7 @@ public class QueueServer
             // перезапускают сутками, иначе увидела бы вчерашние заказы
             // закрытыми только по первому же POST /orders — а на кухонном
             // экране до первой продажи нового дня они бы всё ещё висели.
-            await _storage.CloseStaleOrdersAsync(_now());
+            await RunMaintenanceSweepAsync();
 
             var builder = WebApplication.CreateBuilder();
             // Консольный логгер ASP.NET Core говорит поверх остального
@@ -199,6 +199,18 @@ public class QueueServer
         await app.DisposeAsync();
     }
 
+    /// <summary>Одна точка входа для обеих регулярных подчисток очереди —
+    /// перевода дня (CloseStaleOrdersAsync) и удаления старых закрытых заказов
+    /// (PurgeOldClosedOrdersAsync, Fix 3). Обе зовутся из тех же двух мест по
+    /// той же причине: точка может не перезапускаться сутками, и единственный
+    /// регулярный вход в это время — обычный POST /orders (см. StartAsync и
+    /// MapEndpoints ниже).</summary>
+    private async Task RunMaintenanceSweepAsync()
+    {
+        await _storage.CloseStaleOrdersAsync(_now());
+        await _storage.PurgeOldClosedOrdersAsync(_now());
+    }
+
     /// <summary>Секрет приезжает в заголовке — обычный клиент так и делает —
     /// либо в query-параметре: страницам кухни и табло, отданным самим этим
     /// сервером через обычный &lt;script src&gt;, заголовок выставить нечем, а
@@ -227,9 +239,24 @@ public class QueueServer
         // till, опечатка в state) — фильтр просто не применяется, а не 400:
         // это внутренний служебный эндпоинт, а не форма ввода, портить ответ
         // ради строгости незачем.
+        //
+        // Fix 3: какую выборку тянуть из хранилища — решает сам запрошенный
+        // state, а не один и тот же полный снимок для всех. ?state=Closed (или
+        // Cancelled) — единственный вызывающий это HttpQueueTransport.GetClosedAsync,
+        // которому нужны недавно закрытые заказы (GetRecentlyClosedOrdersAsync,
+        // см. её докстринг про окно). Всё остальное — экраны кухни и табло, им
+        // нужны только живые заказы (GetLiveOrdersAsync). Раньше оба случая
+        // читали GetOrdersAsync — историю точки целиком без всякого фильтра —
+        // и уже потом резали её Where() здесь же.
         app.MapGet("/orders", async (HttpContext context) =>
         {
-            IReadOnlyList<QueueOrder> orders = await _storage.GetOrdersAsync();
+            QueueOrderState state = default;
+            var hasStateFilter = context.Request.Query.TryGetValue("state", out var stateRaw) &&
+                Enum.TryParse(stateRaw, ignoreCase: true, out state);
+
+            IReadOnlyList<QueueOrder> orders = hasStateFilter && state is QueueOrderState.Closed or QueueOrderState.Cancelled
+                ? await _storage.GetRecentlyClosedOrdersAsync(_now())
+                : await _storage.GetLiveOrdersAsync();
 
             if (context.Request.Query.TryGetValue("till", out var tillRaw) &&
                 int.TryParse(tillRaw, out var till))
@@ -237,8 +264,7 @@ public class QueueServer
                 orders = orders.Where(o => o.TillIndex == till).ToList();
             }
 
-            if (context.Request.Query.TryGetValue("state", out var stateRaw) &&
-                Enum.TryParse<QueueOrderState>(stateRaw, ignoreCase: true, out var state))
+            if (hasStateFilter)
             {
                 orders = orders.Where(o => o.State == state).ToList();
             }
@@ -248,16 +274,20 @@ public class QueueServer
 
         app.MapPost("/orders", async (HttpContext context) =>
         {
-            // Тот же перевод дня, что и в StartAsync (см. его докстринг) —
-            // здесь, потому что точка может неделями не перезапускаться, и
-            // единственный регулярный вход в это время суток — как раз
-            // постановка нового заказа.
-            await _storage.CloseStaleOrdersAsync(_now());
+            // Тот же перевод дня и та же подчистка старых закрытых заказов, что
+            // и в StartAsync (см. докстринг RunMaintenanceSweepAsync) — здесь,
+            // потому что точка может неделями не перезапускаться, и единственный
+            // регулярный вход в это время суток — как раз постановка нового заказа.
+            await RunMaintenanceSweepAsync();
 
             var order = await context.Request.ReadFromJsonAsync<QueueOrder>(WireJsonOptions);
             if (order == null) return Results.BadRequest();
 
-            await _storage.SaveOrderAsync(order);
+            // Часы сервера, не клиента — Fix 1/2: ReceivedAt — это то, против
+            // чего CloseStaleOrdersAsync судит устарелость (см. её докстринг),
+            // и оно обязано быть временем ЭТОГО сервера, а не CreatedAt заказа,
+            // который приехал с кассы-клиента и может нести её неверные часы.
+            await _storage.SaveOrderAsync(order, _now());
             // Рассылаем и на повторной постановке того же заказа (SaveOrderAsync
             // тогда ничего не меняет): лишняя рассылка того же списка безвредна,
             // а отличать «новый» от «дубль» здесь незачем — кухня и табло просто
@@ -418,7 +448,12 @@ public class QueueServer
 
     private async Task SendOrdersAsync(WebSocket socket, CancellationToken token)
     {
-        var orders = await _storage.GetOrdersAsync();
+        // Fix 3: живые заказы, не история точки целиком — кухня и табло
+        // выбрасывают Closed/Cancelled на своей стороне и без того (см. их
+        // render()), а рассылка исторических заказов на каждое подключение и
+        // каждый пуш — та самая нагрузка, из-за которой это стало доминирующим
+        // трафиком точки в течение года (см. докстринг GetLiveOrdersAsync).
+        var orders = await _storage.GetLiveOrdersAsync();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, WireJsonOptions);
         await socket.SendAsync(bytes, WebSocketMessageType.Text, endOfMessage: true, token);
     }
@@ -437,7 +472,7 @@ public class QueueServer
             snapshot = _subscribers.ToArray();
         }
 
-        var orders = await _storage.GetOrdersAsync();
+        var orders = await _storage.GetLiveOrdersAsync();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(orders, WireJsonOptions);
 
         List<WebSocket>? dead = null;
