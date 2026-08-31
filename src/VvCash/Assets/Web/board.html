@@ -4,7 +4,171 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Очередь</title>
-    <link rel="stylesheet" href="theme.css">
+    <script>
+        // Секрет приезжает в адресе один раз, когда телевизор открывают
+        // ссылкой с планшета настройки, и оседает в localStorage: дальше
+        // телевизор перезагружается сам (после перебоя питания, ночного
+        // выключения по таймеру и т.п.) и поднимается без чьей-либо помощи —
+        // адрес страницы к этому моменту обычно уже без ?secret= в истории
+        // браузера "Домашняя страница".
+        const fromUrl = new URLSearchParams(location.search).get('secret');
+        if (fromUrl) localStorage.setItem('secret', fromUrl);
+        const secret = localStorage.getItem('secret') || '';
+        // document.write здесь безопасен: скрипт выполняется синхронно во
+        // время разбора <head>, до того как браузер дошёл до </head> —
+        // тот самый случай, для которого document.write и предназначен.
+        // Без секрета в самой ссылке (см. QueueServer.HasValidSecret — заголовок
+        // странице выставить нечем) браузер получил бы на CSS 401 молча.
+        document.write(`<link rel="stylesheet" href="theme.css?secret=${encodeURIComponent(secret)}">`);
+    </script>
 </head>
-<body></body>
+<body>
+<div id="stale" class="stale">Нет связи с кассой</div>
+<main>
+    <section>
+        <h2>Готовятся</h2>
+        <ul id="cooking" class="numbers"></ul>
+    </section>
+    <section>
+        <h2>Готовы</h2>
+        <ul id="ready" class="numbers"></ul>
+    </section>
+</main>
+
+<style>
+    main {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+        padding: 24px;
+        min-height: 100vh;
+    }
+    section {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+    }
+    h2 {
+        margin: 0 0 16px;
+        font-size: 2rem;
+        color: var(--text-secondary, #64748b);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .numbers {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 16px;
+        /* Пять номеров читаются от двери за счёт clamp() ниже: минимум —
+           разборчиво даже на маленьком экране, максимум — не крупнее, чем
+           нужно. Сорок номеров всё равно помещаются за счёт переноса
+           строк (flex-wrap), а если и это не спасает на очень мелком
+           табло — секция сама уходит в скролл, а не обрезает цифры молча:
+           лучше пролистать, чем не увидеть свой номер вовсе. */
+        overflow-y: auto;
+    }
+    .numbers li {
+        background: var(--card, #fff);
+        border: 1px solid var(--border, #e2e8f0);
+        border-radius: var(--radius-l, 16px);
+        padding: 12px 28px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        font-size: clamp(2.5rem, 8vw, 7rem);
+        line-height: 1.1;
+    }
+    #ready li {
+        background: var(--success, #22c55e);
+        color: #fff;
+        border-color: var(--success, #22c55e);
+    }
+    /* Свежеготовый номер несколько секунд выделяется переходом из цвета
+       "в работе" в цвет "готово" — не мигает, чтобы не быть навязчивым на
+       экране, который смотрят весь день, но заметен тому, кто в этот
+       момент как раз следит за табло. */
+    #ready li.fresh {
+        animation: settle 3s ease-out;
+    }
+    @keyframes settle {
+        0%, 55% {
+            background: var(--primary, #0075e2);
+            border-color: var(--primary, #0075e2);
+            transform: scale(1.05);
+        }
+        100% {
+            background: var(--success, #22c55e);
+            border-color: var(--success, #22c55e);
+            transform: scale(1);
+        }
+    }
+</style>
+
+<script>
+    // null, пока не пришёл первый снимок вообще: отличает "страница только
+    // что открылась/переподключилась и ещё не знает, что готово" от
+    // "готовых пока нет". Без этого различия первый же снимок после
+    // (пере)подключения поджигал бы анимацию сразу у всех уже готовых
+    // заказов разом — как будто их только что приготовили все одновременно,
+    // хотя часть из них могла провисеть готовой давно.
+    let seen = null;
+
+    function render(orders) {
+        const cooking = orders.filter(o => o.state === 'New' || o.state === 'InProgress');
+        const ready = orders.filter(o => o.state === 'Ready');
+        // Closed и Cancelled сюда не попадают вовсе — ни один из двух
+        // фильтров выше их не берёт, так что явно выбрасывать не нужно.
+        // Любое неизвестное этой странице состояние (значение, которого
+        // сегодняшняя QueueOrderState не знает) по той же причине просто
+        // не показывается — а не роняет рендер.
+
+        document.getElementById('cooking').innerHTML = cooking
+            .map(o => `<li>${o.number}</li>`)
+            .join('');
+
+        const isFirstSnapshot = seen === null;
+        if (isFirstSnapshot) seen = new Set();
+
+        document.getElementById('ready').innerHTML = ready
+            .map(o => `<li class="${!isFirstSnapshot && !seen.has(o.id) ? 'fresh' : ''}">${o.number}</li>`)
+            .join('');
+
+        ready.forEach(o => seen.add(o.id));
+    }
+
+    // Переподключение с нарастающей паузой (до 15 секунд) и полным
+    // перезапросом списка на каждой попытке — сервер сам присылает полный
+    // снимок сразу после апгрейда сокета (см. QueueServer.SendOrdersAsync),
+    // так что открыть /ws заново и есть "перезапросить список". Без этого
+    // табло молча замирает на вчерашних цифрах после любого обрыва сети или
+    // перезапуска кассы-сервера — и именно это никто не замечает, пока
+    // кто-то не придёт с чеком и не увидит на табло не то.
+    let delay = 500;
+    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+    function connect() {
+        const socket = new WebSocket(
+            `${wsProtocol}//${location.host}/ws?secret=${encodeURIComponent(secret)}`);
+
+        socket.onopen = () => {
+            delay = 500;
+            document.getElementById('stale').hidden = true;
+        };
+        socket.onmessage = event => render(JSON.parse(event.data));
+        socket.onclose = () => {
+            document.getElementById('stale').hidden = false;
+            setTimeout(connect, delay);
+            delay = Math.min(delay * 2, 15000);
+        };
+        // onerror не обрабатывается отдельно: браузер всегда следом шлёт
+        // close, и вся логика восстановления уже там — второй обработчик
+        // с тем же кодом означал бы дублирующийся setTimeout(connect).
+    }
+
+    connect();
+</script>
+</body>
 </html>
