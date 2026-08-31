@@ -161,7 +161,31 @@ public class QueueServer
 
     private void MapEndpoints(WebApplication app)
     {
-        app.MapGet("/orders", async () => Results.Ok(await _storage.GetOrdersAsync()));
+        // till и state — необязательные фильтры (Task 17): HttpQueueTransport
+        // зовёт их вместе, чтобы получить закрытые заказы именно своей кассы —
+        // без фильтра касса-клиент увидела бы закрытые заказы соседних касс и
+        // вернула бы в свой пул чужие номера. Значение не распознано (обрезанный
+        // till, опечатка в state) — фильтр просто не применяется, а не 400:
+        // это внутренний служебный эндпоинт, а не форма ввода, портить ответ
+        // ради строгости незачем.
+        app.MapGet("/orders", async (HttpContext context) =>
+        {
+            IReadOnlyList<QueueOrder> orders = await _storage.GetOrdersAsync();
+
+            if (context.Request.Query.TryGetValue("till", out var tillRaw) &&
+                int.TryParse(tillRaw, out var till))
+            {
+                orders = orders.Where(o => o.TillIndex == till).ToList();
+            }
+
+            if (context.Request.Query.TryGetValue("state", out var stateRaw) &&
+                Enum.TryParse<QueueOrderState>(stateRaw, ignoreCase: true, out var state))
+            {
+                orders = orders.Where(o => o.State == state).ToList();
+            }
+
+            return Results.Ok(orders);
+        });
 
         app.MapPost("/orders", async (HttpContext context) =>
         {
