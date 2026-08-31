@@ -152,6 +152,16 @@ public class CompositePrinterService : IPrinterService
     private IReadOnlyList<EscPosPrinterService> For(PrintRole role)
         => _printers.Where(p => p.Roles.HasFlag(role)).ToList();
 
+    /// <summary>Предчек, дёрг ящика, возврат и обмен не размечены ролью — на них
+    /// работает тот же аппарат, что и на чеке, — но None обязан всё равно их
+    /// гасить: PrinterConfig.Roles документирует None как способ выключить
+    /// принтер, не снимая его IsEnabled. Фильтр не For(PrintRole.Receipt) — точка,
+    /// где настроен только талонный принтер и ни одного чекового, тогда осталась
+    /// бы вовсе без возвратов; редкий лишний чек на кухонном аппарате — меньшая
+    /// беда, чем немой возврат.</summary>
+    private IReadOnlyList<EscPosPrinterService> AllButSilenced()
+        => _printers.Where(p => p.Roles != PrintRole.None).ToList();
+
     public async Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
         string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
@@ -189,7 +199,7 @@ public class CompositePrinterService : IPrinterService
 
     public async Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total)
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0)
         {
             return false;
@@ -203,7 +213,7 @@ public class CompositePrinterService : IPrinterService
 
     public async Task<bool> OpenCashDrawerAsync()
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0) return false;
         var tasks = printers.Select(p => p.OpenCashDrawerAsync()).ToList();
         await Task.WhenAll(tasks);
@@ -214,7 +224,7 @@ public class CompositePrinterService : IPrinterService
         IEnumerable<VvCash.Models.ReturnReceiptLine> lines, decimal totalRefund, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0) return false;
         var list = lines.ToList();
         var tasks = printers.Select(p => p.PrintReturnReceiptAsync(list, totalRefund, documentNumber, warehouseName, sellerName, saleDate)).ToList();
@@ -228,7 +238,7 @@ public class CompositePrinterService : IPrinterService
         decimal difference, string documentNumber,
         string? warehouseName = null, string? sellerName = null, string? saleDate = null)
     {
-        var printers = _printers;
+        var printers = AllButSilenced();
         if (printers.Count == 0) return false;
         var returnedList = returned.ToList();
         var issuedList = issued.ToList();

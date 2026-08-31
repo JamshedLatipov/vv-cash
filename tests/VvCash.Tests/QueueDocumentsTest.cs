@@ -67,10 +67,18 @@ public class QueueDocumentsTest
         Assert.True(bare.Length < full.Length);
     }
 
+    /// <summary>Проверяет все девять полей записи, а не выборку — иначе имя теста
+    /// обещает больше, чем он держит. Item, Subtotal и Total намеренно не совпадают
+    /// друг с другом и со строкой одной позиции (10.00), чтобы "24.00" в тексте
+    /// нельзя было списать на что-то другое, кроме Subtotal.</summary>
     [Fact]
     public void SaleReceiptDataCarriesEverythingTheReceiptPrints()
     {
-        var data = new SaleReceiptData(OneCoffee(), 24m, 4m, 20m,
+        var items = new List<CartItem>
+        {
+            new CartItem { Product = new Product { Name = "Espresso", Price = 10m }, Quantity = 1m }
+        };
+        var data = new SaleReceiptData(items, Subtotal: 24m, Discount: 4m, Total: 20m,
             DiscountName: "Happy hour", DocumentNumber: "A-7",
             WarehouseName: "Market 1", SellerName: "Ann", SaleDate: "2026-08-31 14:22");
 
@@ -81,9 +89,15 @@ public class QueueDocumentsTest
 
         var text = Text(bytes);
         Assert.Contains("# 305", text);
-        Assert.Contains("A-7", text);
-        Assert.Contains("Ann", text);
-        Assert.Contains("Happy hour", text);
+        Assert.Contains("Espresso", text);         // Items
+        Assert.Contains("24.00", text);            // Subtotal
+        Assert.Contains("-4.00", text);            // Discount
+        Assert.Contains("20.00", text);            // Total
+        Assert.Contains("Happy hour", text);       // DiscountName
+        Assert.Contains("A-7", text);              // DocumentNumber
+        Assert.Contains("Market 1", text);         // WarehouseName
+        Assert.Contains("Ann", text);              // SellerName
+        Assert.Contains("2026-08-31 14:22", text); // SaleDate
     }
 
     /// <summary>ConnectionType вне диапазона enum уводит SendAsync в свою ветку

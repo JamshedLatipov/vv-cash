@@ -93,13 +93,20 @@ public class PrinterRoutingTest
 
         await composite.PrintReceiptAsync(OneCoffee(), 24m, 0m, 24m, Array.Empty<Coupon>());
         await composite.PrintTicketAsync("305", "14:22", "Market 1");
-        await composite.PrintKitchenOrderAsync(new SaleReceiptData(OneCoffee(), 24m, 0m, 24m), "305");
+        // Значения, которые не спутать одно с другим: PrintKitchenOrderAsync
+        // раскладывает запись в одиннадцать позиционных аргументов, пять подряд
+        // string? — переставь любые два, и это соберётся молча.
+        await composite.PrintKitchenOrderAsync(new SaleReceiptData(OneCoffee(), 24m, 0m, 24m,
+            DocumentNumber: "DOC-77", WarehouseName: "Depot Nine", SellerName: "Zoltan"), "305");
 
         Assert.Single(printers[0].Sent);
         Assert.Single(printers[1].Sent);
         Assert.Equal(2, printers[2].Sent.Count);
         Assert.Contains("305", printers[1].Sent[0]);
         Assert.Contains("# 305", printers[2].Sent[1]);
+        Assert.Contains("DOC-77", printers[2].Sent[1]);
+        Assert.Contains("Depot Nine", printers[2].Sent[1]);
+        Assert.Contains("Zoltan", printers[2].Sent[1]);
     }
 
     [Fact]
@@ -122,5 +129,29 @@ public class PrinterRoutingTest
         var (composite, _) = Build(PrintRole.Receipt);
 
         Assert.False(await composite.PrintTicketAsync("305"));
+    }
+
+    /// <summary>PrinterConfig.Roles обещает, что None гасит принтер, не снимая его
+    /// с учёта — но PrintPreReceiptAsync/OpenCashDrawerAsync/PrintReturnReceiptAsync/
+    /// PrintExchangeReceiptAsync раньше уходили на весь _printers независимо от
+    /// Roles, и None гасил только три документа, маршрутизируемых по ролям. Приколото
+    /// здесь, чтобы никто не "починил рассогласование", пустив эти четыре через
+    /// For(PrintRole.Receipt) — точка без чекового принтера тогда осталась бы
+    /// вовсе без возвратов, что хуже редкого лишнего чека на кухонном аппарате.</summary>
+    [Fact]
+    public async Task ANoneRolePrinterIsSilencedEntirely_ButOthersStillGetTheSharedDocuments()
+    {
+        var (composite, printers) = Build(PrintRole.None, PrintRole.KitchenOrder);
+
+        await composite.PrintReceiptAsync(OneCoffee(), 24m, 0m, 24m, Array.Empty<Coupon>());
+        await composite.PrintTicketAsync("305");
+        await composite.PrintKitchenOrderAsync(new SaleReceiptData(OneCoffee(), 24m, 0m, 24m), "305");
+        await composite.PrintPreReceiptAsync(OneCoffee(), 24m);
+        await composite.OpenCashDrawerAsync();
+        await composite.PrintReturnReceiptAsync(Array.Empty<ReturnReceiptLine>(), 10m, "R-1");
+        await composite.PrintExchangeReceiptAsync(Array.Empty<ReturnReceiptLine>(), Array.Empty<ReturnReceiptLine>(), 0m, "E-1");
+
+        Assert.Empty(printers[0].Sent);
+        Assert.Contains(printers[1].Sent, s => s.Contains("R-1"));
     }
 }
