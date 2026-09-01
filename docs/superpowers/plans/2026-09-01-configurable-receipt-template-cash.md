@@ -731,6 +731,15 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void Parse_ClampsANonPositiveWidth_ToTheDefault()
+    {
+        // Ширина приезжает числом из JSON. Ноль заставил бы Truncate молча съесть
+        // название акции, отрицательное — уронить печать целиком.
+        Assert.Equal(32, ReceiptTemplate.Parse("""{"version":1,"width":0,"blocks":[]}""").Width);
+        Assert.Equal(32, ReceiptTemplate.Parse("""{"version":1,"width":-5,"blocks":[]}""").Width);
+    }
+
+    [Fact]
     public void Default_IsThirtyTwoColumnsWide()
     {
         Assert.Equal(32, ReceiptTemplate.Default.Width);
@@ -905,7 +914,12 @@ public sealed class ReceiptTemplate
 
     public int Version { get; set; } = CurrentVersion;
 
-    /// <summary>Колонок ленты: 32 на 58 мм, 42–48 на 80 мм.</summary>
+    /// <summary>Колонок ленты: 32 на 58 мм, 42–48 на 80 мм.
+    ///
+    /// Разбор клампит это значение к положительному (см. Parse). Валидация живёт
+    /// там, а не в ReceiptText: ноль или отрицательное из JSON ведут себя в
+    /// помощниках несогласованно — Truncate(s, 0) молча съедает название акции,
+    /// Truncate(s, -1) бросает. Один вход для проверки лучше двух.</summary>
     public int Width { get; set; } = 32;
 
     public List<ReceiptBlock> Blocks { get; set; } = new();
@@ -946,7 +960,12 @@ public sealed class ReceiptTemplate
             }
             node["blocks"] = kept;
 
-            return JsonSerializer.Deserialize<ReceiptTemplate>(node.ToJsonString(), Options) ?? Default;
+            var template = JsonSerializer.Deserialize<ReceiptTemplate>(node.ToJsonString(), Options) ?? Default;
+            // Ширина приезжает из JSON и может быть нулём или отрицательной. Кламп
+            // здесь, на границе разбора недоверенных данных, а не в ReceiptText —
+            // см. комментарий у Width.
+            if (template.Width <= 0) template.Width = 32;
+            return template;
         }
         catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException)
         {
