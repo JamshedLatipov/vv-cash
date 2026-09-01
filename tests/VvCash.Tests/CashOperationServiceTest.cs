@@ -29,6 +29,9 @@ public class CashOperationServiceTest
         public string CustomerDisplayPort { get; set; } = string.Empty;
         public int CustomerDisplayBaudRate { get; set; } = 9600;
         public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+        public string CustomerDisplayProtocolId { get; set; } = string.Empty;
+        public string CustomerDisplayFramingId { get; set; } = string.Empty;
+        public bool CustomerDisplayDtrRts { get; set; }
         public event EventHandler? SettingsChanged { add { } remove { } }
         public void Save() { }
     }

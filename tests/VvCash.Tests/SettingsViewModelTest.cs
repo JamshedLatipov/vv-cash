@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Hardware;
 using VvCash.Services.Queue;
 using VvCash.ViewModels;
 using Xunit;
@@ -38,6 +40,9 @@ public class SettingsViewModelTest
         public string CustomerDisplayPort { get; set; } = string.Empty;
         public int CustomerDisplayBaudRate { get; set; } = 9600;
         public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+        public string CustomerDisplayProtocolId { get; set; } = string.Empty;
+        public string CustomerDisplayFramingId { get; set; } = string.Empty;
+        public bool CustomerDisplayDtrRts { get; set; }
         public QueueRole QueueRole { get; set; } = QueueRole.Off;
         public string QueueServerAddress { get; set; } = string.Empty;
         public int QueuePort { get; set; } = 8770;
@@ -121,14 +126,21 @@ public class SettingsViewModelTest
 
     /// <summary>Для тестов, которым нужна касса с уже настроенным состоянием:
     /// Build(out …) создаёт FakeSettings сам, и заполнить их до конструктора
-    /// вью-модели нечем, а часть настроек читается именно там.</summary>
-    private static SettingsViewModel BuildWith(FakeSettings settings)
+    /// вью-модели нечем, а часть настроек читается именно там.
+    ///
+    /// probeDelay подменяет паузу автоподбора: с настоящей один прогон стоил бы 42
+    /// секунды на тест. Тот же шов, что localNetworkAddress у BuildWithQueueServerError
+    /// ниже.</summary>
+    private static SettingsViewModel BuildWith(
+        FakeSettings settings,
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
         => new SettingsViewModel(
             new MainViewModel(),
             settings,
             new FakeStorage(),
             new FakeFeatures(),
-            new FakePaymentCategories());
+            new FakePaymentCategories(),
+            probeDelay: probeDelay);
 
     [Theory]
     [InlineData("http://api.example.test/v1/")]
@@ -354,6 +366,165 @@ public class SettingsViewModelTest
         await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
 
         Assert.Same(EscPosCodePages.Cp1251, vm.LastTestPrintService?.CodePage);
+    }
+
+    [Fact]
+    public void CustomerDisplayProtocolAndFraming_RoundTripThroughSettings()
+    {
+        // Значения нарочно не дефолтные: подмена Save на захардкоженную запись,
+        // забывшую один из трёх ключей, обязана провалить проверку, а не остаться
+        // зелёной на совпадении со значением по умолчанию.
+        //
+        // BackendUrl задан не для красоты: Save отказывается писать что-либо, пока
+        // адрес сервера не проходит проверку, и с пустым адресом этот тест проверял
+        // бы ранний выход, а не запись настроек дисплея.
+        var settings = new FakeSettings { BackendUrl = "https://example.test/api/v1/" };
+        var vm = BuildWith(settings);
+
+        vm.SelectedDisplayProtocol = DisplayProtocols.Numeric;
+        vm.SelectedDisplayFraming = SerialFramings.SevenE1;
+        vm.CustomerDisplayDtrRts = true;
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal("NUMERIC", settings.CustomerDisplayProtocolId);
+        Assert.Equal("7E1", settings.CustomerDisplayFramingId);
+        Assert.True(settings.CustomerDisplayDtrRts);
+    }
+
+    [Theory]
+    [InlineData("AvailableDisplayProtocols")]
+    [InlineData("SelectedDisplayProtocol")]
+    [InlineData("AvailableDisplayFramings")]
+    [InlineData("SelectedDisplayFraming")]
+    [InlineData("CustomerDisplayDtrRts")]
+    [InlineData("IsProbing")]
+    [InlineData("ProbeStatus")]
+    [InlineData("ProbeNumberText")]
+    [InlineData("ProbeDisplayCommand")]
+    [InlineData("StopProbeCommand")]
+    [InlineData("ApplyProbeNumberCommand")]
+    public void SettingsViewBindingPaths_ResolveOnTheViewModel(string path)
+    {
+        // AvaloniaUseCompiledBindingsByDefault выключен, то есть привязки в этом
+        // проекте рефлективные: опечатка в пути собирается начисто и молча даёт
+        // пустую выпадашку или мёртвую кнопку, а не ошибку. Каждый путь, добавленный
+        // в блок дисплея на SettingsView.axaml, перечислен здесь — это единственное
+        // место, где такая опечатка вообще может упасть до попадания на кассу.
+        //
+        // Свойства команд генерирует CommunityToolkit из [RelayCommand], поэтому в
+        // исходнике их grep-ом не найти, и проверка именно отражением, а не поиском
+        // по тексту.
+        var property = typeof(SettingsViewModel).GetProperty(path);
+
+        Assert.NotNull(property);
+        Assert.True(property!.GetMethod?.IsPublic, $"{path} не читается привязкой");
+    }
+
+    [Fact]
+    public async Task Probe_WalksTheWholePlanAndClearsItsFlagAtTheEnd()
+    {
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask);
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(DisplayProbePlan.Build().Count, vm.ProbeStepsRun);
+        Assert.False(vm.IsProbing);
+    }
+
+    [Fact]
+    public async Task Probe_WithNoPort_RefusesInsteadOfWalkingTheWholePlanIntoNothing()
+    {
+        var vm = BuildWith(new FakeSettings(), probeDelay: (_, _) => Task.CompletedTask);
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, vm.ProbeStepsRun);
+        Assert.Equal(I18nService.Instance["DisplayCheckNoPort"], vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Probe_Stopped_LeavesTheRestOfThePlanUnsent()
+    {
+        // Стоп обязан прекращать отправки, а не только гасить надпись: кассир жмёт его
+        // именно тогда, когда увидел своё число и не хочет ждать оставшуюся минуту.
+        SettingsViewModel? vm = null;
+        vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => { vm!.StopProbeCommand.Execute(null); return Task.CompletedTask; });
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.ProbeStepsRun);
+        Assert.False(vm.IsProbing);
+    }
+
+    [Fact]
+    public void ApplyProbeNumber_SetsTheProtocolAndBaudRateOfThatCombination()
+    {
+        var vm = Build(out _);
+        vm.ProbeNumberText = "8";
+
+        vm.ApplyProbeNumberCommand.Execute(null);
+
+        Assert.Same(DisplayProtocols.Cd5220, vm.SelectedDisplayProtocol);
+        Assert.Equal("600", vm.CustomerDisplayBaudRateText);
+        Assert.False(vm.HasError);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("29")]
+    [InlineData("не число")]
+    [InlineData("")]
+    public void ApplyProbeNumber_OutsideThePlan_ReportsItAndChangesNothing(string input)
+    {
+        var vm = Build(out _);
+        var before = vm.SelectedDisplayProtocol;
+        vm.ProbeNumberText = input;
+
+        vm.ApplyProbeNumberCommand.Execute(null);
+
+        Assert.Same(before, vm.SelectedDisplayProtocol);
+        Assert.Equal(I18nService.Instance["DisplayProbeBadNumber"], vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task CheckDisplay_BuildsFromTheProtocolOnScreen_NotTheSavedOne()
+    {
+        // Кнопка обязана проверять то, что кассир только что выбрал, а не то, что уже
+        // сохранено - иначе «проверка прошла» перестаёт значить что-либо про
+        // настройку, которую сейчас подбирают. Тот же приём и та же причина, что у
+        // TestPrint_BuildsFromTheCodePageOnScreen выше.
+        var vm = BuildWith(new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" });
+
+        vm.SelectedDisplayProtocol = DisplayProtocols.Numeric;
+        vm.SelectedDisplayFraming = SerialFramings.SevenE1;
+        vm.CustomerDisplayDtrRts = true;
+
+        await vm.CheckDisplayCommand.ExecuteAsync(null);
+
+        Assert.Same(DisplayProtocols.Numeric, vm.LastCheckDisplayService?.Protocol);
+        Assert.Same(SerialFramings.SevenE1, vm.LastCheckDisplayService?.Framing);
+        Assert.True(vm.LastCheckDisplayService?.DtrRts);
+    }
+
+    [Fact]
+    public void CustomerDisplayProtocolAndFraming_AreReadBackOnOpen()
+    {
+        var settings = new FakeSettings
+        {
+            CustomerDisplayProtocolId = "CD5220",
+            CustomerDisplayFramingId = "7E1",
+            CustomerDisplayDtrRts = true,
+        };
+
+        var vm = BuildWith(settings);
+
+        Assert.Same(DisplayProtocols.Cd5220, vm.SelectedDisplayProtocol);
+        Assert.Same(SerialFramings.SevenE1, vm.SelectedDisplayFraming);
+        Assert.True(vm.CustomerDisplayDtrRts);
     }
 
     [Fact]

@@ -24,6 +24,9 @@ public class SettingsData
     public string CustomerDisplayPort { get; set; } = string.Empty;
     public int CustomerDisplayBaudRate { get; set; } = 9600;
     public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+    public string CustomerDisplayProtocolId { get; set; } = string.Empty;
+    public string CustomerDisplayFramingId { get; set; } = string.Empty;
+    public bool CustomerDisplayDtrRts { get; set; }
 
     public QueueRole QueueRole { get; set; } = QueueRole.Off;
     public string QueueServerAddress { get; set; } = string.Empty;
@@ -139,6 +142,24 @@ public class SettingsService : ISettingsService, IQueueSettings
         set => _data.CustomerDisplayCodePageId = value;
     }
 
+    public string CustomerDisplayProtocolId
+    {
+        get => _data.CustomerDisplayProtocolId;
+        set => _data.CustomerDisplayProtocolId = value;
+    }
+
+    public string CustomerDisplayFramingId
+    {
+        get => _data.CustomerDisplayFramingId;
+        set => _data.CustomerDisplayFramingId = value;
+    }
+
+    public bool CustomerDisplayDtrRts
+    {
+        get => _data.CustomerDisplayDtrRts;
+        set => _data.CustomerDisplayDtrRts = value;
+    }
+
     public QueueRole QueueRole
     {
         get => _data.QueueRole;
@@ -236,6 +257,14 @@ public class SettingsService : ISettingsService, IQueueSettings
                 if (_data.CustomerDisplayCodePageId == null)
                 {
                     _data.CustomerDisplayCodePageId = string.Empty;
+                }
+                if (_data.CustomerDisplayProtocolId == null)
+                {
+                    _data.CustomerDisplayProtocolId = string.Empty;
+                }
+                if (_data.CustomerDisplayFramingId == null)
+                {
+                    _data.CustomerDisplayFramingId = string.Empty;
                 }
                 if (_data.QueueServerAddress == null)
                 {

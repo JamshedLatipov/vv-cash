@@ -59,6 +59,20 @@ public interface ISettingsService
     /// дисплей и принтер это разные железки с разными таблицами.</summary>
     string CustomerDisplayCodePageId { get; set; }
 
+    /// <summary>Id записи из DisplayProtocols. Пусто на кассе, где настройку не
+    /// трогали; Resolve читает пустое и незнакомое как ESC/POS, поэтому обновление
+    /// существующей кассы ничего не меняет.</summary>
+    string CustomerDisplayProtocolId { get; set; }
+
+    /// <summary>Id записи из SerialFramings. Пусто — 8N1, то есть то, что давал голый
+    /// конструктор SerialPort до появления этой настройки.</summary>
+    string CustomerDisplayFramingId { get; set; }
+
+    /// <summary>Поднимать ли DTR и RTS при открытии порта. Часть табло без этого
+    /// данные не принимает, а некоторые от этих линий ещё и питаются. По умолчанию
+    /// false — так вёл себя SerialPort раньше.</summary>
+    bool CustomerDisplayDtrRts { get; set; }
+
     event EventHandler? SettingsChanged;
 
     void Save();

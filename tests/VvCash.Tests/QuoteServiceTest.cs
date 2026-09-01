@@ -28,6 +28,9 @@ public class QuoteServiceTest
         public string CustomerDisplayPort { get; set; } = string.Empty;
         public int CustomerDisplayBaudRate { get; set; } = 9600;
         public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+        public string CustomerDisplayProtocolId { get; set; } = string.Empty;
+        public string CustomerDisplayFramingId { get; set; } = string.Empty;
+        public bool CustomerDisplayDtrRts { get; set; }
         public event System.EventHandler? SettingsChanged;
         public void Save() => SettingsChanged?.Invoke(this, System.EventArgs.Empty);
     }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -188,10 +189,48 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private EscPosCodePage? _selectedDisplayCodePage = EscPosCodePages.Default;
 
+    /// <summary>Диалект табло. Отдельно от кодовой страницы: та решает, какими байтами
+    /// кодировать буквы, а этот — какими командами их обрамить, и у табло эти две
+    /// настройки задаются независимо (часто DIP-переключателями на задней стенке).</summary>
+    [ObservableProperty]
+    private IDisplayProtocol? _selectedDisplayProtocol = DisplayProtocols.Default;
+
+    [ObservableProperty]
+    private SerialFraming? _selectedDisplayFraming = SerialFramings.Default;
+
+    [ObservableProperty]
+    private bool _customerDisplayDtrRts;
+
+    private readonly Func<TimeSpan, CancellationToken, Task> _probeDelay;
+    private CancellationTokenSource? _probeCts;
+
+    /// <summary>Сколько кадров успел отправить последний перебор. Seam как
+    /// LastTestPrintService: только для чтения, только для теста. Без него проверить,
+    /// что «Стоп» действительно прекращает отправки, а не просто гасит надпись,
+    /// нечем.</summary>
+    internal int ProbeStepsRun { get; private set; }
+
+    [ObservableProperty]
+    private bool _isProbing;
+
+    [ObservableProperty]
+    private string _probeStatus = string.Empty;
+
+    [ObservableProperty]
+    private string _probeNumberText = string.Empty;
+
+    /// <summary>Полторы секунды на шаг. Меньше — кассир не успевает прочитать число на
+    /// табло; больше — перебор из 28 шагов перестаёт помещаться в терпение.</summary>
+    private static readonly TimeSpan ProbeStep = TimeSpan.FromSeconds(1.5);
+
     /// <summary>COM-порты машины. Тот же источник, что у принтеров на COM.</summary>
     public ObservableCollection<string> AvailableDisplayPorts { get; } = new();
 
     public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
+
+    public IReadOnlyList<IDisplayProtocol> AvailableDisplayProtocols { get; } = DisplayProtocols.All;
+
+    public IReadOnlyList<SerialFraming> AvailableDisplayFramings { get; } = SerialFramings.All;
 
     /// <summary>Task 24: пять настроек очереди заказов и кухни (см.
     /// IQueueSettings). Читаются/пишутся через приведение _settingsService к
@@ -337,8 +376,13 @@ public partial class SettingsViewModel : ViewModelBase
         // передаёт его и получает DefaultLocalNetworkAddress без изменений; тесты
         // подставляют фиксированный хост, чтобы не зависеть от того, какие сетевые
         // интерфейсы подняты на машине, где они выполняются.
-        Func<string>? localNetworkAddress = null)
+        Func<string>? localNetworkAddress = null,
+        // Подменяется в тесте: один прогон перебора иначе стоил бы 42 секунды.
+        // Тот же шов и та же причина, что у localNetworkAddress строкой выше.
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
     {
+        _probeDelay = probeDelay ?? ((delay, token) => Task.Delay(delay, token));
+
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
         _offlineStorageService = offlineStorageService;
@@ -357,6 +401,9 @@ public partial class SettingsViewModel : ViewModelBase
         CustomerDisplayPort = _settingsService.CustomerDisplayPort;
         CustomerDisplayBaudRateText = _settingsService.CustomerDisplayBaudRate.ToString();
         SelectedDisplayCodePage = EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId);
+        SelectedDisplayProtocol = DisplayProtocols.Resolve(_settingsService.CustomerDisplayProtocolId);
+        SelectedDisplayFraming = SerialFramings.Resolve(_settingsService.CustomerDisplayFramingId);
+        CustomerDisplayDtrRts = _settingsService.CustomerDisplayDtrRts;
         foreach (var port in PrinterDiscoveryService.GetComPorts())
             AvailableDisplayPorts.Add(port);
         // Сохранённый порт мог быть не переподключён к моменту открытия экрана — тот
@@ -496,6 +543,12 @@ public partial class SettingsViewModel : ViewModelBase
     /// читающий сохранённое, ловил бы только grep.</summary>
     internal EscPosPrinterService? LastTestPrintService { get; private set; }
 
+    /// <summary>Что построила последняя проверка дисплея. Seam ровно как
+    /// LastTestPrintService выше: только для чтения, только для теста, существует
+    /// затем, чтобы проверку «кнопка строит из полей экрана, а не из сохранённого»
+    /// вообще можно было написать.</summary>
+    internal VfdDisplayService? LastCheckDisplayService { get; private set; }
+
     /// <summary>Печатает образец на том, что сейчас на экране, а НЕ на сохранённых
     /// настройках. Иначе связка «поменял кодовую страницу → напечатал → посмотрел»
     /// требовала бы сохранения и выхода с экрана, то есть перестала бы быть
@@ -554,24 +607,127 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
-        ICustomerDisplayService display = new VfdDisplayService(
+        var display = new VfdDisplayService(
             CustomerDisplayPort,
             // Тот же откат, что у Save чуть ниже по файлу, а не свои жёсткие
             // 9600: иначе нечитаемое поле проверяется на одной скорости и
             // сохраняется на другой — «проверка прошла» перестаёт значить
             // что-либо про то, на чём касса в итоге заработает.
             int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : _settingsService.CustomerDisplayBaudRate,
-            SelectedDisplayCodePage ?? EscPosCodePages.Default);
+            SelectedDisplayCodePage ?? EscPosCodePages.Default,
+            SelectedDisplayProtocol ?? DisplayProtocols.Default,
+            SelectedDisplayFraming ?? SerialFramings.Default,
+            CustomerDisplayDtrRts);
+
+        LastCheckDisplayService = display;
 
         // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
         // таймаута нет и SerialPort его не предлагает: зависший драйвер
         // USB-serial держит открытие сколько угодно. Без этого кнопка не
         // отчитается, а повиснет — то есть не сделает того, ради чего заведена.
-        var send = display.ShowLineAsync("VV CASH", "Проверка / Test");
+        // Вторая строка несёт цифры намеренно. На текстовом табло это по-прежнему
+        // читаемая проверка, а на сегментном NumericDisplayProtocol достанет из неё
+        // 8888.88 — то есть зажжёт все сегменты разом, классическую самопроверку
+        // панели, которую с покоем не спутать. Убери отсюда цифры, и кнопка перестанет
+        // что-либо показывать на цифровых табло.
+        var send = display.ShowLineAsync("VV CASH", "TEST 8888.88");
         var ok = await Task.WhenAny(send, Task.Delay(3000)) == send && send.Result;
 
         if (ok) StatusMessage = I18nService.Instance["DisplayCheckOk"];
         else ErrorMessage = I18nService.Instance["DisplayCheckFailed"];
+    }
+
+    /// <summary>Гонит план автоподбора, отправляя на табло номер каждой комбинации.
+    ///
+    /// Определить успех сама касса не может и не притворяется: запись в порт удаётся и
+    /// на неверной скорости — драйвер отдаёт байты, а ответа от ESC/POS-табло не
+    /// существует. Судья здесь кассир, глядящий на табло, и потому пробник — номер, а
+    /// не код возврата.</summary>
+    [RelayCommand]
+    private async Task ProbeDisplay()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        ProbeStepsRun = 0;
+
+        // Та же отсечка, что у CheckDisplay: без порта перебор прогнал бы 28 шагов в
+        // пустоту и отчитался бы об успешном завершении.
+        if (string.IsNullOrWhiteSpace(CustomerDisplayPort))
+        {
+            ErrorMessage = I18nService.Instance["DisplayCheckNoPort"];
+            return;
+        }
+
+        _probeCts?.Dispose();
+        _probeCts = new CancellationTokenSource();
+        var token = _probeCts.Token;
+
+        IsProbing = true;
+        try
+        {
+            var plan = DisplayProbePlan.Build();
+            var codePage = SelectedDisplayCodePage ?? EscPosCodePages.Default;
+            var framing = SelectedDisplayFraming ?? SerialFramings.Default;
+
+            foreach (var probe in plan)
+            {
+                if (token.IsCancellationRequested) break;
+
+                ProbeStatus = string.Format(
+                    I18nService.Instance["DisplayProbeProgress"], probe.Number, plan.Count);
+
+                var display = new VfdDisplayService(
+                    CustomerDisplayPort, probe.BaudRate, codePage,
+                    probe.Protocol, framing, CustomerDisplayDtrRts);
+
+                // Результат не ждётся: на мёртвой комбинации он всё равно false, а
+                // ждать его значило бы добавить время открытия порта к паузе, которую
+                // кассир и так отсчитывает глазами.
+                _ = display.ShowProbeAsync(probe.Number);
+                ProbeStepsRun++;
+
+                try
+                {
+                    await _probeDelay(ProbeStep, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+
+            ProbeStatus = I18nService.Instance["DisplayProbeDone"];
+        }
+        finally
+        {
+            IsProbing = false;
+        }
+    }
+
+    [RelayCommand]
+    private void StopProbe() => _probeCts?.Cancel();
+
+    /// <summary>Ставит комбинацию, номер которой кассир прочитал на табло.</summary>
+    [RelayCommand]
+    private void ApplyProbeNumber()
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+
+        var probe = int.TryParse(ProbeNumberText, out var number)
+            ? DisplayProbePlan.Find(number)
+            : null;
+
+        if (probe == null)
+        {
+            ErrorMessage = I18nService.Instance["DisplayProbeBadNumber"];
+            return;
+        }
+
+        SelectedDisplayProtocol = probe.Protocol;
+        CustomerDisplayBaudRateText = probe.BaudRate.ToString();
+        StatusMessage = string.Format(
+            I18nService.Instance["DisplayProbeApplied"], probe.Number);
     }
 
     /// <summary>Confirmation overlay state. This screen is reachable from the login screen,
@@ -710,6 +866,11 @@ public partial class SettingsViewModel : ViewModelBase
             _settingsService.CustomerDisplayBaudRate = displayBaud;
         if (SelectedDisplayCodePage != null)
             _settingsService.CustomerDisplayCodePageId = SelectedDisplayCodePage.Id;
+        if (SelectedDisplayProtocol != null)
+            _settingsService.CustomerDisplayProtocolId = SelectedDisplayProtocol.Id;
+        if (SelectedDisplayFraming != null)
+            _settingsService.CustomerDisplayFramingId = SelectedDisplayFraming.Id;
+        _settingsService.CustomerDisplayDtrRts = CustomerDisplayDtrRts;
 
         // Task 24: same cast as the constructor above.
         if (_settingsService is IQueueSettings queueSettings)
