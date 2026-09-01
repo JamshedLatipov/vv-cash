@@ -1346,34 +1346,64 @@ public static class ReceiptRenderer
     private static void RenderBlock(ReceiptBlock block, ReceiptTemplate template, SaleReceiptData sale,
         IReadOnlyDictionary<string, string> values, List<ReceiptOp> ops)
     {
+        // ПОРЯДОК ОПЕРАЦИЙ ВОКРУГ БЛОКА — НЕ ВКУСОВЩИНА, А УСЛОВИЕ БАЙТ-В-БАЙТ.
+        //
+        // Каждый блок обрамляется одинаково: пролог Align → DoubleSize → Bold,
+        // тело, эпилог Bold(false) → DoubleSize(false). Три свойства этой схемы
+        // проверены на всех пяти фикстурах замка, и каждое обязательно.
+        //
+        // 1. Атрибуты СБРАСЫВАЮТСЯ после блока, а не только выставляются перед.
+        //    Нынешний код выключает двойной размер сразу после шапки, и без
+        //    эпилога этот ESC ! уезжает вниз по чеку — на бумаге весь корпус
+        //    пошёл бы двойной шириной, а каждая строка переносилась бы.
+        //
+        // 2. Сбрасывают ВСЕ блоки, включая нетекстовые. Иначе разделитель,
+        //    позиции и итоги не объявляют шрифтовых атрибутов вовсе, и жирный,
+        //    включённый на номере бегунка, дотягивается до конца чека.
+        //
+        // 3. В прологе DoubleSize идёт СНАРУЖИ Bold, в эпилоге наоборот. Это
+        //    прямое следствие того, что ESC ! гасит emphasized, а эмиттер после
+        //    него переиздаёт ESC E (см. EscPosEmitter, ветка DoubleSizeOp).
+        //    Обратный порядок даёт на чеке с бегунком 418 байт против 424:
+        //    пара «выключить и тут же включить двойной размер» схлопывается,
+        //    и замок краснеет.
+        //
+        // Лишних байтов эта схема не рождает: эмиттер следит за состоянием и
+        // молчит, когда команда уже в силе.
+
+        // Проверка пустой подстановки — ДО пролога. Блок, который решено не
+        // печатать, не должен оставить за собой висячий AlignOp: смена
+        // выравнивания без текста выдаёт ESC a в никуда и сдвигает байты.
+        string? line = null;
+        if (block is TextBlock tb && !TrySubstitute(tb.Content, values, out line)) return;
+
+        ops.Add(new AlignOp(block.Align));
+
         switch (block)
         {
             case TextBlock t:
-                if (!TrySubstitute(t.Content, values, out var line)) return;
-                ops.Add(new AlignOp(t.Align));
-                ops.Add(new BoldOp(t.Bold));
                 ops.Add(new DoubleSizeOp(t.DoubleSize));
-                ops.Add(new TextOp(line));
+                ops.Add(new BoldOp(t.Bold));
+                ops.Add(new TextOp(line!));
                 break;
 
             case LineBlock l:
                 var count = l.Count > 0 ? l.Count : template.Width;
                 var ch = string.IsNullOrEmpty(l.Char) ? "-" : l.Char.Substring(0, 1);
-                ops.Add(new AlignOp(l.Align));
-                ops.Add(new BoldOp(false));
                 ops.Add(new DoubleSizeOp(false));
+                ops.Add(new BoldOp(false));
                 ops.Add(new TextOp(string.Concat(System.Linq.Enumerable.Repeat(ch, count))));
                 break;
 
             case FeedBlock f:
-                ops.Add(new AlignOp(f.Align));
+                ops.Add(new DoubleSizeOp(false));
+                ops.Add(new BoldOp(false));
                 ops.Add(new FeedOp(f.Lines));
                 break;
 
             case FieldsBlock fields:
-                ops.Add(new AlignOp(fields.Align));
-                ops.Add(new BoldOp(false));
                 ops.Add(new DoubleSizeOp(false));
+                ops.Add(new BoldOp(false));
                 foreach (var field in fields.Fields)
                 {
                     if (!values.TryGetValue(field.Key, out var value) || string.IsNullOrWhiteSpace(value))
@@ -1383,9 +1413,8 @@ public static class ReceiptRenderer
                 break;
 
             case ItemsBlock items:
-                ops.Add(new AlignOp(items.Align));
-                ops.Add(new BoldOp(false));
                 ops.Add(new DoubleSizeOp(false));
+                ops.Add(new BoldOp(false));
                 foreach (var item in sale.Items) RenderItem(item, items, template.Width, ops);
                 break;
 
@@ -1398,6 +1427,9 @@ public static class ReceiptRenderer
                 // просто не печатается — это лучше, чем падение на чеке.
                 break;
         }
+
+        ops.Add(new BoldOp(false));
+        ops.Add(new DoubleSizeOp(false));
     }
 
     private static void RenderItem(CartItem item, ItemsBlock cfg, int width, List<ReceiptOp> ops)
@@ -1422,7 +1454,9 @@ public static class ReceiptRenderer
 
     private static void RenderTotals(TotalsBlock cfg, SaleReceiptData sale, int width, List<ReceiptOp> ops)
     {
-        ops.Add(new AlignOp(cfg.Align));
+        // AlignOp здесь нет: его добавляет общий пролог RenderBlock, одинаковый
+        // для всех блоков. Дубль был бы безвреден (эмиттер его подавит), но
+        // рассогласовал бы этот метод с остальными.
         ops.Add(new DoubleSizeOp(false));
         ops.Add(new BoldOp(false));
 
