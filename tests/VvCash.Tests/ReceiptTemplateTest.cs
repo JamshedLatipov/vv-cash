@@ -119,6 +119,40 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void Parse_ReadsATypeDiscriminator_RegardlessOfItsPositionInTheObject()
+    {
+        // Шаблоны пишет конструктор бэкофиса на TypeScript: JSON.stringify
+        // кладёт ключи в порядке полей литерала, и "type" там появляется там,
+        // где его поставил автор формы — необязательно первым. System.Text.Json
+        // по умолчанию требует дискриминатор первым свойством и бросает
+        // NotSupportedException иначе; калитка KnownTypes читает по ключу и
+        // порядок ей безразличен, так что блок проходил бы её, а потом
+        // Deserialize бросал, и поблочный catch тихо его глотал — блок исчезал
+        // без следа, хотя JSON был полностью корректен.
+        var typeFirst = """{"version":1,"blocks":[{"type":"text","content":"A"}]}""";
+        var typeMiddle = """{"version":1,"blocks":[{"content":"B","type":"text","bold":true}]}""";
+        var typeLast = """{"version":1,"blocks":[{"content":"C","bold":true,"type":"text"}]}""";
+
+        Assert.Equal("A", Assert.IsType<TextBlock>(ReceiptTemplate.Parse(typeFirst).Blocks[0]).Content);
+        Assert.Equal("B", Assert.IsType<TextBlock>(ReceiptTemplate.Parse(typeMiddle).Blocks[0]).Content);
+        Assert.Equal("C", Assert.IsType<TextBlock>(ReceiptTemplate.Parse(typeLast).Blocks[0]).Content);
+    }
+
+    [Fact]
+    public void Parse_TreatsANonIntegerWidth_AsAbsent_AndKeepsTheBlocks()
+    {
+        // Раньше "width":"сорок" ронял GetValue<int>() и с ним весь Deserialize
+        // на документ целиком, хотя блоки рядом разбираются поштучно и
+        // терпимо — асимметрия без причины. TryGetValue не бросает: битая
+        // ширина просто не переопределяет дефолт свойства (32), а блок "A"
+        // остаётся в шаблоне.
+        var t = ReceiptTemplate.Parse("""{"version":1,"width":"сорок","blocks":[{"type":"text","content":"A"}]}""");
+
+        Assert.Equal(32, t.Width);
+        Assert.Equal("A", Assert.IsType<TextBlock>(t.Blocks[0]).Content);
+    }
+
+    [Fact]
     public void Parse_DropsAStructurallyBrokenBlock_ButKeepsItsNeighbors()
     {
         // До поблочной десериализации один битый блок ронял единый
@@ -259,6 +293,22 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void LineBlock_StripsAControlCharacterFromChar_AndFallsBackToTheDash()
+    {
+        // Док-комментарий TextOp прямо запрещает перевод строки в печатаемой
+        // строке: она проходит эмиттер насквозь и даёт на бумаге лишний
+        // перенос мимо всей логики ширины. Пустой Char уже клампился, но "\n"
+        // — непустая строка, и она проходила бы как есть до этой правки.
+        Assert.Equal("-", new LineBlock { Char = "\n" }.Char);
+    }
+
+    [Fact]
+    public void LineBlock_TakesTheFirstNonControlCharacter()
+    {
+        Assert.Equal("X", new LineBlock { Char = "\nX" }.Char);
+    }
+
+    [Fact]
     public void LineBlock_ClampsANegativeCount_ToZero()
     {
         Assert.Equal(0, new LineBlock { Count = -5 }.Count);
@@ -277,6 +327,43 @@ public class ReceiptTemplateTest
     public void FeedBlock_ClampsANegativeLines_ToZero()
     {
         Assert.Equal(0, new FeedBlock { Lines = -5 }.Lines);
+    }
+
+    [Fact]
+    public void FeedBlock_ClampsAnExcessiveLines_ToTheCeiling()
+    {
+        // EscPosEmitter пишет перевод строки в цикле по Lines. "lines":2e9 из
+        // мусорного конфига укладывается в int (2 000 000 000 меньше
+        // Int32.MaxValue), так что это не бросило бы на десериализации — оно
+        // дошло бы до эмиттера и стало бы двумя гигабайтами в MemoryStream и
+        // OutOfMemoryException посреди чека. Потолок тот же, что у Count у
+        // LineBlock — 200, чтобы не заводить второе число с той же ролью.
+        Assert.Equal(200, new FeedBlock { Lines = 2_000_000_000 }.Lines);
+    }
+
+    [Fact]
+    public void TextBlock_ReplacesNewlinesInContentWithASpace()
+    {
+        // TextOp прямо запрещает перевод строки в своей строке: он прошёл бы
+        // эмиттер насквозь и дал бы на бумаге две строки мимо всей логики
+        // ширины и без пролога/эпилога атрибутов, которые рендерер ставит
+        // ровно вокруг одной строки на блок.
+        Assert.Equal("Строка 1 Строка 2", new TextBlock { Content = "Строка 1\nСтрока 2" }.Content);
+        Assert.Equal("A B", new TextBlock { Content = "A\r\nB" }.Content);
+    }
+
+    [Fact]
+    public void Parse_ClampsANewlineInLineCharAndTextContent()
+    {
+        var t = ReceiptTemplate.Parse("""
+        {"version":1,"blocks":[
+          {"type":"line","char":"\n"},
+          {"type":"text","content":"A\nB"}
+        ]}
+        """);
+
+        Assert.Equal("-", Assert.IsType<LineBlock>(t.Blocks[0]).Char);
+        Assert.Equal("A B", Assert.IsType<TextBlock>(t.Blocks[1]).Content);
     }
 
     [Fact]

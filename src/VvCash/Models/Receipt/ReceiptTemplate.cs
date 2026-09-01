@@ -42,12 +42,24 @@ public sealed class ReceiptTemplate
     /// потом читает касса. Две раздельные копии одних и тех же
     /// JsonSerializerOptions — тот самый дубль, который разъедется в первый же
     /// день, когда кто-то добавит WriteIndented на одной стороне и забудет про
-    /// другую.</summary>
+    /// другую.
+    ///
+    /// AllowOutOfOrderMetadataProperties = true — иначе System.Text.Json требует
+    /// дискриминатор ("type") ПЕРВЫМ свойством объекта и бросает
+    /// NotSupportedException, если он стоит хоть на втором месте. Шаблоны пишет
+    /// конструктор бэкофиса на TypeScript: JSON.stringify кладёт ключи в
+    /// порядке полей литерала, и "type" там появляется там, где его поставил
+    /// автор формы, а не первым. KnownTypes ниже эту зависимость от порядка не
+    /// разделяет — он читает по ключу — так что без этого флага калитка
+    /// пропускала бы блок, а Deserialize следом бросал, поблочный catch глотал
+    /// исключение, и блок тихо пропадал из чека вместо того, чтобы напечататься
+    /// или хотя бы шумно уйти в Default целиком.</summary>
     internal static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
+        AllowOutOfOrderMetadataProperties = true,
     };
 
     /// <summary>Разбирает значение опции receipt_template. Любая беда — пустое
@@ -85,7 +97,14 @@ public sealed class ReceiptTemplate
     /// блок разбирается отдельно, в своём try/catch: битое поле внутри одного
     /// блока (число там, где ждали строку, или наоборот) роняет только этот
     /// блок, а не документ целиком — раньше один общий Deserialize на весь
-    /// шаблон терял вместе с плохим блоком и соседние, исправные.</summary>
+    /// шаблон терял вместе с плохим блоком и соседние, исправные.
+    ///
+    /// Регистр ключей внутри блока (Options.PropertyNameCaseInsensitive) и
+    /// снаружи (индексаторы node["version"]/node["blocks"]/node["width"], у
+    /// которых регистр по умолчанию точный) — намеренно разные политики, а не
+    /// недосмотр: наш собственный конструктор шаблонов их не различает, а
+    /// исправлять асимметрию, которую никто не может воспроизвести, — не
+    /// повод трогать код.</summary>
     public static ReceiptTemplate Parse(string? raw)
     {
         raw = raw?.TrimStart('\uFEFF');
@@ -113,8 +132,6 @@ public sealed class ReceiptTemplate
                 return Default;
             }
 
-            var width = node["width"]?.GetValue<int>() ?? 32;
-
             var blocks = new List<ReceiptBlock>();
             foreach (var blockNode in blocksArray)
             {
@@ -141,7 +158,18 @@ public sealed class ReceiptTemplate
                 }
             }
 
-            return new ReceiptTemplate { Version = version, Width = width, Blocks = blocks };
+            // TryGetValue, не "?? 32": свойство Width уже отдаёт 32 само (см.
+            // его инициализатор), так что второй копии того же литерала здесь
+            // не нужно — раньше именно комментарий на этом месте объяснял,
+            // почему второго места с той же политикой быть не должно, а
+            // "?? 32" само стало этим вторым местом. Заодно уходит асимметрия:
+            // "width":"сорок" раньше ронял GetValue<int>() и с ним весь
+            // шаблон, хотя блоки рядом разбираются поштучно и терпимо —
+            // TryGetValue не бросает, и битая ширина просто не переопределяет
+            // дефолт свойства, а остальной шаблон (блоки) остаётся в силе.
+            var t = new ReceiptTemplate { Version = version, Blocks = blocks };
+            if (node["width"] is JsonValue w && w.TryGetValue<int>(out var width)) t.Width = width;
+            return t;
         }
         catch (Exception ex)
         {

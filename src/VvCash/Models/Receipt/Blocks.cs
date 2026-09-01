@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace VvCash.Models.Receipt;
 
@@ -7,7 +8,18 @@ namespace VvCash.Models.Receipt;
 /// скобках, без циклов и условий; цикл по товарам делает ItemsBlock.</summary>
 public sealed class TextBlock : ReceiptBlock
 {
-    public string Content { get; set; } = string.Empty;
+    /// <summary>Перевод строки заменяется пробелом: TextOp прямо запрещает его
+    /// в своей строке — он прошёл бы эмиттер насквозь и дал бы на бумаге две
+    /// строки мимо всей логики ширины и без пролога/эпилога атрибутов, которые
+    /// рендерер ставит вокруг ровно одной строки на блок.</summary>
+    private string _content = string.Empty;
+
+    public string Content
+    {
+        get => _content;
+        set => _content = (value ?? string.Empty).Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+    }
+
     public bool Bold { get; set; }
     public bool DoubleSize { get; set; }
 }
@@ -20,18 +32,36 @@ public sealed class LineBlock : ReceiptBlock
 {
     /// <summary>Пустая строка уронила бы рендер на первом же символе
     /// (IndexOutOfRangeException) — разбор JSON не единственный вход, тот же
-    /// довод, что у ReceiptTemplate.Width.</summary>
+    /// довод, что у ReceiptTemplate.Width. Управляющие символы (перевод строки
+    /// среди них) отбрасываются, а не берутся как есть: рендерер и так режет
+    /// строку до первого символа (l.Char.Substring(0, 1)), но делает это на
+    /// сырых char, и "\n" первым символом дал бы на бумаге лишний перевод
+    /// строки в обход всей логики ширины — тот же класс беды, что TextOp
+    /// прямо запрещает в своей строке. Кламп здесь, а не только в рендерере:
+    /// разбор — не единственный вход, и будущий генератор превью в бэкофисе
+    /// читает это же свойство напрямую.</summary>
     private string _char = "-";
 
     public string Char
     {
         get => _char;
-        set => _char = string.IsNullOrEmpty(value) ? "-" : value;
+        set
+        {
+            var cleaned = new string((value ?? string.Empty).Where(c => !char.IsControl(c)).ToArray());
+            _char = cleaned.Length > 0 ? cleaned.Substring(0, 1) : "-";
+        }
     }
 
     /// <summary>Отрицательное число уронило бы рендер (повторяемая строка не
     /// принимает отрицательную длину), а огромное — ленту и память. Потолок —
-    /// 200, вдвое больше самой широкой из поддерживаемых лент.</summary>
+    /// 200, вдвое больше самой широкой из поддерживаемых лент.
+    ///
+    /// Клампы Width/Char молчат, потому что подмена там очевидна на глаз по
+    /// самому чеку (не та ширина, не тот символ). Здесь — нет: {"count":300}
+    /// тихо становится 200, и ничего на бумаге не укажет, что значение вообще
+    /// было отвергнуто, а не выбрано таким намеренно. Единственный кламп в
+    /// этом файле, меняющий вид бумаги без поломки, и потому единственный,
+    /// которому нужна строка в лог.</summary>
     private const int MaxCount = 200;
 
     private int _count;
@@ -39,20 +69,32 @@ public sealed class LineBlock : ReceiptBlock
     public int Count
     {
         get => _count;
-        set => _count = value < 0 ? 0 : Math.Min(value, MaxCount);
+        set
+        {
+            var clamped = value < 0 ? 0 : Math.Min(value, MaxCount);
+            if (clamped != value)
+                Console.WriteLine($"[LineBlock] Count {value} вне диапазона [0, {MaxCount}], использую {clamped}");
+            _count = clamped;
+        }
     }
 }
 
 public sealed class FeedBlock : ReceiptBlock
 {
     /// <summary>Отрицательное число строк подачи бессмысленно и уронило бы
-    /// рендер тем же способом, что и отрицательный Count у LineBlock.</summary>
+    /// рендер тем же способом, что и отрицательный Count у LineBlock.
+    /// Верхний потолок — тот же, что у Count (200): EscPosEmitter пишет
+    /// перевод строки в цикле по Lines, и "lines":2000000000 из мусорного
+    /// конфига — это не косметика, а два гигабайта в MemoryStream и
+    /// OutOfMemoryException посреди чека.</summary>
+    private const int MaxLines = 200;
+
     private int _lines = 1;
 
     public int Lines
     {
         get => _lines;
-        set => _lines = value < 0 ? 0 : value;
+        set => _lines = value < 0 ? 0 : Math.Min(value, MaxLines);
     }
 }
 
