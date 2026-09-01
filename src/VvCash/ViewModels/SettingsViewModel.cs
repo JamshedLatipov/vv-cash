@@ -188,10 +188,26 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private EscPosCodePage? _selectedDisplayCodePage = EscPosCodePages.Default;
 
+    /// <summary>Диалект табло. Отдельно от кодовой страницы: та решает, какими байтами
+    /// кодировать буквы, а этот — какими командами их обрамить, и у табло эти две
+    /// настройки задаются независимо (часто DIP-переключателями на задней стенке).</summary>
+    [ObservableProperty]
+    private IDisplayProtocol? _selectedDisplayProtocol = DisplayProtocols.Default;
+
+    [ObservableProperty]
+    private SerialFraming? _selectedDisplayFraming = SerialFramings.Default;
+
+    [ObservableProperty]
+    private bool _customerDisplayDtrRts;
+
     /// <summary>COM-порты машины. Тот же источник, что у принтеров на COM.</summary>
     public ObservableCollection<string> AvailableDisplayPorts { get; } = new();
 
     public IReadOnlyList<EscPosCodePage> AvailableCodePages { get; } = EscPosCodePages.All;
+
+    public IReadOnlyList<IDisplayProtocol> AvailableDisplayProtocols { get; } = DisplayProtocols.All;
+
+    public IReadOnlyList<SerialFraming> AvailableDisplayFramings { get; } = SerialFramings.All;
 
     /// <summary>Task 24: пять настроек очереди заказов и кухни (см.
     /// IQueueSettings). Читаются/пишутся через приведение _settingsService к
@@ -357,6 +373,9 @@ public partial class SettingsViewModel : ViewModelBase
         CustomerDisplayPort = _settingsService.CustomerDisplayPort;
         CustomerDisplayBaudRateText = _settingsService.CustomerDisplayBaudRate.ToString();
         SelectedDisplayCodePage = EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId);
+        SelectedDisplayProtocol = DisplayProtocols.Resolve(_settingsService.CustomerDisplayProtocolId);
+        SelectedDisplayFraming = SerialFramings.Resolve(_settingsService.CustomerDisplayFramingId);
+        CustomerDisplayDtrRts = _settingsService.CustomerDisplayDtrRts;
         foreach (var port in PrinterDiscoveryService.GetComPorts())
             AvailableDisplayPorts.Add(port);
         // Сохранённый порт мог быть не переподключён к моменту открытия экрана — тот
@@ -710,6 +729,11 @@ public partial class SettingsViewModel : ViewModelBase
             _settingsService.CustomerDisplayBaudRate = displayBaud;
         if (SelectedDisplayCodePage != null)
             _settingsService.CustomerDisplayCodePageId = SelectedDisplayCodePage.Id;
+        if (SelectedDisplayProtocol != null)
+            _settingsService.CustomerDisplayProtocolId = SelectedDisplayProtocol.Id;
+        if (SelectedDisplayFraming != null)
+            _settingsService.CustomerDisplayFramingId = SelectedDisplayFraming.Id;
+        _settingsService.CustomerDisplayDtrRts = CustomerDisplayDtrRts;
 
         // Task 24: same cast as the constructor above.
         if (_settingsService is IQueueSettings queueSettings)

@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Models.Api;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
+using VvCash.Services.Hardware;
 using VvCash.Services.Queue;
 using VvCash.ViewModels;
 using Xunit;
@@ -38,6 +40,9 @@ public class SettingsViewModelTest
         public string CustomerDisplayPort { get; set; } = string.Empty;
         public int CustomerDisplayBaudRate { get; set; } = 9600;
         public string CustomerDisplayCodePageId { get; set; } = string.Empty;
+        public string CustomerDisplayProtocolId { get; set; } = string.Empty;
+        public string CustomerDisplayFramingId { get; set; } = string.Empty;
+        public bool CustomerDisplayDtrRts { get; set; }
         public QueueRole QueueRole { get; set; } = QueueRole.Off;
         public string QueueServerAddress { get; set; } = string.Empty;
         public int QueuePort { get; set; } = 8770;
@@ -354,6 +359,46 @@ public class SettingsViewModelTest
         await vm.TestPrintCommand.ExecuteAsync(vm.Printers[0]);
 
         Assert.Same(EscPosCodePages.Cp1251, vm.LastTestPrintService?.CodePage);
+    }
+
+    [Fact]
+    public void CustomerDisplayProtocolAndFraming_RoundTripThroughSettings()
+    {
+        // Значения нарочно не дефолтные: подмена Save на захардкоженную запись,
+        // забывшую один из трёх ключей, обязана провалить проверку, а не остаться
+        // зелёной на совпадении со значением по умолчанию.
+        //
+        // BackendUrl задан не для красоты: Save отказывается писать что-либо, пока
+        // адрес сервера не проходит проверку, и с пустым адресом этот тест проверял
+        // бы ранний выход, а не запись настроек дисплея.
+        var settings = new FakeSettings { BackendUrl = "https://example.test/api/v1/" };
+        var vm = BuildWith(settings);
+
+        vm.SelectedDisplayProtocol = DisplayProtocols.Numeric;
+        vm.SelectedDisplayFraming = SerialFramings.SevenE1;
+        vm.CustomerDisplayDtrRts = true;
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal("NUMERIC", settings.CustomerDisplayProtocolId);
+        Assert.Equal("7E1", settings.CustomerDisplayFramingId);
+        Assert.True(settings.CustomerDisplayDtrRts);
+    }
+
+    [Fact]
+    public void CustomerDisplayProtocolAndFraming_AreReadBackOnOpen()
+    {
+        var settings = new FakeSettings
+        {
+            CustomerDisplayProtocolId = "CD5220",
+            CustomerDisplayFramingId = "7E1",
+            CustomerDisplayDtrRts = true,
+        };
+
+        var vm = BuildWith(settings);
+
+        Assert.Same(DisplayProtocols.Cd5220, vm.SelectedDisplayProtocol);
+        Assert.Same(SerialFramings.SevenE1, vm.SelectedDisplayFraming);
+        Assert.True(vm.CustomerDisplayDtrRts);
     }
 
     [Fact]
