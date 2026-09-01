@@ -83,17 +83,33 @@ public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : Recei
     public int WidthBytes
     {
         get;
-        init => field = ValidateDimension(value, Height, Raster, isWidth: true);
-    } = ValidateDimension(WidthBytes, Height, Raster, isWidth: true);
+        init => field = ValidateDimension(value, nameof(WidthBytes), Height, Raster, isWidth: true);
+    } = ValidateDimension(WidthBytes, nameof(WidthBytes), Height, Raster, isWidth: true);
 
     public int Height
     {
         get;
-        init => field = ValidateDimension(value, WidthBytes, Raster, isWidth: false);
-    } = ValidateDimension(Height, WidthBytes, Raster, isWidth: false);
+        init => field = ValidateDimension(value, nameof(Height), WidthBytes, Raster, isWidth: false);
+    } = ValidateDimension(Height, nameof(Height), WidthBytes, Raster, isWidth: false);
 
+    /// <summary>Диагностика на пути, который сегодня никто не вызывает
+    /// (BitmapOp не конструирует ни один боевой код), но раз уж инвариант
+    /// здесь — пусть сообщения не вводят в заблуждение. Три правки:
+    /// null даёт ArgumentNullException, а не NullReferenceException из
+    /// raster.LongLength; диапазон WidthBytes/Height проверяется РАНЬШЕ
+    /// сравнения длины — без этого отрицательная ширина (пока её
+    /// собственный init/инициализатор ещё не отработал: Raster идёт первым
+    /// параметром и проверяется первым) давала бы невнятное "нужно ровно
+    /// −4" вместо понятного "вне диапазона"; оба вызова ValidateDimension
+    /// передают конкретное имя свойства, а не общее "value" параметра
+    /// самого метода.</summary>
     private static byte[] ValidateRaster(byte[] raster, int widthBytes, int height)
     {
+        if (raster is null) throw new ArgumentNullException(nameof(Raster));
+
+        EnsureDimensionInRange(widthBytes, nameof(WidthBytes));
+        EnsureDimensionInRange(height, nameof(Height));
+
         var expected = (long)widthBytes * height;
         if (raster.LongLength != expected)
             throw new ArgumentException(
@@ -103,11 +119,9 @@ public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : Recei
         return raster;
     }
 
-    private static int ValidateDimension(int value, int otherDimension, byte[] raster, bool isWidth)
+    private static int ValidateDimension(int value, string paramName, int otherDimension, byte[] raster, bool isWidth)
     {
-        if (value < 0 || value > MaxDimension)
-            throw new ArgumentOutOfRangeException(nameof(value), value,
-                $"Размер вне диапазона GS v 0 (0..{MaxDimension}).");
+        EnsureDimensionInRange(value, paramName);
 
         var expected = isWidth ? (long)value * otherDimension : (long)otherDimension * value;
         if (raster.LongLength != expected)
@@ -116,5 +130,12 @@ public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : Recei
                 $"нужно ровно {expected}.");
 
         return value;
+    }
+
+    private static void EnsureDimensionInRange(int value, string paramName)
+    {
+        if (value < 0 || value > MaxDimension)
+            throw new ArgumentOutOfRangeException(paramName, value,
+                $"Размер вне диапазона GS v 0 (0..{MaxDimension}).");
     }
 }

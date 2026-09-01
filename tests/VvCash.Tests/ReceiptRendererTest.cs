@@ -304,12 +304,31 @@ public class ReceiptRendererTest
         foreach (var type in knownTypes)
         {
             var block = (ReceiptBlock)Activator.CreateInstance(type)!;
+            FillMinimalData(block);
             var t = One(block);
 
             var ex = Record.Exception(() => ReceiptRenderer.Render(t, Sale(Glue())));
 
             Assert.True(ex is not NotSupportedException,
                 $"{type.Name} провалился в default рендерера: {ex?.Message}");
+        }
+    }
+
+    /// <summary>Activator.CreateInstance даёт значения по умолчанию — а у
+    /// QrBlock.Data и BarcodeBlock.Data это пустая строка. Рендерер
+    /// отбрасывает такой блок на гейте пустых данных ДО switch (см.
+    /// RenderBlock), независимо от того, есть ли для него ветка в switch.
+    /// Без этой подстановки тест выше не проверяет для этих двух типов
+    /// ровно ничего: и с веткой, и без неё блок с пустыми данными до
+    /// switch не долетает, а значит "полнота switch" для них оставалась бы
+    /// недоказанной — ту самую дыру и нашло ревью, отключив обе ветки и
+    /// увидев, что этот тест единственный из всех остаётся зелёным.</summary>
+    private static void FillMinimalData(ReceiptBlock block)
+    {
+        switch (block)
+        {
+            case QrBlock qr: qr.Data = "A"; break;
+            case BarcodeBlock bc: bc.Data = "A"; break;
         }
     }
 
