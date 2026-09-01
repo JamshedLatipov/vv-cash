@@ -53,4 +53,34 @@ public class DisplayProtocolTest
         Assert.All(bytes, b => Assert.True(b <= 0x7F));
         Assert.Contains("17", Encoding.ASCII.GetString(bytes));
     }
+
+    [Fact]
+    public void Cd5220_WritesEachLineWithItsOwnCommandAndTerminator()
+    {
+        // ESC Q A - верхняя строка, ESC Q B - нижняя, каждая закрывается CR. Строки
+        // добиваются пробелами до 20: часть клонов не гасит остаток строки по CR
+        // сама, и без набивки на табло оставался бы хвост предыдущего товара.
+        var protocol = new Cd5220DisplayProtocol();
+        var cp = EscPosCodePages.Cp866;
+
+        var actual = protocol.BuildItem("Молоко", 50m, cp);
+
+        var expected = new List<byte> { 0x1B, 0x51, 0x41 };
+        expected.AddRange(cp.Encoding.GetBytes("Молоко".PadRight(20)));
+        expected.Add(0x0D);
+        expected.AddRange(new byte[] { 0x1B, 0x51, 0x42 });
+        expected.AddRange(cp.Encoding.GetBytes("50.00".PadRight(20)));
+        expected.Add(0x0D);
+
+        Assert.Equal(expected.ToArray(), actual);
+    }
+
+    [Fact]
+    public void Cd5220_Probe_IsPlainAscii()
+    {
+        var bytes = new Cd5220DisplayProtocol().BuildProbe(17);
+
+        Assert.All(bytes, b => Assert.True(b <= 0x7F));
+        Assert.Contains("17", Encoding.ASCII.GetString(bytes));
+    }
 }
