@@ -1,14 +1,21 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
 using VvCash.Models.Receipt;
 using VvCash.Services.Data;
 using Xunit;
 
 namespace VvCash.Tests;
 
-public class ReceiptTemplateStorageTest
+public class ReceiptTemplateStorageTest : IDisposable
 {
+    // One instance of this test class per [Fact] (xUnit default), so this only ever
+    // collects the db file(s) that fact itself created via NewStorage().
+    private readonly List<string> _dbPaths = new();
+
     [Fact]
     public async Task RawTemplate_RoundTrips()
     {
@@ -25,7 +32,18 @@ public class ReceiptTemplateStorageTest
     {
         var storage = await NewStorage();
 
-        Assert.True(string.IsNullOrEmpty(await storage.GetReceiptTemplateAsync()));
+        // Assert.Equal(string.Empty, ...), not IsNullOrEmpty: the interface promises
+        // Task<string> under nullable — i.e. never null. IsNullOrEmpty is true for
+        // null too, so it would not catch a regression that returns null instead of "".
+        Assert.Equal(string.Empty, await storage.GetReceiptTemplateAsync());
+    }
+
+    [Fact]
+    public async Task Logo_IsEmpty_WhenNothingWasEverSynced()
+    {
+        var storage = await NewStorage();
+
+        Assert.Equal(string.Empty, await storage.GetReceiptLogoAsync());
     }
 
     [Fact]
@@ -57,13 +75,50 @@ public class ReceiptTemplateStorageTest
         Assert.Equal("AAECAw==", await storage.GetReceiptLogoAsync());
     }
 
+    /// <summary>Template and logo are two keys sharing the same Settings table and the
+    /// same SaveSettingAsync/GetSettingAsync helpers — a copy-paste that hardcodes the
+    /// wrong key string on one side would make them silently overwrite each other, and
+    /// no other test here would notice: every other test saves only one of the two.</summary>
+    [Fact]
+    public async Task Template_And_Logo_DoNotShareStorage()
+    {
+        var storage = await NewStorage();
+        var json = """{"version":1,"width":42,"blocks":[]}""";
+        var logo = "AAECAw==";
+
+        await storage.SaveReceiptTemplateAsync(json);
+        await storage.SaveReceiptLogoAsync(logo);
+
+        Assert.Equal(json, await storage.GetReceiptTemplateAsync());
+        Assert.Equal(logo, await storage.GetReceiptLogoAsync());
+    }
+
     /// <summary>InitializeAsync обязателен: именно он создаёт таблицу Settings,
     /// из которой всё это читается. Без него тест падает не про то.</summary>
-    private static async Task<OfflineStorageService> NewStorage()
+    private async Task<OfflineStorageService> NewStorage()
     {
-        var storage = new OfflineStorageService(
-            Path.Combine(Path.GetTempPath(), $"vvcash-receipt-{System.Guid.NewGuid():N}.db"));
+        var dbPath = Path.Combine(Path.GetTempPath(), $"vvcash-receipt-{Guid.NewGuid():N}.db");
+        _dbPaths.Add(dbPath);
+
+        var storage = new OfflineStorageService(dbPath);
         await storage.InitializeAsync();
         return storage;
+    }
+
+    /// <summary>Same pooling gotcha OfflineStorageServiceTest.Dispose documents:
+    /// Microsoft.Data.Sqlite pools connections by connection string, so the file
+    /// outlives a disposed SqliteConnection until the pool is cleared, and deleting it
+    /// first fails silently on Windows (file still in use).</summary>
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+
+        foreach (var dbPath in _dbPaths)
+        {
+            foreach (var path in new[] { dbPath, dbPath + "-wal", dbPath + "-shm", dbPath + "-journal" })
+            {
+                try { if (File.Exists(path)) File.Delete(path); } catch { /* best effort cleanup */ }
+            }
+        }
     }
 }
