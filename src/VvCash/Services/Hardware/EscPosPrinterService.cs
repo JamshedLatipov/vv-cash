@@ -139,7 +139,17 @@ public class EscPosPrinterService : IPrinterService
     /// собственную копию CmdCancelKanji с комментарием об этом же дублировании.
     /// Так что асимметрия — текущая граница объёма этой работы, а не
     /// промежуточное состояние с известной датой закрытия; перевод остальных
-    /// пяти — отдельная, пока не заведённая задача.</summary>
+    /// пяти — отдельная, пока не заведённая задача.
+    ///
+    /// Снимка списка здесь нет, в отличие от перегрузки выше (та оборачивает
+    /// items в new List&lt;CartItem&gt;): sale.Items уже типизирован как
+    /// IReadOnlyList — контракт, что список принадлежит вызывающему и не
+    /// изменится под рукой, а не сигнал скопировать его ещё раз. Снимок,
+    /// если он вообще нужен, — забота того, кто строит SaleReceiptData;
+    /// сегодня единственный вызывающий (PrintKitchenOrderAsync) уже получает
+    /// свой sale с items, снятыми через .ToList() выше по стеку, но по
+    /// другой причине — ClearCart() очищает корзину раньше, чем письмо
+    /// успевает уйти в очередь.</summary>
     public static byte[] BuildSaleReceipt(EscPosCodePage codePage, SaleReceiptData sale, ReceiptTemplate? template = null)
     {
         return EscPosEmitter.Emit(
@@ -493,7 +503,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Printer status subscriber failed: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Printer status subscriber failed: {chain}");
         }
     }
 
@@ -557,7 +568,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Cash drawer error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Cash drawer error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }

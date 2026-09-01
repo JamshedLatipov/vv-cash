@@ -3551,9 +3551,18 @@ public class PosViewModelSellerGateTest
 
         // The kitchen slip was attempted and failed...
         Assert.Single(deps.PrinterService.KitchenOrders);
-        // ...but the sale completed anyway.
+        // ...but the sale completed anyway, and the sale receipt itself printed fine —
+        // a failing kitchen printer must not leak into the status line that reports on
+        // the customer's own receipt. Compared against I18nService itself, not the
+        // English literal it used to be: both status lines go through the same lookup
+        // now (see the review note at their call site in PosViewModel), and the test
+        // host never initializes the real dictionary, so every key resolves to its
+        // "[key]" placeholder here (see
+        // SettingsViewModelTest.CheckDisplay_WithNoPortConfigured_SaysThePortIsMissing_NotThatTheDisplayFailed).
+        // A wrong key — e.g. the kitchen failure wrongly flipping this to
+        // PaymentProcessedReceiptNotPrinted — would still make this assertion fail.
         Assert.Empty(vm.CartItems);
-        Assert.Equal("Payment processed. Thank you!", vm.StatusMessage);
+        Assert.Equal(I18nService.Instance["PaymentProcessed"], vm.StatusMessage);
     }
 
     [Fact]
@@ -3562,8 +3571,8 @@ public class PosViewModelSellerGateTest
         // The payment has already posted (or queued) by the time PrintReceiptAsync runs,
         // so a print failure here cannot roll the sale back — the only thing left to get
         // right is not lying about it. Before this fix the returned bool was discarded and
-        // StatusMessage always read "Payment processed. Thank you!", even over a receipt
-        // that never came out of the printer.
+        // StatusMessage always read the plain "Payment processed. Thank you!" success
+        // line, even over a receipt that never came out of the printer.
         using var vm = CreateViewModel(out var deps);
         deps.PrinterService.ReceiptFails = true;
         deps.SellerSession.SetCurrent(MakeSeller("s1"));
@@ -3583,9 +3592,12 @@ public class PosViewModelSellerGateTest
         // SettingsViewModelTest.CheckDisplay_WithNoPortConfigured_SaysThePortIsMissing_NotThatTheDisplayFailed:
         // the test host never initializes the real dictionary, so every key resolves to
         // its "[key]" placeholder here. That a real translation exists for this key in
-        // every locale is I18nLocaleTest's job, not this test's.
+        // every locale is I18nLocaleTest's job, not this test's. NotEqual against the
+        // success key (PaymentProcessed), not the old English literal — both branches go
+        // through I18nService now, so the literal would never match either way and the
+        // assertion would stop meaning anything.
         Assert.Equal(I18nService.Instance["PaymentProcessedReceiptNotPrinted"], vm.StatusMessage);
-        Assert.NotEqual("Payment processed. Thank you!", vm.StatusMessage);
+        Assert.NotEqual(I18nService.Instance["PaymentProcessed"], vm.StatusMessage);
     }
 
     [Fact]

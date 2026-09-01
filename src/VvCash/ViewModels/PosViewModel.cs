@@ -2524,8 +2524,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         // already carries this seller's id — from here on nobody is
                         // confirmed. Only on this success branch: see EndReceipt.
                         EndReceipt();
+                        // Both branches now go through I18nService: a hardcoded English
+                        // literal on the success path and a localized one on the failure
+                        // path meant the status line spoke two different languages
+                        // depending on whether the receipt printed, on a register set to
+                        // any language other than English.
                         StatusMessage = receiptPrinted
-                            ? "Payment processed. Thank you!"
+                            ? I18nService.Instance["PaymentProcessed"]
                             : I18nService.Instance["PaymentProcessedReceiptNotPrinted"];
 
                         if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)

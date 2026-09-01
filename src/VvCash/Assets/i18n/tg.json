@@ -77,6 +77,7 @@
   "TestPrint": "Чопи санҷишӣ",
   "TestPrintSent": "Чеки санҷишӣ фиристода шуд",
   "TestPrintFailed": "Чопи санҷишӣ иҷро нашуд:",
+  "PaymentProcessed": "Пардохт анҷом ёфт. Ташаккур барои харид!",
   "PaymentProcessedReceiptNotPrinted": "Пардохт анҷом ёфт, аммо чек чоп нашуд.",
   "CustomerDisplay": "Дисплейи харидор",
   "DisplayPort": "Порт",

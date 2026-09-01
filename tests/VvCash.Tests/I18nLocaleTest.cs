@@ -71,19 +71,38 @@ public class I18nLocaleTest
     }
 
     [Fact]
-    public void PaymentProcessedReceiptNotPrinted_ExistsInEveryLocale()
+    public void PaymentProcessedStatusKeys_ExistInEveryLocale()
     {
-        // PosViewModel reads this key when the sale posted but PrintReceiptAsync came
-        // back false — the one branch that used to tell the cashier "Thank you!" over a
-        // receipt that never printed. An untranslated locale would show "[key]" instead,
-        // which at least is not a false "all good", but a real translation is the point.
+        // PosViewModel picks between these two after a sale posts, depending on whether
+        // PrintReceiptAsync came back true or false — the pair that used to leave the
+        // cashier reading "Thank you!" in English over a receipt that never printed, on
+        // any register set to a language other than English. An untranslated locale
+        // would show "[key]" instead, which at least is not a false "all good", but a
+        // real translation is the point.
+        string[] keys = { "PaymentProcessed", "PaymentProcessedReceiptNotPrinted" };
+
         foreach (var locale in Locales)
         {
             var map = Load(locale);
-            Assert.True(map.ContainsKey("PaymentProcessedReceiptNotPrinted"),
-                $"{locale}.json: нет ключа PaymentProcessedReceiptNotPrinted");
-            Assert.False(string.IsNullOrWhiteSpace(map["PaymentProcessedReceiptNotPrinted"]),
-                $"{locale}.json: PaymentProcessedReceiptNotPrinted пуст");
+            foreach (var key in keys)
+            {
+                Assert.True(map.ContainsKey(key), $"{locale}.json: нет ключа {key}");
+                Assert.False(string.IsNullOrWhiteSpace(map[key]), $"{locale}.json: {key} пуст");
+            }
+        }
+    }
+
+    [Fact]
+    public void PaymentProcessed_IsNotTheSameStringAsPaymentProcessedReceiptNotPrinted()
+    {
+        // The two outcomes read very differently to a cashier — one says the receipt is
+        // in the customer's hand, the other says it is not — and a copy-paste that left
+        // one locale's translation identical to the other would erase that difference
+        // exactly where it matters, on the till itself.
+        foreach (var locale in Locales)
+        {
+            var map = Load(locale);
+            Assert.NotEqual(map["PaymentProcessed"], map["PaymentProcessedReceiptNotPrinted"]);
         }
     }
 
