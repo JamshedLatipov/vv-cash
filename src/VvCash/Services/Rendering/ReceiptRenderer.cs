@@ -25,13 +25,16 @@ public static class ReceiptRenderer
             RenderBlock(block, template, sale, values, ops);
         }
 
-        // Резать нечего, если на бумагу ничего не вышло. Считать по длине ops
-        // (как было раньше) неверно: AlignOp/BoldOp/DoubleSizeOp сами по себе
-        // ничего не печатают, а их достаточно, чтобы список не был пуст —
-        // например, единственный QR-блок (тип известен, печать ещё не
-        // реализована) даёт три таких операции и ни одного символа. Без этой
-        // проверки шаблон, собранный преимущественно из ещё не напечатанных
-        // блоков (qr/barcode/logo), гонял бы ленту до ножа на каждой продаже.
+        // Резать нечего, если на бумагу не вышло ни одного символа. Считать по
+        // длине ops (как было раньше) неверно: AlignOp/BoldOp/DoubleSizeOp сами
+        // по себе ничего не печатают, а их достаточно, чтобы список не был
+        // пуст. Условие сознательно смотрит только на TextOp/FeedOp, а не на
+        // QrOp/BarcodeOp/NvLogoOp/BitmapOp тоже: чек из одной графики без
+        // единой текстовой строки — вырожденный случай, которого нет ни в
+        // одном шаблоне из конструктора, и плата за него — не пропавший чек, а
+        // отсутствие обрезки после него; поставщик такого шаблона одновременно
+        // ставит эмиттеру FeedBlock (см. дефолтный шаблон), так что на практике
+        // ножа это не касается.
         if (ops.Any(o => o is TextOp or FeedOp)) ops.Add(new CutOp());
         return ops;
     }
@@ -67,8 +70,18 @@ public static class ReceiptRenderer
         // Проверка пустой подстановки — ДО пролога. Блок, который решено не
         // печатать, не должен оставить за собой висячий AlignOp: смена
         // выравнивания без текста выдаёт ESC a в никуда и сдвигает байты.
+        // qr и barcode подставляют данные тем же TrySubstitute, что и текст, —
+        // значит и проверка для них стоит здесь же, а не внутри switch: там она
+        // была бы уже ПОСЛЕ AlignOp двумя строками ниже и не спасла бы от той же
+        // самой висячей команды, от которой спасает эта проверка для текста.
         string? line = null;
         if (block is TextBlock tb && !TrySubstitute(tb.Content, values, out line)) return;
+
+        string? qrData = null;
+        if (block is QrBlock qrPre && !TrySubstitute(qrPre.Data, values, out qrData)) return;
+
+        string? bcData = null;
+        if (block is BarcodeBlock bcPre && !TrySubstitute(bcPre.Data, values, out bcData)) return;
 
         ops.Add(new AlignOp(block.Align));
 
@@ -136,9 +149,26 @@ public static class ReceiptRenderer
                 RenderTotals(totals, sale, template.Width, ops);
                 break;
 
+            case QrBlock qr:
+                // qrData уже проверен и подставлен выше, до AlignOp; здесь он
+                // гарантированно не null, потому что иначе метод вернулся раньше.
+                ops.Add(new QrOp(qrData!, qr.ModuleSize));
+                break;
+
+            case BarcodeBlock bc:
+                ops.Add(new BarcodeOp(bcData!, bc.Symbology, bc.Height, bc.PrintHri));
+                break;
+
+            case LogoBlock logo:
+                // AlignOp уже добавлен общим прологом выше — второй раз здесь
+                // не нужен, как и для всех остальных блоков ниже TextBlock.
+                if (logo.Source == LogoSource.Nv)
+                    ops.Add(new NvLogoOp(logo.NvSlot));
+                // Растровый логотип подключается в Task 9 вместе с опцией
+                // receipt_logo: без её содержимого печатать нечего.
+                break;
+
             default:
-                // QR, штрихкод и логотип подключаются в Task 8. До тех пор блок
-                // просто не печатается — это лучше, чем падение на чеке.
                 break;
         }
 

@@ -25,3 +25,14 @@ public sealed record DoubleSizeOp(bool On) : ReceiptOp;
 public sealed record FeedOp(int Lines) : ReceiptOp;
 
 public sealed record CutOp : ReceiptOp;
+
+public sealed record QrOp(string Data, int ModuleSize) : ReceiptOp;
+
+public sealed record BarcodeOp(string Data, BarcodeSymbology Symbology, int Height, bool PrintHri) : ReceiptOp;
+
+/// <summary>Логотип, уже прошитый в память принтера. Байтов на ленте — четыре.</summary>
+public sealed record NvLogoOp(int Slot) : ReceiptOp;
+
+/// <summary>Растр, приехавший с сервера уже сведённым в один бит. Ширина здесь
+/// в БАЙТАХ, высота в точках — так требует GS v 0, и путать их нельзя.</summary>
+public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : ReceiptOp;

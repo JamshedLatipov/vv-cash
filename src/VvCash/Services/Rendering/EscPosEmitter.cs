@@ -126,11 +126,66 @@ public static class EscPosEmitter
                     ms.Write(CmdCut, 0, CmdCut.Length);
                     break;
 
+                case QrOp qr:
+                    WriteQr(ms, qr, codePage);
+                    break;
+
+                case BarcodeOp bc:
+                    WriteBarcode(ms, bc);
+                    break;
+
+                case NvLogoOp nv:
+                    ms.Write(new byte[] { 0x1C, 0x70, (byte)nv.Slot, 0 }, 0, 4);
+                    break;
+
+                case BitmapOp bmp:
+                    ms.Write(new byte[]
+                    {
+                        0x1D, 0x76, 0x30, 0x00,
+                        (byte)(bmp.WidthBytes & 0xFF), (byte)(bmp.WidthBytes >> 8),
+                        (byte)(bmp.Height & 0xFF), (byte)(bmp.Height >> 8),
+                    }, 0, 8);
+                    ms.Write(bmp.Raster, 0, bmp.Raster.Length);
+                    break;
+
                 default:
                     throw new NotSupportedException($"Неизвестная операция печати: {op.GetType().Name}");
             }
         }
 
         return ms.ToArray();
+    }
+
+    /// <summary>GS ( k тремя вызовами: выбрать модель, задать размер модуля,
+    /// сложить данные в буфер символа, напечатать. Порядок обязателен — печать
+    /// берёт то, что лежит в буфере на её момент.</summary>
+    private static void WriteQr(MemoryStream ms, QrOp qr, EscPosCodePage codePage)
+    {
+        // Функция 165: модель 2 (0x32) — её понимают все ходовые аппараты.
+        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00 }, 0, 9);
+        // Функция 167: размер модуля в точках.
+        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, (byte)qr.ModuleSize }, 0, 8);
+
+        var data = codePage.Encoding.GetBytes(qr.Data);
+        var len = data.Length + 3;
+        // Функция 180: сложить данные. pL/pH считают ТРИ служебных байта следом,
+        // а не только полезную нагрузку — отсюда +3.
+        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, (byte)(len & 0xFF), (byte)(len >> 8), 0x31, 0x50, 0x30 }, 0, 8);
+        ms.Write(data, 0, data.Length);
+        // Функция 181: напечатать то, что в буфере.
+        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30 }, 0, 8);
+    }
+
+    private static void WriteBarcode(MemoryStream ms, BarcodeOp bc)
+    {
+        ms.Write(new byte[] { 0x1D, 0x68, (byte)bc.Height }, 0, 3);              // GS h — высота
+        ms.Write(new byte[] { 0x1D, 0x48, bc.PrintHri ? (byte)0x02 : (byte)0x00 }, 0, 3); // GS H — подпись снизу
+
+        // m ≥ 65 — форма с длиной вместо NUL-терминатора: она принимает данные с
+        // любым байтом внутри, включая ноль, и не зависит от терминатора.
+        var m = bc.Symbology == BarcodeSymbology.Ean13 ? (byte)67 : (byte)73;
+        var data = System.Text.Encoding.ASCII.GetBytes(bc.Data);
+        ms.Write(new byte[] { 0x1D, 0x6B, m, (byte)data.Length }, 0, 4);
+        ms.Write(data, 0, data.Length);
     }
 }
