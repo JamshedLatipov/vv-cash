@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using VvCash.Models;
 using VvCash.Models.Receipt;
@@ -24,10 +25,14 @@ public static class ReceiptRenderer
             RenderBlock(block, template, sale, values, ops);
         }
 
-        // Ничего не напечатано (все блоки выключены, включая пустой шаблон
-        // без блоков вовсе) — резать нечего: CutOp тут был бы обрезкой пустой
-        // ленты, а не завершением документа.
-        if (ops.Count > 0) ops.Add(new CutOp());
+        // Резать нечего, если на бумагу ничего не вышло. Считать по длине ops
+        // (как было раньше) неверно: AlignOp/BoldOp/DoubleSizeOp сами по себе
+        // ничего не печатают, а их достаточно, чтобы список не был пуст —
+        // например, единственный QR-блок (тип известен, печать ещё не
+        // реализована) даёт три таких операции и ни одного символа. Без этой
+        // проверки шаблон, собранный преимущественно из ещё не напечатанных
+        // блоков (qr/barcode/logo), гонял бы ленту до ножа на каждой продаже.
+        if (ops.Any(o => o is TextOp or FeedOp)) ops.Add(new CutOp());
         return ops;
     }
 
@@ -72,15 +77,17 @@ public static class ReceiptRenderer
             case TextBlock t:
                 ops.Add(new DoubleSizeOp(t.DoubleSize));
                 ops.Add(new BoldOp(t.Bold));
-                ops.Add(new TextOp(line!));
+                AddText(ops, line!);
                 break;
 
             case LineBlock l:
                 var count = l.Count > 0 ? l.Count : template.Width;
-                var ch = string.IsNullOrEmpty(l.Char) ? "-" : l.Char.Substring(0, 1);
                 ops.Add(new DoubleSizeOp(false));
                 ops.Add(new BoldOp(false));
-                ops.Add(new TextOp(string.Concat(System.Linq.Enumerable.Repeat(ch, count))));
+                // l.Char гарантированно ровно один непустой символ — сеттер
+                // LineBlock.Char сам это обеспечивает (см. Blocks.cs), так что
+                // проверять IsNullOrEmpty здесь незачем.
+                AddText(ops, new string(l.Char[0], count));
                 break;
 
             case FeedBlock f:
@@ -94,9 +101,21 @@ public static class ReceiptRenderer
                 ops.Add(new BoldOp(false));
                 foreach (var field in fields.Fields)
                 {
-                    if (!values.TryGetValue(field.Key, out var value) || string.IsNullOrWhiteSpace(value))
+                    // Незнакомый ключ и известный-но-пустой — разные беды и не
+                    // должны молча схлопываться в одно и то же "пропустить".
+                    // Опечатка в ключе (field.Key вроде "sellr") обязана быть
+                    // видна на бумаге ровно так же, как опечатка в подстановке
+                    // TextBlock ({tota}) — иначе на один и тот же класс ошибки
+                    // в одном и том же конструкторе шаблонов заведены две
+                    // противоположные политики.
+                    if (!values.TryGetValue(field.Key, out var value))
+                    {
+                        AddText(ops, field.Label + "{" + field.Key + "}");
                         continue;
-                    ops.Add(new TextOp(field.Label + value));
+                    }
+
+                    if (string.IsNullOrWhiteSpace(value)) continue;
+                    AddText(ops, field.Label + value);
                 }
                 break;
 
@@ -122,22 +141,32 @@ public static class ReceiptRenderer
 
     private static void RenderItem(CartItem item, ItemsBlock cfg, int width, List<ReceiptOp> ops)
     {
-        ops.Add(new TextOp(ReceiptText.PadLine(
+        AddText(ops, ReceiptText.PadLine(
             $"{item.Product.Name} x{item.QuantityDisplay}",
             ReceiptText.Money(item.LineTotal),
-            width)));
+            width));
 
+        // UnitPrice, не Product.Price: сервер оценивает корзину по каталогу
+        // склада и игнорирует цену, присланную кассой, поэтому
+        // QuotedUnitPrice — когда он есть — и есть то, что реально платит
+        // клиент (см. CartItem.UnitPrice и CartService.ApplyQuotedPrices).
+        // item.LineTotal чуть выше уже посчитан из UnitPrice; печатать здесь
+        // Product.Price означало бы показать цену, с которой сумма строки не
+        // сходится арифметически.
         if (cfg.ShowUnitPrice)
-            ops.Add(new TextOp($"    {item.QuantityDisplay} x {ReceiptText.Money(item.Product.Price)}"));
+            AddText(ops, $"    {item.QuantityDisplay} x {ReceiptText.Money(item.UnitPrice)}");
 
         if (cfg.ShowSku && !string.IsNullOrWhiteSpace(item.Product.Sku))
-            ops.Add(new TextOp($"    {item.Product.Sku}"));
+            AddText(ops, $"    {item.Product.Sku}");
 
         if (cfg.ShowBarcode && !string.IsNullOrWhiteSpace(item.Product.Barcode))
-            ops.Add(new TextOp($"    {item.Product.Barcode}"));
+            AddText(ops, $"    {item.Product.Barcode}");
 
         if (cfg.ShowSecondaryUnit && item.Product.HasSecondaryUnit)
-            ops.Add(new TextOp($"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}"));
+            AddText(ops, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
+
+        if (cfg.ShowLineDiscount && item.HasLineDiscount)
+            AddText(ops, ReceiptText.PadLine("    Discount:", $"-{ReceiptText.Money(item.LineDiscount)}", width));
     }
 
     private static void RenderTotals(TotalsBlock cfg, SaleReceiptData sale, int width, List<ReceiptOp> ops)
@@ -149,17 +178,17 @@ public static class ReceiptRenderer
         ops.Add(new BoldOp(false));
 
         if (cfg.ShowSubtotal)
-            ops.Add(new TextOp(ReceiptText.PadLine(cfg.SubtotalLabel, ReceiptText.Money(sale.Subtotal), width)));
+            AddText(ops, ReceiptText.PadLine(cfg.SubtotalLabel, ReceiptText.Money(sale.Subtotal), width));
 
         if (cfg.ShowDiscount && sale.Discount > 0)
         {
-            ops.Add(new TextOp(ReceiptText.PadLine(cfg.DiscountLabel, $"-{ReceiptText.Money(sale.Discount)}", width)));
+            AddText(ops, ReceiptText.PadLine(cfg.DiscountLabel, $"-{ReceiptText.Money(sale.Discount)}", width));
             if (cfg.ShowDiscountName && !string.IsNullOrWhiteSpace(sale.DiscountName))
-                ops.Add(new TextOp(ReceiptText.Truncate(sale.DiscountName!, width)));
+                AddText(ops, ReceiptText.Truncate(sale.DiscountName!, width));
         }
 
         ops.Add(new BoldOp(cfg.BoldTotal));
-        ops.Add(new TextOp(ReceiptText.PadLine(cfg.TotalLabel, ReceiptText.Money(sale.Total), width)));
+        AddText(ops, ReceiptText.PadLine(cfg.TotalLabel, ReceiptText.Money(sale.Total), width));
         ops.Add(new BoldOp(false));
     }
 
@@ -182,7 +211,19 @@ public static class ReceiptRenderer
     /// номера, и пустая строка вместо него — мусор, а не информация.
     ///
     /// Незнакомое имя не считается пустым и остаётся на бумаге как есть: {tota}
-    /// сразу показывает, где опечатка в бэкофисе.</summary>
+    /// сразу показывает, где опечатка в бэкофисе.
+    ///
+    /// Правило не умеет различать "пусто" и "ноль": {discount} всегда
+    /// раскрывается в "0.00" (Money никогда не возвращает пустую строку), а
+    /// не в string.Empty, так что подстановка никогда не считается пустой из-
+    /// за нулевой скидки. Значит текстовый блок вроде "Скидка: {discount}"
+    /// печатается на КАЖДОЙ продаже, включая те, где скидки нет — в отличие
+    /// от TotalsBlock, который в этом случае строку скидки прячет
+    /// (cfg.ShowDiscount && sale.Discount > 0). Два способа показать скидку в
+    /// одном шаблоне ведут себя по-разному, и это сознательно не исправлено
+    /// здесь: TrySubstitute работает с любым именем одинаково и не обязан
+    /// знать, что "discount" — особое, денежное. TS-двойник обязан повторить
+    /// именно это, а не "исправленную" версию.</summary>
     private static bool TrySubstitute(string content, IReadOnlyDictionary<string, string> values, out string result)
     {
         var dropped = false;
@@ -197,4 +238,19 @@ public static class ReceiptRenderer
 
         return !dropped;
     }
+
+    /// <summary>Единственная точка, строящая TextOp. TextOp своей
+    /// документацией запрещает "\n" в своей строке: она пройдёт эмиттер
+    /// насквозь и превратится на бумаге в две строки мимо переноса по ширине.
+    /// TextBlock.Content чистит перевод строки в своём сеттере, но это не
+    /// единственный источник свободного текста на чеке — имя товара, SKU,
+    /// штрихкод, название акции, Label поля и ЛЮБОЕ подставленное значение
+    /// приходят из того же конструктора шаблонов и того же бэкофиса, а
+    /// подстановка в TrySubstitute как раз обходит санитайзер TextBlock.Content
+    /// стороной. Один узкий проход здесь держит инвариант в одном месте
+    /// вместо семи мест, которые иначе пришлось бы поддерживать заново на
+    /// каждый новый источник текста.</summary>
+    private static void AddText(List<ReceiptOp> ops, string line) => ops.Add(new TextOp(Sanitize(line)));
+
+    private static string Sanitize(string s) => s.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
 }

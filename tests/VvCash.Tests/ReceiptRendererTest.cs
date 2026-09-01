@@ -183,4 +183,156 @@ public class ReceiptRendererTest
 
         Assert.IsType<CutOp>(ops[^1]);
     }
+
+    [Fact]
+    public void NoPrintedContent_ProducesNoCut()
+    {
+        // qr — тип известен парсеру шаблона, но печать ещё не реализована
+        // (Task 8): блок не выводит ни TextOp, ни FeedOp. Резать тут нечего —
+        // считать по длине списка операций было бы неверно: AlignOp/BoldOp/
+        // DoubleSizeOp сами по себе ничего не печатают, а их для этого блока
+        // достаточно, чтобы список не был пуст.
+        var ops = ReceiptRenderer.Render(One(new QrBlock { Data = "x" }), Sale(Glue()));
+
+        Assert.DoesNotContain(ops, o => o is CutOp);
+    }
+
+    [Fact]
+    public void DroppedTextBlock_LeavesNoDanglingAlignOp()
+    {
+        var t = new ReceiptTemplate
+        {
+            Width = 32,
+            Blocks = new List<ReceiptBlock>
+            {
+                new TextBlock { Content = "Doc #{doc}", Align = ReceiptAlign.Right },
+                new TextBlock { Content = "OK" },
+            },
+        };
+        var sale = Sale(Glue()) with { DocumentNumber = "" };
+
+        var ops = ReceiptRenderer.Render(t, sale);
+
+        Assert.DoesNotContain(ops, o => o is AlignOp { Align: ReceiptAlign.Right });
+    }
+
+    [Fact]
+    public void Items_ShowTheQuotedUnitPrice_NotTheCatalogPrice()
+    {
+        // Сервер оценивает корзину по каталогу склада и игнорирует цену,
+        // присланную кассой — QuotedUnitPrice, когда он есть, и есть то, что
+        // реально платит клиент. LineTotal уже считается из него; печатать
+        // рядом Product.Price значит показать цену, с которой сумма строки
+        // арифметически не сходится.
+        var item = Glue();
+        item.QuotedUnitPrice = 40m;
+
+        var lines = Lines(One(new ItemsBlock { ShowUnitPrice = true }), Sale(item));
+
+        Assert.Contains("Клей x3" + new string(' ', 19) + "120.00", lines);
+        Assert.Contains("    3 x 40.00", lines);
+        Assert.DoesNotContain(lines, l => l.Contains("45.00"));
+    }
+
+    [Fact]
+    public void Items_AddALineDiscountLine_WhenEnabled()
+    {
+        var item = Glue();
+        item.QuotedUnitDiscount = 5m; // LineDiscount = 5 * 3 = 15.00
+
+        var lines = Lines(One(new ItemsBlock { ShowLineDiscount = true }), Sale(item));
+
+        Assert.Contains("    Discount:" + new string(' ', 13) + "-15.00", lines);
+    }
+
+    [Fact]
+    public void Items_OmitTheLineDiscountLine_WhenThereIsNone()
+    {
+        var lines = Lines(One(new ItemsBlock { ShowLineDiscount = true }), Sale(Glue()));
+
+        Assert.DoesNotContain(lines, l => l.Contains("Discount"));
+    }
+
+    [Fact]
+    public void Items_AddASkuLine_WhenEnabled()
+    {
+        var item = new CartItem
+        {
+            Product = new Product { Id = "p6", Name = "Гвозди", Price = 10m, Sku = "SKU-1" },
+            Quantity = 1m,
+        };
+
+        var lines = Lines(One(new ItemsBlock { ShowSku = true }), Sale(item));
+
+        Assert.Contains("    SKU-1", lines);
+    }
+
+    [Fact]
+    public void Items_AddABarcodeLine_WhenEnabled()
+    {
+        var item = new CartItem
+        {
+            Product = new Product { Id = "p7", Name = "Гвозди", Price = 10m, Barcode = "4600000000000" },
+            Quantity = 1m,
+        };
+
+        var lines = Lines(One(new ItemsBlock { ShowBarcode = true }), Sale(item));
+
+        Assert.Contains("    4600000000000", lines);
+    }
+
+    [Fact]
+    public void Items_StripNewlinesFromTheProductName()
+    {
+        // Замер из ревью: "Клей\nОПАСНО" даёт сырой 0x0A посреди строки чека,
+        // ломая и выравнивание PadLine, и число строк на бумаге.
+        var item = new CartItem
+        {
+            Product = new Product { Id = "p9", Name = "Клей\nОПАСНО", Price = 45m },
+            Quantity = 1m,
+        };
+
+        var lines = Lines(One(new ItemsBlock()), Sale(item));
+
+        Assert.Equal(new[] { "Клей ОПАСНО x1" + new string(' ', 13) + "45.00" }, lines);
+        Assert.DoesNotContain(lines, l => l.Contains('\n'));
+    }
+
+    [Fact]
+    public void Text_StripsNewlinesThatArriveThroughASubstitution()
+    {
+        // TextBlock.Content чистит "\n" в своём сеттере, но подстановка идёт
+        // мимо этого сеттера — она подставляет значение уже после него.
+        var t = One(new TextBlock { Content = "Продавец: {seller}" });
+        var sale = Sale(Glue()) with { SellerName = "Пётр\nОПАСНО" };
+
+        Assert.Equal(new[] { "Продавец: Пётр ОПАСНО" }, Lines(t, sale));
+    }
+
+    [Fact]
+    public void Fields_StripsNewlinesFromTheLabel()
+    {
+        // Label приходит из того же конструктора, ради которого сеттер
+        // TextBlock.Content и был заведён — но сам сеттер тут не задействован.
+        var t = One(new FieldsBlock
+        {
+            Fields = new List<ReceiptField> { new() { Key = "doc", Label = "Doc\n#" } },
+        });
+
+        Assert.Equal(new[] { "Doc #A-1" }, Lines(t, Sale(Glue())));
+    }
+
+    [Fact]
+    public void Fields_PrintsThePlaceholderVerbatim_ForAnUnknownKey()
+    {
+        // Та же политика, что у TrySubstitute для TextBlock: опечатка в ключе
+        // ({sellr} вместо {seller}) должна быть видна на бумаге, а не молча
+        // пропасть неотличимо от "seller" оказался пустым.
+        var t = One(new FieldsBlock
+        {
+            Fields = new List<ReceiptField> { new() { Key = "sellr", Label = "Seller: " } },
+        });
+
+        Assert.Equal(new[] { "Seller: {sellr}" }, Lines(t, Sale(Glue())));
+    }
 }
