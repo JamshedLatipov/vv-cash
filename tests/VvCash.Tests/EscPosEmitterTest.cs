@@ -168,6 +168,30 @@ public class EscPosEmitterTest
     }
 
     [Fact]
+    public void Emit_ReassertsBoldOnlyOnce_WhenDoubleSizeRepeatsWithoutChanging()
+    {
+        // Зеркало Emit_SkipsADoubleSizeCommand_WhenTheSizeIsAlreadyInEffect,
+        // но с включённым жирным. Обе ветки DoubleSizeOp похожи почти
+        // дословно и напрашиваются на слияние в одну — но переиздание ESC E
+        // обязано жить только в ветке РЕАЛЬНОЙ смены состояния (Task 2,
+        // фикс "re-assert bold after ESC !"). Уедь оно в подавленную ветку —
+        // блочный рендерер, объявляющий размер на каждом блоке, получит
+        // лишнюю ESC E 1 на каждый повторный DoubleSizeOp, а повторных у
+        // него будет большинство.
+        var bytes = Emit(
+            new BoldOp(true),
+            new DoubleSizeOp(true), new TextOp("A"),
+            new DoubleSizeOp(true), new TextOp("B"),
+            new DoubleSizeOp(true), new TextOp("C"));
+
+        // Исходное включение плюс одно переиздание — для единственной
+        // настоящей смены состояния (false -> true). Оба повтора
+        // DoubleSizeOp(true) не пишут ни ESC !, ни ESC E.
+        Assert.Equal(2, FindAll(bytes, new byte[] { 0x1B, 0x45, 0x01 }).Length);
+        Assert.Single(FindAll(bytes, new byte[] { 0x1B, 0x21, 0x30 }));
+    }
+
+    [Fact]
     public void Emit_ReassertsBold_AfterDoubleSizeResetsTheWholePrintMode()
     {
         // ESC ! адресует режим печати ЦЕЛИКОМ одной битовой маской (шрифт,
