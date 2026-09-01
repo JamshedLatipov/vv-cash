@@ -1125,6 +1125,29 @@ git commit -m "feat(receipt): add the block template model with tolerant parsing
 
 ## Task 5: Рендерер — блоки в операции
 
+> **Задача выполнена; листинг ниже — замысел, а не итоговый код.** Порядок операций
+> вокруг блока в нём верен и проверен: `Render(Default, …)` даёт все пять эталонных
+> фикстур байт в байт, и в памяти, и через круг сериализации. Но ревью нашло в этом
+> листинге ошибки, которых на `Default` не видно, потому что `Default` не задевает
+> соответствующие ветки:
+>
+> - **`ShowUnitPrice` печатал каталожную цену** (`Product.Price`) вместо проданной
+>   (`item.UnitPrice`). На чеке это несходящаяся арифметика: сумма строки считается
+>   от проданной цены, а «3 × 45.00» печаталось от каталожной. Сервер переоценивает
+>   корзину по складу и цену кассы игнорирует — расхождение это норма, а не край.
+> - **`ShowLineDiscount` был объявлен в модели и не реализован** — галочка в
+>   конструкторе без эффекта на бумаге.
+> - **Перевод строки чистился только в `TextBlock.Content`**, а проходил ещё из шести
+>   мест, включая подставляемые значения — то есть санитайзер обходился подстановкой.
+>   Сырой `0A` посреди строки ломает `PadLine`, счёт строк и паритет с превью.
+> - **`FieldsBlock` глотал опечатку в ключе молча**, тогда как подстановка в тексте
+>   печатает её как есть. Две противоположные политики на одну опечатку.
+> - **Обрезка ставилась по `ops.Count > 0`**, а в этот счёт входят операции
+>   выравнивания и шрифта, ничего не печатающие. Шаблон из ещё не реализованных
+>   блоков давал чистый огрызок с обрезкой на каждую продажу.
+>
+> Фактическое состояние — в `src/VvCash/Services/Rendering/ReceiptRenderer.cs`.
+
 **Files:**
 - Create: `src/VvCash/Services/Rendering/ReceiptRenderer.cs`
 - Test: `tests/VvCash.Tests/ReceiptRendererTest.cs`
@@ -1290,7 +1313,7 @@ public class ReceiptRendererTest
         var lines = Lines(t, sale);
 
         Assert.Equal("Subtotal:" + new string(' ', 17) + "150.00", lines[0]);
-        Assert.Equal("Discount:" + new string(' ', 16) + "-50.00", lines[1]);
+        Assert.Equal("Discount:" + new string(' ', 17) + "-50.00", lines[1]);
         Assert.Equal("Акция", lines[2]);
         Assert.Equal("TOTAL:" + new string(' ', 20) + "100.00", lines[3]);
     }
@@ -1359,7 +1382,11 @@ public static class ReceiptRenderer
             RenderBlock(block, template, sale, values, ops);
         }
 
-        ops.Add(new CutOp());
+        // Обрезка только если что-то реально напечатано. Счёт операций для этого
+        // не годится: выравнивание и шрифт на бумагу не выводят ничего, а команда
+        // обрезки прогоняет ленту до ножа и режет — на пустом чеке это чистый
+        // огрызок на каждую продажу.
+        if (ops.Any(o => o is TextOp or FeedOp)) ops.Add(new CutOp());
         return ops;
     }
 
@@ -1460,7 +1487,7 @@ public static class ReceiptRenderer
             width)));
 
         if (cfg.ShowUnitPrice)
-            ops.Add(new TextOp($"    {item.QuantityDisplay} x {ReceiptText.Money(item.Product.Price)}"));
+            ops.Add(new TextOp($"    {item.QuantityDisplay} x {ReceiptText.Money(item.UnitPrice)}"));
 
         if (cfg.ShowSku && !string.IsNullOrWhiteSpace(item.Product.Sku))
             ops.Add(new TextOp($"    {item.Product.Sku}"));
