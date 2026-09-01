@@ -17,6 +17,11 @@ namespace VvCash.Services.Rendering;
 public static class EscPosEmitter
 {
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
+    // Смысл этой команды — обход того, что ESC @ не выключает китайский
+    // режим на XP-80 — подробно задокументирован у одноимённой константы в
+    // EscPosPrinterService.cs; здесь не повторяем, а ссылаемся. Два
+    // источника правды сохранятся, пока пять старых билдеров печати живут
+    // на собственных константах отдельно от этого эмиттера.
     private static readonly byte[] CmdCancelKanji = { 0x1C, 0x2E };
     private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
     private static readonly byte[] CmdAlignLeft = { 0x1B, 0x61, 0x00 };
@@ -24,9 +29,20 @@ public static class EscPosEmitter
     private static readonly byte[] CmdAlignRight = { 0x1B, 0x61, 0x02 };
     private static readonly byte[] CmdBoldOn = { 0x1B, 0x45, 0x01 };
     private static readonly byte[] CmdBoldOff = { 0x1B, 0x45, 0x00 };
+    // ESC ! n — «Select print mode»: выбор режима печати ЦЕЛИКОМ одной
+    // битовой маской (шрифт, emphasized, double-height, double-width,
+    // underline), а НЕ только размера символа. У обоих значений ниже —
+    // 0x30 (double-height + double-width) и 0x00 (все биты сброшены) — бит
+    // emphasized (0x08) нулевой. Значит эта команда гасит жирный на
+    // принтере независимо от того, что просил BoldOp. Модель состояния
+    // эмиттера при этом не путается: переменная bold остаётся тем, что
+    // попросили последним, — путается физический принтер. Поэтому switch
+    // ниже переиздаёт ESC E следом за каждой из этих двух команд, если
+    // жирный должен оставаться в силе.
     private static readonly byte[] CmdDoubleSizeOn = { 0x1B, 0x21, 0x30 };
     private static readonly byte[] CmdDoubleSizeOff = { 0x1B, 0x21, 0x00 };
     private static readonly byte[] CmdCut = { 0x1D, 0x56, 0x42, 0x00 };
+    private static readonly byte[] CmdLineFeed = { 0x0A };
 
     public static byte[] Emit(IEnumerable<ReceiptOp> ops, EscPosCodePage codePage)
     {
@@ -74,6 +90,12 @@ public static class EscPosEmitter
                     doubleSize = d.On;
                     var sizeCmd = doubleSize ? CmdDoubleSizeOn : CmdDoubleSizeOff;
                     ms.Write(sizeCmd, 0, sizeCmd.Length);
+                    // ESC ! только что сбросил emphasized на принтере (см. док у
+                    // CmdDoubleSizeOn/Off выше), независимо от нашей модели bold.
+                    // Переиздаём ESC E, если жирный должен оставаться в силе —
+                    // иначе текст после DoubleSizeOp молча вышел бы не жирным.
+                    if (bold)
+                        ms.Write(CmdBoldOn, 0, CmdBoldOn.Length);
                     break;
 
                 case DoubleSizeOp:
@@ -85,7 +107,11 @@ public static class EscPosEmitter
                     break;
 
                 case FeedOp f:
-                    for (var i = 0; i < f.Lines; i++) ms.WriteByte(0x0A);
+                    // Lines приходит из JSON шаблона с сервера — внешний ввод.
+                    // Отрицательное осознанно трактуем как ноль вместо того,
+                    // чтобы бросать: цикл ниже просто не выполнится, а кривое
+                    // число в косметическом поле не должно ронять чек.
+                    for (var i = 0; i < f.Lines; i++) ms.Write(CmdLineFeed, 0, CmdLineFeed.Length);
                     break;
 
                 case CutOp:
