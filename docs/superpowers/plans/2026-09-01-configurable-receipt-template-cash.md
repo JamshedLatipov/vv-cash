@@ -610,11 +610,15 @@ using VvCash.Services.Rendering;
 
 и замените каждый вызов на квалифицированный: `Money(` → `ReceiptText.Money(`, `PadLine(` → `ReceiptText.PadLine(`, `Truncate(` → `ReceiptText.Truncate(`.
 
+Вызовов ровно **21** (посчитано `grep -o`, три определения не в счёт). Часть строк несёт два вызова сразу — например `PadLine("Subtotal:", Money(subtotal), 32)`, — поэтому считать надо вхождения, а не строки:
+
 ```bash
-grep -c "ReceiptText\." src/VvCash/Services/Hardware/EscPosPrinterService.cs
+grep -o "ReceiptText\." src/VvCash/Services/Hardware/EscPosPrinterService.cs | wc -l
 ```
 
-Expected: `13` — двенадцать вызовов по коду плюс строка `using`.
+Expected: `21`.
+
+Но настоящая проверка не в подсчёте: файл обязан скомпилироваться (пропущенный вызов даст ошибку — приватных методов больше нет), а замок совместимости — остаться зелёным.
 
 - [ ] **Step 5: Прогнать замок и новые тесты**
 
