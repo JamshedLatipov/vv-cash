@@ -126,14 +126,21 @@ public class SettingsViewModelTest
 
     /// <summary>Для тестов, которым нужна касса с уже настроенным состоянием:
     /// Build(out …) создаёт FakeSettings сам, и заполнить их до конструктора
-    /// вью-модели нечем, а часть настроек читается именно там.</summary>
-    private static SettingsViewModel BuildWith(FakeSettings settings)
+    /// вью-модели нечем, а часть настроек читается именно там.
+    ///
+    /// probeDelay подменяет паузу автоподбора: с настоящей один прогон стоил бы 42
+    /// секунды на тест. Тот же шов, что localNetworkAddress у BuildWithQueueServerError
+    /// ниже.</summary>
+    private static SettingsViewModel BuildWith(
+        FakeSettings settings,
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
         => new SettingsViewModel(
             new MainViewModel(),
             settings,
             new FakeStorage(),
             new FakeFeatures(),
-            new FakePaymentCategories());
+            new FakePaymentCategories(),
+            probeDelay: probeDelay);
 
     [Theory]
     [InlineData("http://api.example.test/v1/")]
@@ -382,6 +389,76 @@ public class SettingsViewModelTest
         Assert.Equal("NUMERIC", settings.CustomerDisplayProtocolId);
         Assert.Equal("7E1", settings.CustomerDisplayFramingId);
         Assert.True(settings.CustomerDisplayDtrRts);
+    }
+
+    [Fact]
+    public async Task Probe_WalksTheWholePlanAndClearsItsFlagAtTheEnd()
+    {
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask);
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(DisplayProbePlan.Build().Count, vm.ProbeStepsRun);
+        Assert.False(vm.IsProbing);
+    }
+
+    [Fact]
+    public async Task Probe_WithNoPort_RefusesInsteadOfWalkingTheWholePlanIntoNothing()
+    {
+        var vm = BuildWith(new FakeSettings(), probeDelay: (_, _) => Task.CompletedTask);
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, vm.ProbeStepsRun);
+        Assert.Equal(I18nService.Instance["DisplayCheckNoPort"], vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Probe_Stopped_LeavesTheRestOfThePlanUnsent()
+    {
+        // Стоп обязан прекращать отправки, а не только гасить надпись: кассир жмёт его
+        // именно тогда, когда увидел своё число и не хочет ждать оставшуюся минуту.
+        SettingsViewModel? vm = null;
+        vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => { vm!.StopProbeCommand.Execute(null); return Task.CompletedTask; });
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, vm.ProbeStepsRun);
+        Assert.False(vm.IsProbing);
+    }
+
+    [Fact]
+    public void ApplyProbeNumber_SetsTheProtocolAndBaudRateOfThatCombination()
+    {
+        var vm = Build(out _);
+        vm.ProbeNumberText = "8";
+
+        vm.ApplyProbeNumberCommand.Execute(null);
+
+        Assert.Same(DisplayProtocols.Cd5220, vm.SelectedDisplayProtocol);
+        Assert.Equal("600", vm.CustomerDisplayBaudRateText);
+        Assert.False(vm.HasError);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("29")]
+    [InlineData("не число")]
+    [InlineData("")]
+    public void ApplyProbeNumber_OutsideThePlan_ReportsItAndChangesNothing(string input)
+    {
+        var vm = Build(out _);
+        var before = vm.SelectedDisplayProtocol;
+        vm.ProbeNumberText = input;
+
+        vm.ApplyProbeNumberCommand.Execute(null);
+
+        Assert.Same(before, vm.SelectedDisplayProtocol);
+        Assert.Equal(I18nService.Instance["DisplayProbeBadNumber"], vm.ErrorMessage);
     }
 
     [Fact]
