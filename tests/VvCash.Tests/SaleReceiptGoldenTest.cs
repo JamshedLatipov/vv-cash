@@ -14,11 +14,16 @@ namespace VvCash.Tests;
 /// делает этот план, обязано оставлять их неизменными: касса, до которой шаблон с
 /// сервера не доехал, должна печатать ровно то, что печатала вчера.
 ///
-/// Три случая, не один: "всё заполнено" задевает каждую ветку НАЛИЧИЯ (скидка,
+/// Четыре случая, не один: "всё заполнено" задевает каждую ветку НАЛИЧИЯ (скидка,
 /// бегунок, все четыре реквизита), но ни одной ветки ОТСУТСТВИЯ — а именно там
 /// сидит самый частый чек вообще (обычная продажа без акции) и офлайновый
 /// (пустые реквизиты). Рефакторинг, уронивший "Subtotal:" при нулевой скидке,
-/// проходил бы замок из одного случая мимо.
+/// проходил бы замок из одного случая мимо. И ни один из этих трёх не задевает
+/// ширину ленты: и название товара, и название акции там короче 32 колонок.
+/// Четвёртый случай — с обоими длиной 40 символов — держит на месте
+/// Math.Max(1, spaces) в PadLine и Truncate(discountName, 32), которые сейчас
+/// пришпилены только этим тестом и разъедутся вместе с восемью литералами 32,
+/// когда ширина ленты станет параметром слоя рендеринга.
 ///
 /// Фикстуры перегенерируются только при VVCASH_UPDATE_GOLDEN=1 и только руками —
 /// режим обновления оканчивается Assert.Fail, а не тихим "return", именно чтобы
@@ -103,11 +108,39 @@ public class SaleReceiptGoldenTest
             saleDate: "01.09.2026 12:30",
             queueNumber: "17");
 
+    /// <summary>Ветка ШИРИНЫ ленты: единственная величина, от которой зависит,
+    /// влезет ли строка в 32 колонки термопринтера, встречается в раскладке
+    /// восемь раз как голый литерал — и ни один из первых трёх случаев её не
+    /// задевает, потому что там и название товара, и название акции короче
+    /// ширины. Здесь оба ровно по 40 символов, заведомо длиннее 32:
+    /// - строка позиции переполняет PadLine (Math.Max(1, spaces) вместо
+    ///   отрицательного числа пробелов — цена прижимается к названию, а не
+    ///   выравнивается по правому краю);
+    /// - discountName длиннее ширины и обязан быть обрезан Truncate до 32
+    ///   символов, а не перенесён или напечатан целиком.</summary>
+    internal static byte[] BuildWideGolden() =>
+        EscPosPrinterService.BuildSaleReceipt(
+            EscPosCodePages.Cp866,
+            new[]
+            {
+                new CartItem
+                {
+                    Product = new Product
+                    {
+                        Id = "p4", Name = "Ламинат влагостойкий, дуб дымчатый, 32кл", Price = 999m,
+                    },
+                    Quantity = 1m,
+                },
+            },
+            subtotal: 999m, discount: 100m, total: 899m,
+            discountName: "Скидка выходного дня на весь ассортимент");
+
     public static IEnumerable<object[]> GoldenCases()
     {
         yield return new object[] { "sale-receipt-default.bin", (Func<byte[]>)BuildGolden };
         yield return new object[] { "sale-receipt-bare.bin", (Func<byte[]>)BuildBareGolden };
         yield return new object[] { "sale-receipt-queue.bin", (Func<byte[]>)BuildQueueGolden };
+        yield return new object[] { "sale-receipt-wide.bin", (Func<byte[]>)BuildWideGolden };
     }
 
     [Theory]
@@ -152,7 +185,8 @@ public class SaleReceiptGoldenTest
             throw new XunitException(
                 ex.Message + "\n\nЕсли расхождение — ожидаемая правка раскладки, а не регрессия: " +
                 "перегенерируйте эталон через VVCASH_UPDATE_GOLDEN=1, декодируйте новый файл и " +
-                "посмотрите на него глазами, прежде чем коммитить отдельно от кода раскладки.");
+                "посмотрите на него глазами, прежде чем коммитить отдельно от кода раскладки.",
+                ex);
         }
     }
 
@@ -175,6 +209,6 @@ public class SaleReceiptGoldenTest
         // решение, поправьте и это имя.
         while (dir != null && !File.Exists(Path.Combine(dir.FullName, "vv-cash.slnx")))
             dir = dir.Parent;
-        return dir?.FullName ?? throw new InvalidOperationException("vv-cash.slnx не найден выше по дереву");
+        return dir?.FullName ?? throw new InvalidOperationException($"vv-cash.slnx не найден выше по дереву: {AppContext.BaseDirectory}");
     }
 }
