@@ -70,10 +70,11 @@ public class ReceiptTextTest
     {
         // .NET's own Math.Round(2.005m, 2) would give 2.00 here (banker's
         // rounding), and JavaScript's toFixed(2) rounds by the binary float
-        // representation and also lands on 2.00 for both values below. This
-        // method rounds away from zero instead, so a real sale of
-        // 13.50 x 0.150 prints 2.03 on the till. The TS twin must replicate
-        // away-from-zero rounding explicitly — toFixed is not a substitute.
+        // representation and disagrees with this method on both values below —
+        // toFixed(2) gives "2.00" for 2.005 and "2.67" for 2.675. This method
+        // rounds away from zero instead, so a real sale of 13.50 x 0.150 prints
+        // 2.03 on the till. The TS twin must replicate away-from-zero rounding
+        // explicitly — toFixed is not a substitute.
         Assert.Equal("2.01", ReceiptText.Money(2.005m));
         Assert.Equal("2.68", ReceiptText.Money(2.675m));
     }

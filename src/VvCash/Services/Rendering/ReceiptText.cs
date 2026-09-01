@@ -12,11 +12,13 @@ namespace VvCash.Services.Rendering;
 /// JS. Зеркалить в TS нужно обе части — и PadLine/Truncate, и этот формат
 /// количества, — иначе ширины колонок разъедутся.
 ///
-/// PadLine и Truncate считают длину в code units UTF-16 (<c>string.Length</c>),
-/// что случайно совпадает с JS <c>.length</c> — совпадение работает только до
-/// суррогатных пар и не распространяется на графемные кластеры. Не "чинить"
-/// ни одну из сторон в сторону графемных кластеров: это сломает паритет,
-/// который сейчас держится только на совпадении семантик.</summary>
+/// PadLine и Truncate считают длину в code units UTF-16 (<c>string.Length</c>) —
+/// совпадение с JS <c>.length</c> точное, включая суррогатные пары: обе стороны
+/// считают одни и те же code units и режут пару одинаково. Держится это на том,
+/// что все таблицы кассы (Cp866, Cp1251, Pc437) однобайтовые, поэтому code unit
+/// равен и байту, и колонке на ленте. Не переводить ни одну из сторон на
+/// кодовые точки или графемные кластеры — это сломает и паритет с TS, и счёт
+/// колонок на бумаге.</summary>
 public static class ReceiptText
 {
     /// <summary>Amounts on a receipt, formatted the same way on every register.
@@ -28,7 +30,7 @@ public static class ReceiptText
     /// Rounds away from zero — decimal.ToString("F2") semantics, not banker's
     /// rounding: Math.Round(2.005m, 2) gives 2.00m, this gives "2.01". JavaScript's
     /// toFixed(2) rounds by the binary float representation and disagrees with
-    /// both (toFixed on 2.005 gives "2.00"). The TS twin of this receipt must
+    /// both (toFixed on 2.675 gives "2.67"). The TS twin of this receipt must
     /// replicate away-from-zero rounding explicitly — toFixed is not a
     /// substitute, and reaching for it will print a different total than the
     /// till for an ordinary sale of a fractional-quantity item.</summary>
