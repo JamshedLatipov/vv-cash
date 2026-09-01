@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -329,12 +330,42 @@ public class PosViewModelSellerGateTest
         public int TillIndex { get; set; }
     }
 
+    /// <summary>Записывает каждый ушедший кадр, по порядку. Порядок здесь и есть
+    /// предмет проверки, а не побочная подробность: у двухстрочного VFD видно только
+    /// то, что пришло последним, и очередь в VfdDisplayService строго FIFO — значит
+    /// «сколько кадров и какой из них последний» решает, что увидит покупатель.
+    ///
+    /// Сумма форматируется инвариантно. На машине с русской локалью {total} дал бы
+    /// «50,00», и тест ловил бы культуру теста, а не поведение витрины.</summary>
     private class FakeCustomerDisplayService : ICustomerDisplayService
     {
-        public Task<bool> ShowLineAsync(string line1, string line2) => Task.FromResult(true);
-        public Task<bool> ShowItemAsync(string name, decimal price) => Task.FromResult(true);
-        public Task<bool> ShowTotalAsync(decimal total) => Task.FromResult(true);
-        public Task<bool> ClearAsync() => Task.FromResult(true);
+        public List<string> Frames { get; } = new();
+
+        private static string Money(decimal value) => value.ToString(CultureInfo.InvariantCulture);
+
+        public Task<bool> ShowLineAsync(string line1, string line2)
+        {
+            Frames.Add($"line:{line1}/{line2}");
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> ShowItemAsync(string name, decimal total)
+        {
+            Frames.Add($"item:{name}/{Money(total)}");
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> ShowTotalAsync(decimal total)
+        {
+            Frames.Add($"total:{Money(total)}");
+            return Task.FromResult(true);
+        }
+
+        public Task<bool> ClearAsync()
+        {
+            Frames.Add("clear");
+            return Task.FromResult(true);
+        }
     }
 
     private class FakeShiftService : IShiftService
@@ -684,6 +715,11 @@ public class PosViewModelSellerGateTest
         public FakePrinterService PrinterService { get; } = new();
         public FakeQueueClient QueueClient { get; } = new();
         public FakeQueueSettings QueueSettings { get; } = new();
+
+        /// <summary>Вынесен сюда из CreateViewModel, где он строился на месте и был
+        /// тесту недоступен: без этого ни один тест не мог увидеть, что именно уходит
+        /// на витрину, и подмена кадра прошла бы мимо всей проверки.</summary>
+        public FakeCustomerDisplayService CustomerDisplay { get; } = new();
     }
 
     private static PosViewModel CreateViewModel(out Deps deps, Action<Deps>? configure = null)
@@ -695,7 +731,7 @@ public class PosViewModelSellerGateTest
             new FakeCategoryService(),
             deps.CartService,
             deps.PrinterService,
-            new FakeCustomerDisplayService(),
+            deps.CustomerDisplay,
             deps.ShiftService,
             new FakeOfflineStorageService(),
             deps.SyncService,
@@ -3537,5 +3573,75 @@ public class PosViewModelSellerGateTest
         Assert.Empty(deps.QueueClient.Enqueued);
         Assert.Empty(deps.PrinterService.Tickets);
         Assert.Empty(deps.PrinterService.KitchenOrders);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Что уходит на VFD покупателя
+    // ---------------------------------------------------------------------------------
+
+    // Витрина — единственный экран, который видит покупатель, и последний ушедший кадр
+    // на ней стоит до следующего. Поэтому здесь проверяется не «был ли вызов», а
+    // сколько кадров ушло и какой из них последний.
+
+    [Fact]
+    public void AddToCart_SendsOneFrameCarryingTheNameAndTheRunningTotal()
+    {
+        // AddToCart слал два кадра, и не в том порядке, в каком читаются строки метода.
+        // _cartService.AddProduct поднимает CartChanged синхронно (CartService.AddProduct),
+        // так что OnCartChanged успевал поставить в очередь TOTAL раньше, чем управление
+        // возвращалось в AddToCart к строке с товаром. Очередь в VfdDisplayService строго
+        // FIFO — кадр товара затирал итог, и покупатель не видел, сколько должен, вообще
+        // никогда: итог держался ~45мс, ровно на одну отправку в порт.
+        using var vm = CreateViewModel(out var deps);
+
+        vm.AddToCartCommand.Execute(MakeProduct("1", 50m));
+
+        Assert.Equal(new[] { "item:Product 1/50" }, deps.CustomerDisplay.Frames);
+    }
+
+    [Fact]
+    public void AddToCart_SecondScan_ShowsTheNewNameAndTheGrownTotal()
+    {
+        // Сумма во втором кадре — итог по чеку, а не цена второго товара. Различить их
+        // можно только на разных ценах: с двумя одинаковыми оба варианта совпали бы.
+        using var vm = CreateViewModel(out var deps);
+
+        vm.AddToCartCommand.Execute(MakeProduct("1", 50m));
+        vm.AddToCartCommand.Execute(MakeProduct("2", 30m));
+
+        Assert.Equal("item:Product 2/80", deps.CustomerDisplay.Frames[^1]);
+    }
+
+    [Fact]
+    public void QuantityChange_KeepsTheLastScannedNameAndFollowsTheNewTotal()
+    {
+        // Изменение количества — не новый скан, названию взяться неоткуда, и кадр обязан
+        // остаться цельным: имя от последнего скана, сумма — новая. Голый TOTAL здесь
+        // был бы регрессом ровно в ту сторону, из которой этот код и пришёл.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("1", 50m));
+        deps.CustomerDisplay.Frames.Clear();
+
+        vm.IncreaseQuantityCommand.Execute(vm.CartItems[0]);
+
+        Assert.Equal(new[] { "item:Product 1/100" }, deps.CustomerDisplay.Frames);
+    }
+
+    [Fact]
+    public void ClearCart_DropsTheNameSoNoLaterFrameCarriesAStaleOne()
+    {
+        // Имя последнего скана переживает чек, если его не сбросить: следующий чек
+        // начинался бы с чужого товара на витрине. Пустая корзина — единственный момент,
+        // когда сбрасывать безопасно и достаточно.
+        using var vm = CreateViewModel(out var deps);
+        vm.AddToCartCommand.Execute(MakeProduct("1", 50m));
+        deps.CustomerDisplay.Frames.Clear();
+
+        vm.ClearCartCommand.Execute(null);
+
+        Assert.DoesNotContain(deps.CustomerDisplay.Frames, f => f.StartsWith("item:"));
+        // Последним уходит именно очистка: ClearCart шлёт ClearAsync после того, как
+        // опустошение корзины уже подняло свои CartChanged.
+        Assert.Equal("clear", deps.CustomerDisplay.Frames[^1]);
     }
 }

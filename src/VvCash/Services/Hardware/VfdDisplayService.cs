@@ -58,14 +58,14 @@ public class VfdDisplayService : ICustomerDisplayService
     /// BuildFrame, потому что доллар жил именно здесь — в форматировании денег,
     /// а не в набивке колонок: BuildFrame по устройству не может подставить
     /// валюту, что бы Money ни делал, и тест против него ничего не сторожил бы.</summary>
-    public static string BuildItemFrame(string name, decimal price) => BuildFrame(name, Money(price));
+    public static string BuildItemFrame(string name, decimal total) => BuildFrame(name, Money(total));
 
     public static string BuildTotalFrame(decimal total) => BuildFrame("TOTAL", Money(total));
 
     public Task<bool> ShowLineAsync(string line1, string line2)
         => SendAsync(BuildFrame(line1, line2));
 
-    public Task<bool> ShowItemAsync(string name, decimal price) => SendAsync(BuildItemFrame(name, price));
+    public Task<bool> ShowItemAsync(string name, decimal total) => SendAsync(BuildItemFrame(name, total));
 
     public Task<bool> ShowTotalAsync(decimal total) => SendAsync(BuildTotalFrame(total));
 
