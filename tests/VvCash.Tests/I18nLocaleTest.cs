@@ -63,7 +63,7 @@ public class I18nLocaleTest
             "DisplayProtocol", "DisplayFraming", "DisplayDtrRts",
             "ProbeDisplay", "StopProbe", "DisplayProbeProgress",
             "DisplayProbeNumber", "ApplyProbeNumber", "DisplayProbeBadNumber",
-            "DisplayProbeApplied", "DisplayProbeDone",
+            "DisplayProbeApplied", "DisplayProbeDone", "DisplayProbePortBusy",
         };
 
         foreach (var locale in Locales)

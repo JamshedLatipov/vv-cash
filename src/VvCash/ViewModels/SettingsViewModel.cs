@@ -202,7 +202,26 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _customerDisplayDtrRts;
 
     private readonly Func<TimeSpan, CancellationToken, Task> _probeDelay;
+    private readonly Func<DisplayProbe, Task<bool>> _probeSend;
     private CancellationTokenSource? _probeCts;
+
+    /// <summary>Служба, построенная последним шагом перебора. Seam как
+    /// LastCheckDisplayService: без него перебор мог бы слать 28 раз одну и ту же
+    /// комбинацию, а счётчик всё равно дошёл бы до 28 и выглядел бы исправным.</summary>
+    internal VfdDisplayService? LastProbeDisplayService { get; private set; }
+
+    /// <summary>Сколько отказов подряд перебор терпит, прежде чем остановиться.
+    ///
+    /// Отказ здесь никогда не значит «протокол не тот»: неверный диалект всё равно
+    /// успешно уходит в порт, отвергает его уже само табло. Отказ значит одно — порт
+    /// не открылся. Три подряд, и остальные шаги упрутся в то же самое, потратив
+    /// минуту на молчание.</summary>
+    private const int MaxConsecutiveProbeFailures = 3;
+
+    /// <summary>Своя отсечка на отправку, по той же причине, что у CheckDisplay:
+    /// у SerialPort.Open() таймаута нет, и зависший драйвер USB-serial держит открытие
+    /// сколько угодно. Без неё один залипший шаг подвесил бы весь перебор.</summary>
+    private static readonly TimeSpan ProbeSendTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>Сколько кадров успел отправить последний перебор. Seam как
     /// LastTestPrintService: только для чтения, только для теста. Без него проверить,
@@ -379,9 +398,15 @@ public partial class SettingsViewModel : ViewModelBase
         Func<string>? localNetworkAddress = null,
         // Подменяется в тесте: один прогон перебора иначе стоил бы 42 секунды.
         // Тот же шов и та же причина, что у localNetworkAddress строкой выше.
-        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null,
+        // Одна отправка перебора. Шов ради того, чтобы проверить порядок шагов и
+        // раннюю остановку без COM-порта: настоящая отправка на любой машине без
+        // железа возвращает только false, и отличить «идёт по плану» от «встал»
+        // было бы нечем.
+        Func<DisplayProbe, Task<bool>>? probeSend = null)
     {
         _probeDelay = probeDelay ?? ((delay, token) => Task.Delay(delay, token));
+        _probeSend = probeSend ?? SendProbeAsync;
 
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
@@ -666,8 +691,7 @@ public partial class SettingsViewModel : ViewModelBase
         try
         {
             var plan = DisplayProbePlan.Build();
-            var codePage = SelectedDisplayCodePage ?? EscPosCodePages.Default;
-            var framing = SelectedDisplayFraming ?? SerialFramings.Default;
+            var failures = 0;
 
             foreach (var probe in plan)
             {
@@ -676,15 +700,34 @@ public partial class SettingsViewModel : ViewModelBase
                 ProbeStatus = string.Format(
                     I18nService.Instance["DisplayProbeProgress"], probe.Number, plan.Count);
 
-                var display = new VfdDisplayService(
-                    CustomerDisplayPort, probe.BaudRate, codePage,
-                    probe.Protocol, framing, CustomerDisplayDtrRts);
-
-                // Результат не ждётся: на мёртвой комбинации он всё равно false, а
-                // ждать его значило бы добавить время открытия порта к паузе, которую
-                // кассир и так отсчитывает глазами.
-                _ = display.ShowProbeAsync(probe.Number);
+                // Отправка ОЖИДАЕТСЯ, и это здесь главное. Раньше она уходила через
+                // `_ = …` и гонялась наперегонки с паузой: FIFO-очередь, которая
+                // защищает отправки от наложения, живёт внутри экземпляра
+                // VfdDisplayService, а экземпляр тут новый на каждом шаге — то есть 28
+                // независимых очередей на один физический порт и никакой сериализации
+                // между ними.
+                //
+                // Живая касса это и предъявила: в журнале две записи
+                // «VFD error: Access to the path 'COM2' is denied» через 1.512 с —
+                // ровно интервал шага. Шаг N ещё держал порт, шаг N+1 получал
+                // UnauthorizedAccessException, catch его глотал, и перебор досчитывал
+                // до 28, не отправив ни байта. Со стороны кассира отказ был неотличим
+                // от работы.
                 ProbeStepsRun++;
+                var sent = await _probeSend(probe);
+
+                if (sent)
+                {
+                    failures = 0;
+                }
+                else if (++failures >= MaxConsecutiveProbeFailures)
+                {
+                    // Молча продолжать нельзя: счётчик дошёл бы до 28, не отправив
+                    // ничего, и это выглядело бы как исправный перебор.
+                    ErrorMessage = I18nService.Instance["DisplayProbePortBusy"];
+                    ProbeStatus = string.Empty;
+                    return;
+                }
 
                 try
                 {
@@ -702,6 +745,28 @@ public partial class SettingsViewModel : ViewModelBase
         {
             IsProbing = false;
         }
+    }
+
+    /// <summary>Одна отправка перебора, с отсечкой по времени.
+    ///
+    /// Экземпляр на шаг, а не один на весь перебор: порт, скорость и протокол у
+    /// VfdDisplayService задаются конструктором и по устройству не меняются. Это
+    /// безопасно ровно потому, что вызывающий цикл ждёт завершения — предыдущий
+    /// экземпляр успевает закрыть порт до того, как следующий его откроет.</summary>
+    private async Task<bool> SendProbeAsync(DisplayProbe probe)
+    {
+        var display = new VfdDisplayService(
+            CustomerDisplayPort,
+            probe.BaudRate,
+            SelectedDisplayCodePage ?? EscPosCodePages.Default,
+            probe.Protocol,
+            SelectedDisplayFraming ?? SerialFramings.Default,
+            CustomerDisplayDtrRts);
+
+        LastProbeDisplayService = display;
+
+        var send = display.ShowProbeAsync(probe.Number);
+        return await Task.WhenAny(send, Task.Delay(ProbeSendTimeout)) == send && send.Result;
     }
 
     [RelayCommand]

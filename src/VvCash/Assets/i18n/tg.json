@@ -95,6 +95,7 @@
   "DisplayProbeBadNumber": "Чунин рақам дар рӯйхат нест",
   "DisplayProbeApplied": "Протокол ва суръати комбинатсияи {0} гузошта шуд",
   "DisplayProbeDone": "Худинтихоб анҷом ёфт",
+  "DisplayProbePortBusy": "Порт машғул аст ё кушода намешавад — худинтихоб қатъ шуд",
   "QueueSettings": "Навбати фармоишҳо",
   "QueueRole": "Нақш",
   "TillNumber": "Рақами касса",

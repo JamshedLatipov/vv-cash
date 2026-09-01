@@ -108,6 +108,7 @@
   "DisplayProbeBadNumber": "Такого номера в переборе нет",
   "DisplayProbeApplied": "Поставлены протокол и скорость из комбинации {0}",
   "DisplayProbeDone": "Перебор закончен",
+  "DisplayProbePortBusy": "Порт занят или не открывается — перебор остановлен",
   "QueueSettings": "Очередь заказов",
   "QueueRole": "Роль",
   "TillNumber": "Номер кассы",

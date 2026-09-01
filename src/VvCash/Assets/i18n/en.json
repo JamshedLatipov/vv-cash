@@ -95,6 +95,7 @@
   "DisplayProbeBadNumber": "No such number in the sweep",
   "DisplayProbeApplied": "Protocol and baud rate set from combination {0}",
   "DisplayProbeDone": "Autodetect finished",
+  "DisplayProbePortBusy": "The port is busy or will not open — sweep stopped",
   "QueueSettings": "Order Queue",
   "QueueRole": "Role",
   "TillNumber": "Till Number",

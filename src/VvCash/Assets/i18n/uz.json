@@ -95,6 +95,7 @@
   "DisplayProbeBadNumber": "Bunday raqam royxatda yoq",
   "DisplayProbeApplied": "{0} kombinatsiyasining protokoli va tezligi qoyildi",
   "DisplayProbeDone": "Avtotanlash tugadi",
+  "DisplayProbePortBusy": "Port band yoki ochilmayapti — avtotanlash toxtatildi",
   "QueueSettings": "Buyurtmalar navbati",
   "QueueRole": "Rol",
   "TillNumber": "Kassa raqami",

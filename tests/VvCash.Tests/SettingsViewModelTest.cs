@@ -133,14 +133,16 @@ public class SettingsViewModelTest
     /// ниже.</summary>
     private static SettingsViewModel BuildWith(
         FakeSettings settings,
-        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null,
+        Func<DisplayProbe, Task<bool>>? probeSend = null)
         => new SettingsViewModel(
             new MainViewModel(),
             settings,
             new FakeStorage(),
             new FakeFeatures(),
             new FakePaymentCategories(),
-            probeDelay: probeDelay);
+            probeDelay: probeDelay,
+            probeSend: probeSend);
 
     [Theory]
     [InlineData("http://api.example.test/v1/")]
@@ -421,16 +423,83 @@ public class SettingsViewModelTest
     }
 
     [Fact]
-    public async Task Probe_WalksTheWholePlanAndClearsItsFlagAtTheEnd()
+    public async Task Probe_WaitsForEachSendBeforeStartingTheNext()
     {
+        // Ровно тот дефект, что предъявил журнал кассы: две записи
+        // «VFD error: Access to the path 'COM2' is denied» через 1.512 с — интервал
+        // шага. Отправка не ожидалась, шаг N+1 открывал порт, который шаг N ещё
+        // держал, catch глотал UnauthorizedAccessException, и перебор досчитывал до
+        // 28, не отправив ни байта. Счётчик при этом бодро шёл вперёд, так что со
+        // стороны кассира отказ был неотличим от работы.
+        var inFlight = 0;
+        var overlapped = false;
+
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask,
+            probeSend: async _ =>
+            {
+                if (Interlocked.Increment(ref inFlight) > 1) overlapped = true;
+                await Task.Yield();
+                Interlocked.Decrement(ref inFlight);
+                return true;
+            });
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.False(overlapped, "шаг начался, пока предыдущая отправка ещё держала порт");
+    }
+
+    [Fact]
+    public async Task Probe_WalksTheWholePlanWhenEverySendSucceeds()
+    {
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask,
+            probeSend: _ => Task.FromResult(true));
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(DisplayProbePlan.Build().Count, vm.ProbeStepsRun);
+        Assert.False(vm.IsProbing);
+        Assert.False(vm.HasError);
+    }
+
+    [Fact]
+    public async Task Probe_PortThatNeverOpens_StopsEarlyAndSaysSo()
+    {
+        // Отказ отправки на этом пути никогда не значит «протокол не тот»: неверный
+        // диалект всё равно успешно пишется в порт, его отвергает уже само табло.
+        // Отказ значит одно — порт не открылся. Три подряд, и продолжать бессмысленно:
+        // остальные 25 шагов упрутся в то же самое, потратив минуту на молчание.
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask,
+            probeSend: _ => Task.FromResult(false));
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(3, vm.ProbeStepsRun);
+        Assert.Equal(I18nService.Instance["DisplayProbePortBusy"], vm.ErrorMessage);
+        Assert.False(vm.IsProbing);
+    }
+
+    [Fact]
+    public async Task Probe_BuildsEachStepFromThePlan()
+    {
+        // Иначе перебор мог бы слать 28 раз одно и то же, а счётчик всё равно дошёл бы
+        // до 28 — и это выглядело бы как исправная работа.
         var vm = BuildWith(
             new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
             probeDelay: (_, _) => Task.CompletedTask);
 
         await vm.ProbeDisplayCommand.ExecuteAsync(null);
 
-        Assert.Equal(DisplayProbePlan.Build().Count, vm.ProbeStepsRun);
-        Assert.False(vm.IsProbing);
+        // Порт мёртвый, поэтому перебор встанет на третьем шаге — важно, что до этого
+        // он строил службу из комбинации плана, а не из захардкоженных значений.
+        var third = DisplayProbePlan.Find(3);
+        Assert.Same(third!.Protocol, vm.LastProbeDisplayService?.Protocol);
+        Assert.Equal(third.BaudRate, vm.LastProbeDisplayService?.BaudRate);
     }
 
     [Fact]

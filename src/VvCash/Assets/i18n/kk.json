@@ -95,6 +95,7 @@
   "DisplayProbeBadNumber": "Мұндай нөмір тізімде жоқ",
   "DisplayProbeApplied": "{0} комбинациясының хаттамасы мен жылдамдығы қойылды",
   "DisplayProbeDone": "Автотаңдау аяқталды",
+  "DisplayProbePortBusy": "Порт бос емес немесе ашылмайды — автотаңдау тоқтатылды",
   "QueueSettings": "Тапсырыстар кезегі",
   "QueueRole": "Рөл",
   "TillNumber": "Касса нөмірі",
