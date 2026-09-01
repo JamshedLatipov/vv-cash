@@ -83,4 +83,46 @@ public class DisplayProtocolTest
         Assert.All(bytes, b => Assert.True(b <= 0x7F));
         Assert.Contains("17", Encoding.ASCII.GetString(bytes));
     }
+
+    [Fact]
+    public void Numeric_DropsTheItemNameAndShowsTheTotal()
+    {
+        // Сегментное табло букв не умеет физически. Название отбрасывается здесь, а
+        // не в PosViewModel: тот шлёт один и тот же кадр всем табло и о разнице
+        // между ними не знает.
+        var bytes = new NumericDisplayProtocol().BuildItem("Молоко", 50m, EscPosCodePages.Cp866);
+
+        Assert.Equal("50.00\r", Encoding.ASCII.GetString(bytes));
+    }
+
+    [Fact]
+    public void Numeric_LineWithNoDigits_Clears()
+    {
+        // ShowLineAsync("Thank you!", "Come again!") после оплаты. Цифр в нём нет,
+        // показывать нечего - табло уходит в ноль, а не остаётся с суммой прошлого
+        // покупателя.
+        var bytes = new NumericDisplayProtocol().BuildLine("Thank you!", "Come again!", EscPosCodePages.Cp866);
+
+        Assert.Equal("0.00\r", Encoding.ASCII.GetString(bytes));
+    }
+
+    [Fact]
+    public void Numeric_LineWithDigits_ShowsThem()
+    {
+        // Кнопка проверки шлёт "TEST 8888.88" второй строкой именно ради этой ветки:
+        // на сегментном табло 8888.88 зажигает все сегменты - классическая
+        // самопроверка панели, которую ни с покоем, ни с суммой не спутать.
+        var bytes = new NumericDisplayProtocol().BuildLine("VV CASH", "TEST 8888.88", EscPosCodePages.Cp866);
+
+        Assert.Equal("8888.88\r", Encoding.ASCII.GetString(bytes));
+    }
+
+    [Fact]
+    public void Numeric_Probe_IsPlainAscii()
+    {
+        var bytes = new NumericDisplayProtocol().BuildProbe(17);
+
+        Assert.All(bytes, b => Assert.True(b <= 0x7F));
+        Assert.Contains("17", Encoding.ASCII.GetString(bytes));
+    }
 }
