@@ -385,6 +385,26 @@ public class SettingsViewModelTest
     }
 
     [Fact]
+    public async Task CheckDisplay_BuildsFromTheProtocolOnScreen_NotTheSavedOne()
+    {
+        // Кнопка обязана проверять то, что кассир только что выбрал, а не то, что уже
+        // сохранено - иначе «проверка прошла» перестаёт значить что-либо про
+        // настройку, которую сейчас подбирают. Тот же приём и та же причина, что у
+        // TestPrint_BuildsFromTheCodePageOnScreen выше.
+        var vm = BuildWith(new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" });
+
+        vm.SelectedDisplayProtocol = DisplayProtocols.Numeric;
+        vm.SelectedDisplayFraming = SerialFramings.SevenE1;
+        vm.CustomerDisplayDtrRts = true;
+
+        await vm.CheckDisplayCommand.ExecuteAsync(null);
+
+        Assert.Same(DisplayProtocols.Numeric, vm.LastCheckDisplayService?.Protocol);
+        Assert.Same(SerialFramings.SevenE1, vm.LastCheckDisplayService?.Framing);
+        Assert.True(vm.LastCheckDisplayService?.DtrRts);
+    }
+
+    [Fact]
     public void CustomerDisplayProtocolAndFraming_AreReadBackOnOpen()
     {
         var settings = new FakeSettings

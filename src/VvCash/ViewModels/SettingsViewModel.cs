@@ -515,6 +515,12 @@ public partial class SettingsViewModel : ViewModelBase
     /// читающий сохранённое, ловил бы только grep.</summary>
     internal EscPosPrinterService? LastTestPrintService { get; private set; }
 
+    /// <summary>Что построила последняя проверка дисплея. Seam ровно как
+    /// LastTestPrintService выше: только для чтения, только для теста, существует
+    /// затем, чтобы проверку «кнопка строит из полей экрана, а не из сохранённого»
+    /// вообще можно было написать.</summary>
+    internal VfdDisplayService? LastCheckDisplayService { get; private set; }
+
     /// <summary>Печатает образец на том, что сейчас на экране, а НЕ на сохранённых
     /// настройках. Иначе связка «поменял кодовую страницу → напечатал → посмотрел»
     /// требовала бы сохранения и выхода с экрана, то есть перестала бы быть
@@ -573,20 +579,30 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
-        ICustomerDisplayService display = new VfdDisplayService(
+        var display = new VfdDisplayService(
             CustomerDisplayPort,
             // Тот же откат, что у Save чуть ниже по файлу, а не свои жёсткие
             // 9600: иначе нечитаемое поле проверяется на одной скорости и
             // сохраняется на другой — «проверка прошла» перестаёт значить
             // что-либо про то, на чём касса в итоге заработает.
             int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : _settingsService.CustomerDisplayBaudRate,
-            SelectedDisplayCodePage ?? EscPosCodePages.Default);
+            SelectedDisplayCodePage ?? EscPosCodePages.Default,
+            SelectedDisplayProtocol ?? DisplayProtocols.Default,
+            SelectedDisplayFraming ?? SerialFramings.Default,
+            CustomerDisplayDtrRts);
+
+        LastCheckDisplayService = display;
 
         // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
         // таймаута нет и SerialPort его не предлагает: зависший драйвер
         // USB-serial держит открытие сколько угодно. Без этого кнопка не
         // отчитается, а повиснет — то есть не сделает того, ради чего заведена.
-        var send = display.ShowLineAsync("VV CASH", "Проверка / Test");
+        // Вторая строка несёт цифры намеренно. На текстовом табло это по-прежнему
+        // читаемая проверка, а на сегментном NumericDisplayProtocol достанет из неё
+        // 8888.88 — то есть зажжёт все сегменты разом, классическую самопроверку
+        // панели, которую с покоем не спутать. Убери отсюда цифры, и кнопка перестанет
+        // что-либо показывать на цифровых табло.
+        var send = display.ShowLineAsync("VV CASH", "TEST 8888.88");
         var ok = await Task.WhenAny(send, Task.Delay(3000)) == send && send.Result;
 
         if (ok) StatusMessage = I18nService.Instance["DisplayCheckOk"];
