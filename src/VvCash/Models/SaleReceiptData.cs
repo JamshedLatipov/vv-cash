@@ -18,4 +18,7 @@ public sealed record SaleReceiptData(
     string? DocumentNumber = null,
     string? WarehouseName = null,
     string? SellerName = null,
-    string? SaleDate = null);
+    string? SaleDate = null,
+    /// <summary>Номер бегунка на кухню. Пусто на клиентском чеке — блок с
+    /// подстановкой {queue} тогда не печатается, ровно как решено спекой.</summary>
+    string? QueueNumber = null);
