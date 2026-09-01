@@ -202,7 +202,26 @@ public partial class SettingsViewModel : ViewModelBase
     private bool _customerDisplayDtrRts;
 
     private readonly Func<TimeSpan, CancellationToken, Task> _probeDelay;
+    private readonly Func<DisplayProbe, Task<bool>> _probeSend;
     private CancellationTokenSource? _probeCts;
+
+    /// <summary>Служба, построенная последним шагом перебора. Seam как
+    /// LastCheckDisplayService: без него перебор мог бы слать 28 раз одну и ту же
+    /// комбинацию, а счётчик всё равно дошёл бы до 28 и выглядел бы исправным.</summary>
+    internal VfdDisplayService? LastProbeDisplayService { get; private set; }
+
+    /// <summary>Сколько отказов подряд перебор терпит, прежде чем остановиться.
+    ///
+    /// Отказ здесь никогда не значит «протокол не тот»: неверный диалект всё равно
+    /// успешно уходит в порт, отвергает его уже само табло. Отказ значит одно — порт
+    /// не открылся. Три подряд, и остальные шаги упрутся в то же самое, потратив
+    /// минуту на молчание.</summary>
+    private const int MaxConsecutiveProbeFailures = 3;
+
+    /// <summary>Своя отсечка на отправку, по той же причине, что у CheckDisplay:
+    /// у SerialPort.Open() таймаута нет, и зависший драйвер USB-serial держит открытие
+    /// сколько угодно. Без неё один залипший шаг подвесил бы весь перебор.</summary>
+    private static readonly TimeSpan ProbeSendTimeout = TimeSpan.FromSeconds(3);
 
     /// <summary>Сколько кадров успел отправить последний перебор. Seam как
     /// LastTestPrintService: только для чтения, только для теста. Без него проверить,
@@ -219,9 +238,23 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _probeNumberText = string.Empty;
 
-    /// <summary>Полторы секунды на шаг. Меньше — кассир не успевает прочитать число на
-    /// табло; больше — перебор из 28 шагов перестаёт помещаться в терпение.</summary>
+    /// <summary>Полторы секунды на шаг. Меньше — кассир не успевает заметить вспышку
+    /// на табло; больше — полный крест перестаёт помещаться в терпение.</summary>
     private static readonly TimeSpan ProbeStep = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>Сколько последних комбинаций держать на экране. Пять, а не одна:
+    /// между «на табло мелькнуло» и «рука дошла до Стоп» проходит секунда-другая, то
+    /// есть шаг-другой, и показывать только текущий значит показывать уже не ту.</summary>
+    private const int RecentProbeCount = 5;
+
+    /// <summary>Последние опробованные комбинации, свежая сверху. Строками, а не
+    /// записями DisplayProbe: список существует ради чтения глазами, и привязке
+    /// в XAML нужен готовый текст.</summary>
+    public ObservableCollection<string> RecentProbes { get; } = new();
+
+    /// <summary>План текущего прогона. Хранится, потому что зависит от портов машины,
+    /// и «применить номер» обязано смотреть в тот же план, по которому шёл перебор.</summary>
+    private IReadOnlyList<DisplayProbe> _currentPlan = new List<DisplayProbe>();
 
     /// <summary>COM-порты машины. Тот же источник, что у принтеров на COM.</summary>
     public ObservableCollection<string> AvailableDisplayPorts { get; } = new();
@@ -379,9 +412,15 @@ public partial class SettingsViewModel : ViewModelBase
         Func<string>? localNetworkAddress = null,
         // Подменяется в тесте: один прогон перебора иначе стоил бы 42 секунды.
         // Тот же шов и та же причина, что у localNetworkAddress строкой выше.
-        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null,
+        // Одна отправка перебора. Шов ради того, чтобы проверить порядок шагов и
+        // раннюю остановку без COM-порта: настоящая отправка на любой машине без
+        // железа возвращает только false, и отличить «идёт по плану» от «встал»
+        // было бы нечем.
+        Func<DisplayProbe, Task<bool>>? probeSend = null)
     {
         _probeDelay = probeDelay ?? ((delay, token) => Task.Delay(delay, token));
+        _probeSend = probeSend ?? SendProbeAsync;
 
         _previousViewModel = previousViewModel;
         _settingsService = settingsService;
@@ -649,10 +688,15 @@ public partial class SettingsViewModel : ViewModelBase
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
         ProbeStepsRun = 0;
+        RecentProbes.Clear();
 
-        // Та же отсечка, что у CheckDisplay: без порта перебор прогнал бы 28 шагов в
-        // пустоту и отчитался бы об успешном завершении.
-        if (string.IsNullOrWhiteSpace(CustomerDisplayPort))
+        // Порт больше не берётся из поля: перебор идёт по всем портам машины, потому
+        // что угадать нужный с экрана нечем. Материнский UART принимает байты и тогда,
+        // когда к нему ничего не подключено, так что «отправка удалась» про выбор порта
+        // не говорит ровно ничего.
+        _currentPlan = DisplayProbePlan.Build(AvailableDisplayPorts.ToList());
+
+        if (_currentPlan.Count == 0)
         {
             ErrorMessage = I18nService.Instance["DisplayCheckNoPort"];
             return;
@@ -665,26 +709,58 @@ public partial class SettingsViewModel : ViewModelBase
         IsProbing = true;
         try
         {
-            var plan = DisplayProbePlan.Build();
-            var codePage = SelectedDisplayCodePage ?? EscPosCodePages.Default;
-            var framing = SelectedDisplayFraming ?? SerialFramings.Default;
+            var plan = _currentPlan;
+            var failures = 0;
 
             foreach (var probe in plan)
             {
                 if (token.IsCancellationRequested) break;
 
+                // Параметры шага, а не только его номер. Кассир смотрит на табло
+                // вживую, и когда там что-то мелькнёт, ему нужно понимать, что именно
+                // сейчас пробуется, — иначе остаётся голое число, по которому руками
+                // ничего не повторишь.
                 ProbeStatus = string.Format(
-                    I18nService.Instance["DisplayProbeProgress"], probe.Number, plan.Count);
+                    I18nService.Instance["DisplayProbeProgress"],
+                    probe.Number, plan.Count, DisplayProbePlan.Describe(probe));
 
-                var display = new VfdDisplayService(
-                    CustomerDisplayPort, probe.BaudRate, codePage,
-                    probe.Protocol, framing, CustomerDisplayDtrRts);
+                // Хвост из последних комбинаций — страховка от того, что кассир
+                // моргнул. Верная комбинация держится на табло ровно до следующего
+                // шага, а следующий её затирает, и на неверной скорости ещё и гасит
+                // панель. Живой разбор показал это буквально: на 2400 табло
+                // включалось, на 9600 гасло. Увидел что-нибудь — жмёшь «Стоп», и
+                // нужная строка здесь, даже если номер прочитать не успел.
+                RecentProbes.Insert(0, $"{probe.Number}  {DisplayProbePlan.Describe(probe)}");
+                while (RecentProbes.Count > RecentProbeCount) RecentProbes.RemoveAt(RecentProbes.Count - 1);
 
-                // Результат не ждётся: на мёртвой комбинации он всё равно false, а
-                // ждать его значило бы добавить время открытия порта к паузе, которую
-                // кассир и так отсчитывает глазами.
-                _ = display.ShowProbeAsync(probe.Number);
+                // Отправка ОЖИДАЕТСЯ, и это здесь главное. Раньше она уходила через
+                // `_ = …` и гонялась наперегонки с паузой: FIFO-очередь, которая
+                // защищает отправки от наложения, живёт внутри экземпляра
+                // VfdDisplayService, а экземпляр тут новый на каждом шаге — то есть 28
+                // независимых очередей на один физический порт и никакой сериализации
+                // между ними.
+                //
+                // Живая касса это и предъявила: в журнале две записи
+                // «VFD error: Access to the path 'COM2' is denied» через 1.512 с —
+                // ровно интервал шага. Шаг N ещё держал порт, шаг N+1 получал
+                // UnauthorizedAccessException, catch его глотал, и перебор досчитывал
+                // до 28, не отправив ни байта. Со стороны кассира отказ был неотличим
+                // от работы.
                 ProbeStepsRun++;
+                var sent = await _probeSend(probe);
+
+                if (sent)
+                {
+                    failures = 0;
+                }
+                else if (++failures >= MaxConsecutiveProbeFailures)
+                {
+                    // Молча продолжать нельзя: счётчик дошёл бы до 28, не отправив
+                    // ничего, и это выглядело бы как исправный перебор.
+                    ErrorMessage = I18nService.Instance["DisplayProbePortBusy"];
+                    ProbeStatus = string.Empty;
+                    return;
+                }
 
                 try
                 {
@@ -704,6 +780,30 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Одна отправка перебора, с отсечкой по времени.
+    ///
+    /// Экземпляр на шаг, а не один на весь перебор: порт, скорость и протокол у
+    /// VfdDisplayService задаются конструктором и по устройству не меняются. Это
+    /// безопасно ровно потому, что вызывающий цикл ждёт завершения — предыдущий
+    /// экземпляр успевает закрыть порт до того, как следующий его откроет.</summary>
+    private async Task<bool> SendProbeAsync(DisplayProbe probe)
+    {
+        // Всё из комбинации, ничего с экрана: перебор затем и заведён, что полям
+        // экрана верить нечему — их и подбираем.
+        var display = new VfdDisplayService(
+            probe.PortName,
+            probe.BaudRate,
+            SelectedDisplayCodePage ?? EscPosCodePages.Default,
+            probe.Protocol,
+            probe.Framing,
+            probe.DtrRts);
+
+        LastProbeDisplayService = display;
+
+        var send = display.ShowProbeAsync(probe.Number);
+        return await Task.WhenAny(send, Task.Delay(ProbeSendTimeout)) == send && send.Result;
+    }
+
     [RelayCommand]
     private void StopProbe() => _probeCts?.Cancel();
 
@@ -714,8 +814,16 @@ public partial class SettingsViewModel : ViewModelBase
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
 
+        // План строится на месте, если перебор в этом сеансе ещё не гоняли: кассир
+        // мог записать номер на бумажке вчера, а сегодня открыть настройки и ввести
+        // его сразу. Номер значит одно и то же, пока не изменился набор портов, —
+        // порядок плана закреплён тестом ровно ради этого.
+        var plan = _currentPlan.Count > 0
+            ? _currentPlan
+            : DisplayProbePlan.Build(AvailableDisplayPorts.ToList());
+
         var probe = int.TryParse(ProbeNumberText, out var number)
-            ? DisplayProbePlan.Find(number)
+            ? DisplayProbePlan.Find(plan, number)
             : null;
 
         if (probe == null)
@@ -724,10 +832,20 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
+        // Ставятся все пять осей. Раньше применялись только протокол и скорость,
+        // потому что порт и формат кадра задавались руками и в переборе не
+        // участвовали; теперь участвуют, и вернуть из комбинации половину значило бы
+        // оставить кассу на настройках, которые заведомо не те.
+        if (!AvailableDisplayPorts.Contains(probe.PortName))
+            AvailableDisplayPorts.Add(probe.PortName);
+        CustomerDisplayPort = probe.PortName;
         SelectedDisplayProtocol = probe.Protocol;
         CustomerDisplayBaudRateText = probe.BaudRate.ToString();
+        SelectedDisplayFraming = probe.Framing;
+        CustomerDisplayDtrRts = probe.DtrRts;
+
         StatusMessage = string.Format(
-            I18nService.Instance["DisplayProbeApplied"], probe.Number);
+            I18nService.Instance["DisplayProbeApplied"], DisplayProbePlan.Describe(probe));
     }
 
     /// <summary>Confirmation overlay state. This screen is reachable from the login screen,

@@ -133,14 +133,16 @@ public class SettingsViewModelTest
     /// ниже.</summary>
     private static SettingsViewModel BuildWith(
         FakeSettings settings,
-        Func<TimeSpan, CancellationToken, Task>? probeDelay = null)
+        Func<TimeSpan, CancellationToken, Task>? probeDelay = null,
+        Func<DisplayProbe, Task<bool>>? probeSend = null)
         => new SettingsViewModel(
             new MainViewModel(),
             settings,
             new FakeStorage(),
             new FakeFeatures(),
             new FakePaymentCategories(),
-            probeDelay: probeDelay);
+            probeDelay: probeDelay,
+            probeSend: probeSend);
 
     [Theory]
     [InlineData("http://api.example.test/v1/")]
@@ -400,6 +402,7 @@ public class SettingsViewModelTest
     [InlineData("IsProbing")]
     [InlineData("ProbeStatus")]
     [InlineData("ProbeNumberText")]
+    [InlineData("RecentProbes")]
     [InlineData("ProbeDisplayCommand")]
     [InlineData("StopProbeCommand")]
     [InlineData("ApplyProbeNumberCommand")]
@@ -421,22 +424,137 @@ public class SettingsViewModelTest
     }
 
     [Fact]
-    public async Task Probe_WalksTheWholePlanAndClearsItsFlagAtTheEnd()
+    public async Task Probe_WaitsForEachSendBeforeStartingTheNext()
     {
+        // Ровно тот дефект, что предъявил журнал кассы: две записи
+        // «VFD error: Access to the path 'COM2' is denied» через 1.512 с — интервал
+        // шага. Отправка не ожидалась, шаг N+1 открывал порт, который шаг N ещё
+        // держал, catch глотал UnauthorizedAccessException, и перебор досчитывал до
+        // 28, не отправив ни байта. Счётчик при этом бодро шёл вперёд, так что со
+        // стороны кассира отказ был неотличим от работы.
+        var inFlight = 0;
+        var overlapped = false;
+
         var vm = BuildWith(
             new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
-            probeDelay: (_, _) => Task.CompletedTask);
+            probeDelay: (_, _) => Task.CompletedTask,
+            probeSend: async _ =>
+            {
+                if (Interlocked.Increment(ref inFlight) > 1) overlapped = true;
+                await Task.Yield();
+                Interlocked.Decrement(ref inFlight);
+                return true;
+            });
 
         await vm.ProbeDisplayCommand.ExecuteAsync(null);
 
-        Assert.Equal(DisplayProbePlan.Build().Count, vm.ProbeStepsRun);
+        Assert.False(overlapped, "шаг начался, пока предыдущая отправка ещё держала порт");
+    }
+
+    [Fact]
+    public async Task Probe_WalksTheWholePlanWhenEverySendSucceeds()
+    {
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask,
+            probeSend: _ => Task.FromResult(true));
+
+        // Список портов задаётся явно, а не берётся тем, что нашлось на машине:
+        // иначе тест считал бы шаги от числа COM-портов сборочного агента и падал бы
+        // на любой машине, где их не ноль.
+        vm.AvailableDisplayPorts.Clear();
+        vm.AvailableDisplayPorts.Add("COM-does-not-exist");
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        // Один порт: 7 скоростей x 2 формата кадра x 2 состояния DTR x 4 протокола.
+        Assert.Equal(112, vm.ProbeStepsRun);
+        Assert.False(vm.IsProbing);
+        Assert.False(vm.HasError);
+    }
+
+    [Fact]
+    public async Task Probe_KeepsTheLastFiveCombinationsAfterStopping()
+    {
+        // Страховка от «моргнул и не успел»: верная комбинация держится на табло
+        // только до следующего шага, а на неверной скорости следующий её ещё и гасит.
+        // Живая касса показала это буквально — на 2400 включалось, на 9600 гасло.
+        // Между вспышкой и рукой на «Стоп» проходит шаг-другой, поэтому одной текущей
+        // комбинации мало.
+        SettingsViewModel? vm = null;
+        var steps = 0;
+        vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) =>
+            {
+                if (++steps == 8) vm!.StopProbeCommand.Execute(null);
+                return Task.CompletedTask;
+            },
+            probeSend: _ => Task.FromResult(true));
+
+        vm.AvailableDisplayPorts.Clear();
+        vm.AvailableDisplayPorts.Add("COM-does-not-exist");
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(5, vm.RecentProbes.Count);
+        // Свежая сверху: кассир смотрит на верх списка, а не отсчитывает с конца.
+        Assert.StartsWith("8 ", vm.RecentProbes[0]);
+        Assert.StartsWith("4 ", vm.RecentProbes[4]);
+    }
+
+    [Fact]
+    public async Task Probe_PortThatNeverOpens_StopsEarlyAndSaysSo()
+    {
+        // Отказ отправки на этом пути никогда не значит «протокол не тот»: неверный
+        // диалект всё равно успешно пишется в порт, его отвергает уже само табло.
+        // Отказ значит одно — порт не открылся. Три подряд, и продолжать бессмысленно:
+        // остальные 25 шагов упрутся в то же самое, потратив минуту на молчание.
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask,
+            probeSend: _ => Task.FromResult(false));
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        Assert.Equal(3, vm.ProbeStepsRun);
+        Assert.Equal(I18nService.Instance["DisplayProbePortBusy"], vm.ErrorMessage);
         Assert.False(vm.IsProbing);
     }
 
     [Fact]
-    public async Task Probe_WithNoPort_RefusesInsteadOfWalkingTheWholePlanIntoNothing()
+    public async Task Probe_BuildsEachStepFromThePlan()
+    {
+        // Иначе перебор мог бы слать одно и то же сто раз подряд, а счётчик всё равно
+        // дошёл бы до конца — и это выглядело бы как исправная работа.
+        var vm = BuildWith(
+            new FakeSettings { CustomerDisplayPort = "COM-does-not-exist" },
+            probeDelay: (_, _) => Task.CompletedTask);
+
+        vm.AvailableDisplayPorts.Clear();
+        vm.AvailableDisplayPorts.Add("COM-does-not-exist");
+
+        await vm.ProbeDisplayCommand.ExecuteAsync(null);
+
+        // Порт мёртвый, поэтому перебор встанет на третьем шаге — важно, что до этого
+        // он строил службу из комбинации плана, а не из захардкоженных значений. Все
+        // пять осей, а не только протокол: раньше порт, формат кадра и DTR брались с
+        // экрана, и подмена любой из них прошла бы мимо проверки.
+        var plan = DisplayProbePlan.Build(new[] { "COM-does-not-exist" });
+        var third = DisplayProbePlan.Find(plan, 3);
+
+        Assert.Same(third!.Protocol, vm.LastProbeDisplayService?.Protocol);
+        Assert.Equal(third.BaudRate, vm.LastProbeDisplayService?.BaudRate);
+        Assert.Equal(third.PortName, vm.LastProbeDisplayService?.PortName);
+        Assert.Same(third.Framing, vm.LastProbeDisplayService?.Framing);
+        Assert.Equal(third.DtrRts, vm.LastProbeDisplayService?.DtrRts);
+    }
+
+    [Fact]
+    public async Task Probe_WithNoPortsOnTheMachine_RefusesInsteadOfReportingSuccess()
     {
         var vm = BuildWith(new FakeSettings(), probeDelay: (_, _) => Task.CompletedTask);
+        vm.AvailableDisplayPorts.Clear();
 
         await vm.ProbeDisplayCommand.ExecuteAsync(null);
 
@@ -461,26 +579,40 @@ public class SettingsViewModelTest
     }
 
     [Fact]
-    public void ApplyProbeNumber_SetsTheProtocolAndBaudRateOfThatCombination()
+    public void ApplyProbeNumber_SetsAllFiveAxesOfThatCombination()
     {
+        // Все пять, а не две. Раньше применялись только протокол и скорость, потому
+        // что порт, формат кадра и DTR задавались руками и в переборе не участвовали.
+        // Теперь участвуют, и вернуть из комбинации половину значило бы оставить кассу
+        // на настройках, которые заведомо не те.
         var vm = Build(out _);
+        vm.AvailableDisplayPorts.Clear();
+        vm.AvailableDisplayPorts.Add("COM7");
+
+        var expected = DisplayProbePlan.Build(new[] { "COM7" })[7];   // номер 8
         vm.ProbeNumberText = "8";
 
         vm.ApplyProbeNumberCommand.Execute(null);
 
-        Assert.Same(DisplayProtocols.Cd5220, vm.SelectedDisplayProtocol);
-        Assert.Equal("600", vm.CustomerDisplayBaudRateText);
+        Assert.Equal("COM7", vm.CustomerDisplayPort);
+        Assert.Same(expected.Protocol, vm.SelectedDisplayProtocol);
+        Assert.Equal(expected.BaudRate.ToString(), vm.CustomerDisplayBaudRateText);
+        Assert.Same(expected.Framing, vm.SelectedDisplayFraming);
+        Assert.Equal(expected.DtrRts, vm.CustomerDisplayDtrRts);
         Assert.False(vm.HasError);
     }
 
     [Theory]
     [InlineData("0")]
-    [InlineData("29")]
+    [InlineData("999")]
     [InlineData("не число")]
     [InlineData("")]
     public void ApplyProbeNumber_OutsideThePlan_ReportsItAndChangesNothing(string input)
     {
         var vm = Build(out _);
+        vm.AvailableDisplayPorts.Clear();
+        vm.AvailableDisplayPorts.Add("COM7");
+
         var before = vm.SelectedDisplayProtocol;
         vm.ProbeNumberText = input;
 

@@ -63,7 +63,8 @@ public class I18nLocaleTest
             "DisplayProtocol", "DisplayFraming", "DisplayDtrRts",
             "ProbeDisplay", "StopProbe", "DisplayProbeProgress",
             "DisplayProbeNumber", "ApplyProbeNumber", "DisplayProbeBadNumber",
-            "DisplayProbeApplied", "DisplayProbeDone",
+            "DisplayProbeApplied", "DisplayProbeDone", "DisplayProbePortBusy",
+            "DisplayProbeRecent",
         };
 
         foreach (var locale in Locales)
@@ -78,16 +79,18 @@ public class I18nLocaleTest
     }
 
     [Fact]
-    public void DisplayProbeProgress_CarriesBothPlaceholders()
+    public void DisplayProbeProgress_CarriesAllThreePlaceholders()
     {
-        // Строка идёт через string.Format с номером шага и их общим числом. Перевод,
-        // потерявший {1}, покажет кассиру «Подбор: 12 из» — формат не упадёт, а
-        // строка станет бессмысленной, и поймать это может только проверка текста.
+        // Строка идёт через string.Format с номером шага, их общим числом и словесным
+        // описанием комбинации. Перевод, потерявший {1}, покажет кассиру «Подбор: 12
+        // из» — формат не упадёт, а строка станет бессмысленной. Потерявший {2}
+        // отнимет у него описание, по которому он потом ставит настройки руками.
         foreach (var locale in Locales)
         {
             var value = Load(locale)["DisplayProbeProgress"];
             Assert.Contains("{0}", value);
             Assert.Contains("{1}", value);
+            Assert.Contains("{2}", value);
         }
     }
 
