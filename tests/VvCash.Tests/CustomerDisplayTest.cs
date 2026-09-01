@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Services;
 using VvCash.Services.Hardware;
+using VvCash.Services.Hardware.Protocols;
 using Xunit;
 
 namespace VvCash.Tests;
@@ -40,24 +41,49 @@ public class CustomerDisplayTest
     {
         // Магазины не берут доллары; на чеке это уже чинили. Проверять надо
         // Build*Frame, а не BuildFrame: символ жил в форматировании суммы, и
-        // набивка колонок его подставить не может в принципе.
-        Assert.DoesNotContain("$", VfdDisplayService.BuildTotalFrame(100m));
-        Assert.Contains("100.00", VfdDisplayService.BuildTotalFrame(100m));
+        // набивка колонок его подставить не может в принципе. Кадр переехал в
+        // EscPosDisplayProtocol, проверка осталась той же.
+        Assert.DoesNotContain("$", EscPosDisplayProtocol.BuildTotalFrame(100m));
+        Assert.Contains("100.00", EscPosDisplayProtocol.BuildTotalFrame(100m));
 
-        Assert.DoesNotContain("$", VfdDisplayService.BuildItemFrame("Молоко", 50m));
-        Assert.Contains("50.00", VfdDisplayService.BuildItemFrame("Молоко", 50m));
+        Assert.DoesNotContain("$", EscPosDisplayProtocol.BuildItemFrame("Молоко", 50m));
+        Assert.Contains("50.00", EscPosDisplayProtocol.BuildItemFrame("Молоко", 50m));
     }
 
     [Fact]
     public void Vfd_RendersTwentyColumnsPerLine()
     {
-        // 40 и число пробелов ниже привязаны к Columns = 20 в VfdDisplayService.
-        // Columns — private const и тесту не виден: если значение изменится, здесь
+        // 40 и число пробелов ниже привязаны к Columns = 20 в DisplayText.
+        // Columns — internal const и тесту не виден: если значение изменится, здесь
         // просто перестанет совпадать длина, без подсказки почему.
-        var frame = VfdDisplayService.BuildFrame("Молоко", "50.00");
+        var frame = EscPosDisplayProtocol.BuildFrame("Молоко", "50.00");
 
         Assert.Equal(40, frame.Length);
         Assert.StartsWith("Молоко" + new string(' ', 14), frame);
+    }
+
+    [Fact]
+    public void Vfd_DefaultsToTheShippedProtocolAndFraming()
+    {
+        // Три необязательных параметра конструктора существуют ради вызовов, которым
+        // нечего про них сказать. Их умолчания обязаны совпадать с тем, как касса
+        // работала до появления протоколов, иначе «необязательный» означало бы
+        // «молча меняющий поведение».
+        var display = new VfdDisplayService("COM-does-not-exist", 9600, EscPosCodePages.Cp866);
+
+        Assert.Same(DisplayProtocols.EscPos, display.Protocol);
+        Assert.Same(SerialFramings.EightN1, display.Framing);
+        Assert.False(display.DtrRts);
+    }
+
+    [Fact]
+    public async Task Vfd_ProbeOnADeadPort_ReportsFailureLikeAnyOtherSend()
+    {
+        // Пробник идёт через ту же очередь и тот же catch, что и остальные кадры —
+        // отдельного пути в порт у него нет.
+        var display = new VfdDisplayService("COM-does-not-exist", 9600, EscPosCodePages.Cp866);
+
+        Assert.False(await display.ShowProbeAsync(7));
     }
 
     [Fact]
