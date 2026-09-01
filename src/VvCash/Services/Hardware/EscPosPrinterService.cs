@@ -125,10 +125,11 @@ public class EscPosPrinterService : IPrinterService
     /// Зовёт статическую перегрузку по десяти аргументам ниже с _template()
     /// последним параметром, а не собирает SaleReceiptData здесь заново: та
     /// перегрузка уже делает ровно эту сборку (см. её комментарий), и повторять
-    /// её byte-в-byte в этом методе — значит держать два места, которые обязаны
+    /// её байт-в-байт в этом методе — значит держать два места, которые обязаны
     /// перечислять одни и те же десять полей в одном и том же порядке и разойдутся
-    /// на первой же правке одного без другого (см. ревью этого коммита: перестановка
-    /// warehouseName/sellerName в такой копии молча не ловится ничем).</summary>
+    /// на первой же правке одного без другого. Порядок полей на этом стыке держит
+    /// ReceiptTemplateWiringTest.BuildConfiguredSaleReceipt_PlacesWarehouseAndSellerInTheirOwnFields —
+    /// перестановка warehouseName/sellerName красит его в красный.</summary>
     public byte[] BuildConfiguredSaleReceipt(IEnumerable<CartItem> items,
         decimal subtotal, decimal discount, decimal total,
         string? discountName = null, string? documentNumber = null, string? warehouseName = null,
