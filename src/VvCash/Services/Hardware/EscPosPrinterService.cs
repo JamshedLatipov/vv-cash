@@ -481,12 +481,25 @@ public class EscPosPrinterService : IPrinterService
         }
     }
 
-    private async Task SendViaCom(byte[] data)
-    {
-        using var port = new SerialPort(_connectionString, 9600);
-        port.Open();
-        await port.BaseStream.WriteAsync(data, 0, data.Length);
-    }
+    /// <summary>Task.Run по той же причине, что и у SendViaSpoolerAsync ниже:
+    /// SerialPort.Open() синхронный и на неотвечающем адаптере — снятый USB-COM
+    /// переходник, порт, занятый другим процессом — блокируется на секунды.
+    ///
+    /// Без него это происходило на UI-потоке. Асинхронный метод выполняется
+    /// синхронно до своего первого await, а CompositePrinterService заводит
+    /// задачи через Select().ToList(), то есть вызывает каждый PrintReceiptAsync
+    /// на месте — вся цепочка до port.Open() включительно проходила на потоке
+    /// вызывающего. Касса замерзала ровно в момент закрытия продажи.
+    ///
+    /// Исключения выходят через Task так же, как и раньше: пять методов печати
+    /// ловят их своим catch и выставляют PrinterStatus.Error.</summary>
+    private Task SendViaCom(byte[] data)
+        => Task.Run(async () =>
+        {
+            using var port = new SerialPort(_connectionString, 9600);
+            port.Open();
+            await port.BaseStream.WriteAsync(data, 0, data.Length);
+        });
 
     /// <summary>ConnectAsync и WriteAsync каждый получают свой собственный
     /// CancellationTokenSource(LanTimeout) — см. этот таймаут за числами.

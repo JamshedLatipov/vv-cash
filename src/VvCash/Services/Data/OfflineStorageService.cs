@@ -69,6 +69,11 @@ public class OfflineStorageService : IOfflineStorageService
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
 
+        // До первой схемной команды: journal_mode нельзя менять внутри
+        // транзакции, а CREATE TABLE ниже её открывает. См. SqlitePragmas за
+        // тем, почему WAL и почему только здесь.
+        await SqlitePragmas.ApplyAsync(connection);
+
         using var command = connection.CreateCommand();
 
         command.CommandText = @"
@@ -425,12 +430,33 @@ public class OfflineStorageService : IOfflineStorageService
     private static string SearchTextOf(string? name, string? sku, string? barcode)
         => $"{name} {sku} {barcode}".ToLowerInvariant();
 
+    /// <summary>Сколько строк каталога уходит в одной транзакции.
+    ///
+    /// Пачками, а не всё одной транзакцией, потому что WAL развязал читателей и
+    /// писателя, но не двух писателей между собой, — а у offline_data.db их
+    /// двое: эта заливка и постановка офлайн-документа продажи в
+    /// UnsyncedDocuments. Одна транзакция на весь каталог держала write-lock всё
+    /// время заливки, и продажа, попавшая в это окно, ждала её целиком (до 30 с
+    /// таймаута Microsoft.Data.Sqlite). Пачками окно ожидания становится длиной
+    /// в одну пачку.
+    ///
+    /// Атомарность каталога целиком при этом теряется, и это безопасно ровно
+    /// потому, что SyncService двигает lastVersion только ПОСЛЕ успешного
+    /// возврата отсюда (см. его SyncProductsAsync): оборванная посередине
+    /// заливка оставляет версию непродвинутой, следующая синхронизация повторяет
+    /// её целиком, а INSERT ниже — ON CONFLICT DO UPDATE, то есть повтор
+    /// идемпотентен и сходится к тому же состоянию.</summary>
+    private const int ProductWriteChunk = 500;
+
     public async Task SaveProductsAsync(IEnumerable<Product> products)
     {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
 
-        using var transaction = connection.BeginTransaction();
+        // Не using: транзакция здесь переоткрывается на каждой пачке. Откат при
+        // исключении посреди цикла даёт using на connection выше — закрытие
+        // соединения откатывает незакоммиченную транзакцию.
+        var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
 
@@ -476,6 +502,7 @@ public class OfflineStorageService : IOfflineStorageService
         var sellInUnitParam = command.Parameters.Add("$SellInSecondaryUnit", SqliteType.Integer);
         var searchTextParam = command.Parameters.Add("$SearchText", SqliteType.Text);
 
+        var written = 0;
         foreach (var p in products)
         {
             searchTextParam.Value = SearchTextOf(p.Name, p.Sku, p.Barcode);
@@ -497,9 +524,19 @@ public class OfflineStorageService : IOfflineStorageService
             sellInUnitParam.Value = p.SellInSecondaryUnit ? 1 : 0;
 
             await command.ExecuteNonQueryAsync();
+
+            if (++written % ProductWriteChunk != 0) continue;
+
+            // Пачка закрыта: коммитим и открываем следующую, чтобы write-lock
+            // не держался на весь каталог.
+            await transaction.CommitAsync();
+            transaction.Dispose();
+            transaction = connection.BeginTransaction();
+            command.Transaction = transaction;
         }
 
         await transaction.CommitAsync();
+        transaction.Dispose();
     }
 
     /// <summary>The column list every product SELECT shares, in the order ReadProduct

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -8,8 +9,10 @@ namespace VvCash.Services.Hardware;
 /// <summary>Сырой поток байт в очередь спулера Windows.
 ///
 /// Отдельно от EscPosPrinterService намеренно: тот про ESC/POS, а не про
-/// маршалинг. Имя очереди — то же, что перечисляет PrinterDiscoveryService,
-/// то есть ровно то, что кассир выбрал в настройках.
+/// маршалинг. Перечисление очередей (<see cref="Enumerate"/>) живёт здесь же,
+/// а не в PrinterDiscoveryService, ровно ради того, чтобы имя, которое кассир
+/// видит в настройках, и имя, которое получает OpenPrinter, приходили из одной
+/// и той же winspool.drv — см. remarks у Enumerate.
 ///
 /// Каждый вызов winspool возвращает bool. Игнорировать их — воспроизвести на
 /// новом уровне ту самую ложь, ради которой файл написан.</summary>
@@ -125,5 +128,99 @@ internal static class WindowsRawPrinter
         var code = Marshal.GetLastWin32Error();
         return new InvalidOperationException(
             $"{call} failed: {new Win32Exception(code).Message} (Win32 {code}).");
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PrinterInfo4
+    {
+        public IntPtr PrinterName;
+        public IntPtr ServerName;
+        public uint Attributes;
+    }
+
+    // LOCAL — принтеры, установленные на самой машине; CONNECTIONS — сетевые
+    // подключения текущего пользователя (\сервер\принтер). Нужны оба: с одним
+    // LOCAL сетевые принтеры пропадают из списка, а на точке их подключают
+    // именно так не реже, чем локально.
+    private const uint PrinterEnumLocal = 0x00000002;
+    private const uint PrinterEnumConnections = 0x00000004;
+
+    private const int ErrorInsufficientBuffer = 122;
+
+    // Уровень 4 — самый дешёвый для перечисления: имя, сервер и флаги, без
+    // обращения к драйверу за настройками каждого принтера.
+    private const uint PrinterInfoLevel4 = 4;
+
+    [DllImport("winspool.drv", EntryPoint = "EnumPrintersW", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool EnumPrinters(uint flags, string? name, uint level,
+        IntPtr buffer, uint bufferBytes, out uint needed, out uint returned);
+
+    /// <summary>Имена очередей спулера — то, что кассир выбирает в настройках и
+    /// что затем уезжает в <see cref="Send"/>.
+    ///
+    /// Через winspool, а не через powershell.exe + WMI Win32_Printer, как было
+    /// раньше. Скорость тут четвёртая причина, хотя симптомом была именно она;
+    /// первые три важнее:
+    ///
+    ///  - Имя отсюда попадает в OpenPrinterW строкой в строку: обе функции живут
+    ///    в одной winspool.drv и говорят UTF-16. Вывод powershell.exe проходил
+    ///    через кодовую страницу консоли, и кириллическое имя приезжало
+    ///    покорёженным — то есть таким, которое OpenPrinter уже не открывает.
+    ///  - Нет зависимости от WMI: на кассовой машине с битым репозиторием WMI
+    ///    запрос отдавал пустой список принтеров молча.
+    ///  - Нет зависимости от powershell.exe: ExecutionPolicy, Constrained
+    ///    Language Mode, AppLocker или антивирус на залоченной по GPO машине —
+    ///    любое из этого давало тот же молчаливый пустой список.
+    ///
+    /// Скорость: холодный старт powershell с запросом к WMI занимал секунды, а
+    /// зовётся это с UI-потока — SettingsViewModel.UpdateAvailableConnections
+    /// вызывается на каждый принтер в конструкторе экрана настроек и на каждую
+    /// смену типа подключения в выпадающем списке. Экран настроек и выбор USB
+    /// замерзали на всё это время.
+    ///
+    /// Бросает при отказе спулера, как и <see cref="Send"/>; вызывающий
+    /// (PrinterDiscoveryService) ловит и отдаёт пустой список.</summary>
+    public static List<string> Enumerate()
+    {
+        const uint flags = PrinterEnumLocal | PrinterEnumConnections;
+
+        // Первый вызов — только за размером буфера. Успех на нулевом буфере
+        // означает, что перечислять нечего вовсе: принтеров в системе нет.
+        if (EnumPrinters(flags, null, PrinterInfoLevel4, IntPtr.Zero, 0, out var needed, out _))
+        {
+            return new List<string>();
+        }
+
+        // Единственный ожидаемый отказ здесь. Любой другой — настоящая проблема
+        // спулера, и молчать о ней значит вернуться к пустому списку без причины.
+        if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer) throw Failure("EnumPrinters(size)");
+        if (needed == 0) return new List<string>();
+
+        var buffer = Marshal.AllocHGlobal(checked((int)needed));
+        try
+        {
+            if (!EnumPrinters(flags, null, PrinterInfoLevel4, buffer, needed, out _, out var returned))
+            {
+                throw Failure("EnumPrinters");
+            }
+
+            var names = new List<string>(checked((int)returned));
+            var stride = Marshal.SizeOf<PrinterInfo4>();
+            for (var i = 0; i < returned; i++)
+            {
+                var info = Marshal.PtrToStructure<PrinterInfo4>(IntPtr.Add(buffer, i * stride));
+                // Строки лежат в хвосте того же буфера, а не отдельными
+                // выделениями: PtrToStringUni снимает копию, пока буфер жив, и
+                // освобождать их по отдельности нечего и нельзя.
+                var name = Marshal.PtrToStringUni(info.PrinterName);
+                if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+            }
+
+            return names;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 }

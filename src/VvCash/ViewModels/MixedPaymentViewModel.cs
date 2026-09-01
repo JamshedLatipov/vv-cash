@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -111,7 +112,14 @@ public partial class MixedPaymentViewModel : ViewModelBase
     // Quick input text representation (shown above numpad)
     public string QuickInputText => _currentInputBuffer;
 
-    private readonly Action<bool, decimal, decimal> _onCompletion;
+    /// <summary>Func, а не Action. С Action продолжение оплаты в PosViewModel было
+    /// async-лямбдой, присвоенной синхронному делегату, то есть async void: дождаться
+    /// его было нельзя (отсюда и отсутствие индикатора на экране оплаты), а любое
+    /// исключение внутри — создание документа, печать, постановка в очередь — уходило
+    /// не в catch вызывающего, а в TaskScheduler.UnobservedTaskException и роняло
+    /// процесс. AppLogging заводили в том числе на этот случай; теперь его можно не
+    /// ловить постфактум, а просто дождаться.</summary>
+    private readonly Func<bool, decimal, decimal, Task> _onCompletion;
 
     /// <summary>Whether one receipt may be split across several tenders. When the
     /// store switches mixed payment off, choosing a different method moves the
@@ -132,7 +140,14 @@ public partial class MixedPaymentViewModel : ViewModelBase
     /// discarded once the host navigates away (success or failure), so there is
     /// nothing to resume. Exists purely to stop a second tap — of either button —
     /// from booking a second document for the same receipt while the first
-    /// completion (document creation, printing) is still running.</summary>
+    /// completion (document creation, printing) is still running.
+    ///
+    /// [ObservableProperty], а не голое поле: то же значение теперь показывает
+    /// экрану, что продажа в работе — см. индикатор в MixedPaymentView. Пока
+    /// продолжение было async void, дождаться его было нечем и показывать было
+    /// нечего; с Func&lt;..., Task&gt; выше этот флаг живёт ровно столько, сколько
+    /// длится оформление.</summary>
+    [ObservableProperty]
     private bool _isSubmitting;
 
     /// <summary>The customer's credit ceiling and their balance, as the server reports
@@ -155,7 +170,7 @@ public partial class MixedPaymentViewModel : ViewModelBase
 
     public MixedPaymentViewModel(
         decimal totalAmount,
-        Action<bool, decimal, decimal> onCompletion,
+        Func<bool, decimal, decimal, Task> onCompletion,
         bool allowMixed = true,
         bool hasCustomer = false,
         CreditTerms? creditTerms = null)
@@ -217,45 +232,39 @@ public partial class MixedPaymentViewModel : ViewModelBase
     partial void OnTotalAmountChanged(decimal value) => NotifyDerived();
 
     [RelayCommand]
-    private void Close()
-    {
-        _onCompletion(false, 0, 0);
-    }
+    private Task Close() => _onCompletion(false, 0, 0);
 
     [RelayCommand]
-    private void Back()
-    {
-        _onCompletion(false, 0, 0);
-    }
+    private Task Back() => _onCompletion(false, 0, 0);
 
-    private bool CanConfirmPayment() => IsFullyPaid && !_isSubmitting;
+    private bool CanConfirmPayment() => IsFullyPaid && !IsSubmitting;
 
     [RelayCommand(CanExecute = nameof(CanConfirmPayment))]
-    private void ConfirmPayment()
+    private async Task ConfirmPayment()
     {
-        if (!IsFullyPaid || _isSubmitting) return;
-        Submit();
+        if (!IsFullyPaid || IsSubmitting) return;
+        await Submit();
     }
 
-    private bool CanSellOnCredit() => HasCustomer && !_isSubmitting && IsWithinCreditLimit;
+    private bool CanSellOnCredit() => HasCustomer && !IsSubmitting && IsWithinCreditLimit;
 
     /// <summary>Books the sale with whatever has been tendered so far and lets
     /// the rest ride as the selected customer's debt — PosViewModel derives the
     /// debt amount the same way it derives change, from TotalAmount minus what
     /// this hands back.</summary>
     [RelayCommand(CanExecute = nameof(CanSellOnCredit))]
-    private void SellOnCredit()
+    private async Task SellOnCredit()
     {
-        if (!HasCustomer || _isSubmitting || !IsWithinCreditLimit) return;
-        Submit();
+        if (!HasCustomer || IsSubmitting || !IsWithinCreditLimit) return;
+        await Submit();
     }
 
-    private void Submit()
+    private Task Submit()
     {
-        _isSubmitting = true;
+        IsSubmitting = true;
         ConfirmPaymentCommand.NotifyCanExecuteChanged();
         SellOnCreditCommand.NotifyCanExecuteChanged();
-        _onCompletion(true, CashAmount, CardAmount);
+        return _onCompletion(true, CashAmount, CardAmount);
     }
 
     partial void OnSelectedMethodChanged(string value)

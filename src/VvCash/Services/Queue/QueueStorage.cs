@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
+using VvCash.Services.Data;
 using VvCash.Models;
 
 namespace VvCash.Services.Queue;
@@ -63,6 +64,11 @@ public class QueueStorage : IQueueStorage
     {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
+
+        // До первой схемной команды: journal_mode нельзя менять внутри
+        // транзакции, а CREATE TABLE ниже её открывает. См. SqlitePragmas за
+        // тем, почему WAL и почему только здесь.
+        await SqlitePragmas.ApplyAsync(connection);
 
         using var command = connection.CreateCommand();
         command.CommandText = @"

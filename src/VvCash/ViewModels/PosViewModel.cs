@@ -185,6 +185,22 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private bool _isParkingEnabled = true;
 
     [ObservableProperty] private bool _isMixedPaymentEnabled = true;
+
+    /// <summary>Оплата принята к оформлению и ещё не отпустила экран: держится на
+    /// время предоплатной котировки в ProceedToPayAsync.
+    ///
+    /// Заведено не ради красоты. RequoteNowAsync — сетевой вызов с таймаутом
+    /// HttpClient в 30 секунд (см. App.axaml.cs), и до этого флага нажатие «Оплата»
+    /// не давало кассиру ровно никакого отклика всё это время. UI-поток при этом не
+    /// блокировался — await его отпускает, — но «ничего не происходит» и «касса
+    /// зависла» с той стороны прилавка неотличимы, и читали это именно так.</summary>
+    [ObservableProperty] private bool _isPaymentBusy;
+
+    /// <summary>Идёт ручная синхронизация — кнопка Sync, FullReinitializeCommand.
+    /// Гасит кнопку и крутит на ней индикатор: полная переинициализация выкачивает и
+    /// разбирает весь каталог, это десятки секунд, и без индикатора повторное нажатие
+    /// выглядело единственным разумным действием.</summary>
+    [ObservableProperty] private bool _isSyncing;
     [ObservableProperty] private bool _isCustomerRegistrationEnabled = true;
     [ObservableProperty] private bool _isSellerSwitchEnabled = true;
     [ObservableProperty] private bool _isCustomerDisplayEnabled = true;
@@ -827,21 +843,55 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private async Task FullReinitializeAsync()
     {
+        if (IsSyncing) return;
+
+        IsSyncing = true;
+        try
+        {
+            await ReinitializeCoreAsync();
+        }
+        finally
+        {
+            IsSyncing = false;
+        }
+    }
+
+    /// <summary>Всё, что делает кнопка синхронизации, когда флаг занятости уже
+    /// взведён. Отдельным методом ровно затем, зачем InitializeCoreAsync у
+    /// OfflineStorageService и DownloadCoreAsync у UpdateService: try/finally
+    /// вокруг флага остаётся в две строки и не тонет в теле.</summary>
+    private async Task ReinitializeCoreAsync()
+    {
         StatusMessage = "Starting full database reinitialization...";
-        await _syncService.FullReinitializeAsync();
+        // Task.Run, а не прямой await. SyncProductsAsync между сетевыми await'ами
+        // разбирает JSON всего каталога и пишет его в SQLite, а у
+        // Microsoft.Data.Sqlite методы *Async синхронные — провайдер не умеет
+        // асинхронный ввод-вывод. Кодовая база не использует ConfigureAwait(false)
+        // сознательно (см. RequoteAsync), поэтому каждое продолжение возвращалось на
+        // UI-поток и вся эта работа шла на нём. Фоновая синхронизация всегда жила на
+        // пуле (см. StartBackgroundSync) — ручная кнопка не жила.
+        //
+        // Звать SyncService с фонового потока безопасно: его события ProductsSynced и
+        // SyncStatusChanged обработчики сами загоняют обратно через
+        // Dispatcher.UIThread — см. OnProductsSyncedAsync.
+        await Task.Run(() => _syncService.FullReinitializeAsync());
         await LoadCategoriesAsync();
         await LoadProductsAsync(SelectedCategory?.Id);
         // Surface the catalog size so an empty/failed sync is immediately visible.
-        var totalProducts = (await _productService.GetAllProductsAsync()).Count();
+        var totalProducts = (await Task.Run(() => _productService.GetAllProductsAsync())).Count();
         StatusMessage = totalProducts > 0
             ? $"Catalog updated: {totalProducts} products, {AllCategories.Count} categories."
             : "Sync finished but catalog is EMPTY — check Backend URL / tokens in Settings.";
     }
 
+    /// <summary>Оба чтения — на пуле, по той же причине, что и в LoadProductsAsync.
+    /// Одним Task.Run, а не двумя: это два последовательных чтения одной и той же базы,
+    /// разносить их по разным заходам на пул нечего.</summary>
     private async Task LoadCategoriesAsync()
     {
-        var allCats = (await _categoryService.GetCategoriesAsync()).ToList();
-        var quickCats = (await _categoryService.GetQuickAccessCategoriesAsync()).ToList();
+        var (allCats, quickCats) = await Task.Run(async () => (
+            (await _categoryService.GetCategoriesAsync()).ToList(),
+            (await _categoryService.GetQuickAccessCategoriesAsync()).ToList()));
         AllCategories = new ObservableCollection<Category>(allCats);
         QuickCategories = new ObservableCollection<Category>(quickCats);
         _categoryNavStack.Clear();
@@ -1116,11 +1166,21 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Products.Clear();
     }
 
+    /// <summary>Выборка уходит на пул, сборка ObservableCollection остаётся на
+    /// UI-потоке. Await у Microsoft.Data.Sqlite ничего не уступает — методы *Async там
+    /// синхронные, — так что без Task.Run чтение всего каталога проходило по UI-потоку
+    /// целиком. Продолжение возвращается на UI-поток само: кодовая база не использует
+    /// ConfigureAwait(false) (см. RequoteAsync), и Products ниже присваивается уже на
+    /// нём.
+    ///
+    /// Снимок SearchQuery берётся до захода на пул: это UI-свойство, и читать его с
+    /// чужого потока незачем.</summary>
     private async Task LoadProductsAsync(string? categoryId)
     {
-        var products = string.IsNullOrWhiteSpace(SearchQuery)
-            ? await _productService.GetProductsByCategoryAsync(categoryId ?? "All")
-            : await _productService.SearchProductsAsync(SearchQuery);
+        var search = SearchQuery;
+        var products = await Task.Run(() => string.IsNullOrWhiteSpace(search)
+            ? _productService.GetProductsByCategoryAsync(categoryId ?? "All")
+            : _productService.SearchProductsAsync(search));
         System.Diagnostics.Debug.WriteLine($"[PosViewModel] LoadProductsAsync: {products.Count()} products for category '{categoryId}'");
         foreach (var p in products)
             System.Diagnostics.Debug.WriteLine($"[PosViewModel]   Product '{p.Name}' ImagePath='{p.ImagePath}' Category='{p.Category}'");
@@ -2361,7 +2421,18 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             // Before the amount to collect is shown, not after: the payment screen is
             // built from TotalAmount, so quoting afterwards would take money against a
             // price the server never agreed to.
-            await RequoteNowAsync();
+            //
+            // Под флагом занятости: это единственный участок между нажатием «Оплата» и
+            // появлением экрана оплаты, и он сетевой — см. IsPaymentBusy.
+            IsPaymentBusy = true;
+            try
+            {
+                await RequoteNowAsync();
+            }
+            finally
+            {
+                IsPaymentBusy = false;
+            }
 
             var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result, cashAmount, cardAmount) =>
             {
