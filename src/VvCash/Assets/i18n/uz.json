@@ -83,6 +83,7 @@
   "CheckDisplay": "Displeyni tekshirish",
   "DisplayCheckOk": "Displeyga sinov satri yuborildi",
   "DisplayCheckFailed": "Displeyni tekshirish bajarilmadi",
+  "DisplayCheckNoPort": "Displey porti tanlanmagan",
   "QueueSettings": "Buyurtmalar navbati",
   "QueueRole": "Rol",
   "TillNumber": "Kassa raqami",

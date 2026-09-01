@@ -83,6 +83,7 @@
   "CheckDisplay": "Check display",
   "DisplayCheckOk": "Test line sent to the display",
   "DisplayCheckFailed": "Display check failed",
+  "DisplayCheckNoPort": "No display port selected",
   "QueueSettings": "Order Queue",
   "QueueRole": "Role",
   "TillNumber": "Till Number",

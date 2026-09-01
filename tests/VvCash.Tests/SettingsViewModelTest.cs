@@ -357,15 +357,47 @@ public class SettingsViewModelTest
     }
 
     [Fact]
-    public async Task CheckDisplay_WithNoPortConfigured_ReportsSuccess()
+    public async Task CheckDisplay_WithNoPortConfigured_DoesNotReportSuccess()
     {
-        // Касса без VFD — не отказ.
+        // Раньше здесь пиналось обратное — «касса без VFD не отказ, значит ОК». Для
+        // пути продажи это верно и остаётся верным: NullCustomerDisplayService всё так
+        // же возвращает true, чтобы ненастроенная витрина не роняла чек. Но эта кнопка
+        // существует ровно затем, чтобы отличить рабочий дисплей от нерабочего, а с
+        // пустым портом она строила тот же Null и рапортовала успех — то есть отвечала
+        // «работает» про кассу, в порт которой не уходило ни байта.
+        //
+        // Цена той зелёной галочки — живой разбор: на кассе табло было тёмным, кнопка
+        // проверки говорила «ОК», и на этом диагностика останавливалась.
         var vm = BuildWith(new FakeSettings { CustomerDisplayPort = string.Empty });
 
         await vm.CheckDisplayCommand.ExecuteAsync(null);
 
-        Assert.False(vm.HasError);
-        Assert.NotEmpty(vm.StatusMessage);
+        Assert.Empty(vm.StatusMessage);
+        Assert.True(vm.HasError);
+    }
+
+    [Fact]
+    public async Task CheckDisplay_WithNoPortConfigured_SaysThePortIsMissing_NotThatTheDisplayFailed()
+    {
+        // Два разных исхода, и путать их нельзя: «порт не выбран» чинится в соседней
+        // выпадашке, «проверка не удалась» — это уже про железо, кабель и драйвер.
+        // Одно сообщение на оба случая отправило бы кассира искать неисправное табло
+        // там, где не заполнено поле.
+        var vm = BuildWith(new FakeSettings { CustomerDisplayPort = string.Empty });
+
+        await vm.CheckDisplayCommand.ExecuteAsync(null);
+
+        // Сравнение идёт с самим I18nService, а не с готовой строкой, и по-другому здесь
+        // нельзя: LoadLanguage читает словарь через AssetLoader.Open("avares://…"), а в
+        // тестовом хосте Avalonia не поднята, Initialize никто не зовёт, и словарь
+        // остаётся пустым — каждый ключ отдаёт заглушку "[ключ]". То есть проверить
+        // здесь можно только «какой ключ выбран», но не «что в нём написано».
+        //
+        // Что ключ вообще существует во всех пяти словарях, стережёт
+        // I18nLocaleTest.DisplayCheckKeys_ExistInEveryLocale — оно читает файлы с диска,
+        // мимо AssetLoader, потому и работает.
+        Assert.Equal(I18nService.Instance["DisplayCheckNoPort"], vm.ErrorMessage);
+        Assert.NotEqual(I18nService.Instance["DisplayCheckFailed"], vm.ErrorMessage);
     }
 
     // -----------------------------------------------------------------------------

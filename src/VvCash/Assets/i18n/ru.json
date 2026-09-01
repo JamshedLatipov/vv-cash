@@ -96,6 +96,7 @@
   "CheckDisplay": "Проверить дисплей",
   "DisplayCheckOk": "На дисплей отправлена проверочная строка",
   "DisplayCheckFailed": "Проверка дисплея не удалась",
+  "DisplayCheckNoPort": "Порт дисплея не выбран",
   "QueueSettings": "Очередь заказов",
   "QueueRole": "Роль",
   "TillNumber": "Номер кассы",
