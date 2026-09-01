@@ -90,7 +90,23 @@ public class EscPosPrinterService : IPrinterService
     /// синхронизацией в произвольный момент, и читать его надо в момент печати.
     /// Иначе новый шаблон ждал бы перезапуска кассы. Null — печатать дефолтом;
     /// служба, собранная на экране настроек ради пробной печати, шаблон не
-    /// использует вовсе.</param>
+    /// использует вовсе.
+    ///
+    /// Контракт вызова — три требования, и все жёсткие:
+    /// - дешёвый и неблокирующий, без ввода-вывода и без разбора JSON на каждый
+    ///   вызов: зовётся синхронно, на том же потоке, что печатает, и до первого
+    ///   await внутри печати. Замер: поставщик на 400 мс при двух принтерах в
+    ///   составе даёт 831 мс замороженного интерфейса, и не разово, а
+    ///   последовательно на каждый принтер — цена умножается на их число;
+    /// - потокобезопасный: сегодня печать зовёт его с одного потока, но это
+    ///   свойство состава принтеров конкретно сейчас, а не контракта самого
+    ///   поставщика;
+    /// - возвращает шаблон, который после возврата никто не мутирует.
+    ///   ReceiptTemplate.Blocks — обычный List, не потокобезопасный (см.
+    ///   комментарий у ReceiptTemplate.Default); правка списка в одном потоке
+    ///   одновременно с печатью в другом даёт исключение посреди чека, а
+    ///   поставщик — ровно тот шов, через который синхронизация может
+    ///   подсунуть на печать общий изменяемый экземпляр.</param>
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
         EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt,
         Func<ReceiptTemplate>? template = null)
@@ -106,17 +122,19 @@ public class EscPosPrinterService : IPrinterService
     /// в отличие от статического BuildSaleReceipt: шаблон — свойство принтера, а
     /// не аргумента вызова.
     ///
-    /// Через перегрузку BuildSaleReceipt по готовой записи, а не по десяти
-    /// позиционным аргументам, которую заводил план этой задачи: та перегрузка
-    /// уже существует (см. её комментарий выше) именно ради того, чтобы вызывающий
-    /// код с набором отдельных полей не собирал их в SaleReceiptData вручную.</summary>
+    /// Зовёт статическую перегрузку по десяти аргументам ниже с _template()
+    /// последним параметром, а не собирает SaleReceiptData здесь заново: та
+    /// перегрузка уже делает ровно эту сборку (см. её комментарий), и повторять
+    /// её byte-в-byte в этом методе — значит держать два места, которые обязаны
+    /// перечислять одни и те же десять полей в одном и том же порядке и разойдутся
+    /// на первой же правке одного без другого (см. ревью этого коммита: перестановка
+    /// warehouseName/sellerName в такой копии молча не ловится ничем).</summary>
     public byte[] BuildConfiguredSaleReceipt(IEnumerable<CartItem> items,
         decimal subtotal, decimal discount, decimal total,
         string? discountName = null, string? documentNumber = null, string? warehouseName = null,
         string? sellerName = null, string? saleDate = null, string? queueNumber = null)
-        => BuildSaleReceipt(_codePage, new SaleReceiptData(
-            new List<CartItem>(items), subtotal, discount, total,
-            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber), _template());
+        => BuildSaleReceipt(_codePage, items, subtotal, discount, total,
+            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber, _template());
 
     /// <summary>Та же сборка, но из готовой записи — вход для PrintKitchenOrderAsync.
     /// Не перегрузка выше плюс раскладка sale на десять аргументов: у
@@ -133,8 +151,11 @@ public class EscPosPrinterService : IPrinterService
     /// Раскладка живёт в ReceiptRenderer, байты — в EscPosEmitter; эта
     /// перегрузка только складывает аргументы в SaleReceiptData и передаёт
     /// его перегрузке ниже. Она остаётся ради тестов и вызывающего кода,
-    /// который ещё не перешёл на запись целиком — PrintReceiptAsync такой
-    /// же намеренный долгожитель, что и BuildReturnReceipt рядом.
+    /// который получает данные чека десятью отдельными переменными, а не
+    /// готовой SaleReceiptData: BuildConfiguredSaleReceipt выше зовёт её
+    /// напрямую с _template() последним аргументом, и через этот экземплярный
+    /// метод на неё по-прежнему опирается PrintReceiptAsync — его собственный
+    /// список параметров не менялся, как и у BuildReturnReceipt рядом.
     ///
     /// template = null означает «шаблон с сервера не доехал» и берёт
     /// ReceiptTemplate.Default, который печатает ровно то, что печаталось до
