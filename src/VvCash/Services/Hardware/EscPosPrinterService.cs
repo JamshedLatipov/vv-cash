@@ -8,6 +8,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Services.Rendering;
 
 namespace VvCash.Services.Hardware;
 
@@ -136,8 +137,8 @@ public class EscPosPrinterService : IPrinterService
             // No currency symbol. It was hardcoded to "$" on every line and total of
             // every sale, in stores that do not take dollars — and the return and
             // exchange receipts next to it have always printed the bare amount.
-            var price = Money(item.LineTotal);
-            WriteLine(ms, PadLine(line, price, 32), codePage);
+            var price = ReceiptText.Money(item.LineTotal);
+            WriteLine(ms, ReceiptText.PadLine(line, price, 32), codePage);
 
             // A unit line prints both figures: the customer asked for square
             // metres and is billed for whole tiles, and showing only one of the
@@ -146,16 +147,16 @@ public class EscPosPrinterService : IPrinterService
                 WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
         }
         WriteLine(ms, "----------------------------", codePage);
-        WriteLine(ms, PadLine("Subtotal:", Money(subtotal), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine("Subtotal:", ReceiptText.Money(subtotal), 32), codePage);
         if (discount > 0)
         {
-            WriteLine(ms, PadLine("Discount:", $"-{Money(discount)}", 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine("Discount:", $"-{ReceiptText.Money(discount)}", 32), codePage);
             if (!string.IsNullOrWhiteSpace(discountName))
-                WriteLine(ms, Truncate(discountName!, 32), codePage);
+                WriteLine(ms, ReceiptText.Truncate(discountName!, 32), codePage);
         }
 
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine("TOTAL:", ReceiptText.Money(total), 32), codePage);
         Write(ms, CmdBoldOff);
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignCenter);
@@ -246,7 +247,7 @@ public class EscPosPrinterService : IPrinterService
             if (item.Product.HasSecondaryUnit)
                 WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
         }
-        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine("TOTAL:", ReceiptText.Money(total), 32), codePage);
         Write(ms, CmdLineFeed);
         Write(ms, CmdCut);
         return ms.ToArray();
@@ -350,24 +351,6 @@ public class EscPosPrinterService : IPrinterService
         var bytes = codePage.Encoding.GetBytes(text + "\n");
         ms.Write(bytes, 0, bytes.Length);
     }
-    /// <summary>Amounts on a receipt, formatted the same way on every register.
-    /// Interpolating with ":F2" took the decimal separator from the operating
-    /// system's locale, so the same sale printed 20.00 on one till and 20,00 on the
-    /// next — and CartItem.QuantityDisplay, right beside it on the line, has always
-    /// used the invariant form.</summary>
-    private static string Money(decimal value) => value.ToString("F2", CultureInfo.InvariantCulture);
-
-    private static string PadLine(string left, string right, int width)
-    {
-        var spaces = width - left.Length - right.Length;
-        return left + new string(' ', Math.Max(1, spaces)) + right;
-    }
-
-    /// <summary>Clips a label to the paper width. A promotion name is free text and
-    /// a long one would wrap into a ragged second line on a 32-column roll.</summary>
-    private static string Truncate(string s, int width)
-        => s.Length <= width ? s : s.Substring(0, width);
-
     /// <summary>protected virtual, а не private: иначе маршрутизацию документов по
     /// ролям нельзя проверить, не открыв сокет. Боевой код это не меняет — ветки
     /// транспорта остаются здесь же, ниже.</summary>
@@ -545,10 +528,10 @@ public class EscPosPrinterService : IPrinterService
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         foreach (var l in lines)
-            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", ReceiptText.Money(l.LineRefund), 32), codePage);
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("REFUND:", Money(totalRefund), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine("REFUND:", ReceiptText.Money(totalRefund), 32), codePage);
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
@@ -618,18 +601,18 @@ public class EscPosPrinterService : IPrinterService
 
         WriteLine(ms, "RETURNED:", codePage);
         foreach (var l in returned)
-            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", ReceiptText.Money(l.LineRefund), 32), codePage);
 
         WriteLine(ms, "ISSUED:", codePage);
         foreach (var l in issued)
-            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", ReceiptText.Money(l.LineRefund), 32), codePage);
 
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
         // An even swap owes nothing in either direction; without its own label it
         // printed "REFUND: 0.00" and invited the customer to ask for the money.
         var label = difference > 0 ? "AMOUNT DUE:" : difference < 0 ? "REFUND:" : "NO DIFFERENCE:";
-        WriteLine(ms, PadLine(label, Money(Math.Abs(difference)), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine(label, ReceiptText.Money(Math.Abs(difference)), 32), codePage);
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
