@@ -14,16 +14,19 @@ namespace VvCash.Tests;
 /// делает этот план, обязано оставлять их неизменными: касса, до которой шаблон с
 /// сервера не доехал, должна печатать ровно то, что печатала вчера.
 ///
-/// Четыре случая, не один: "всё заполнено" задевает каждую ветку НАЛИЧИЯ (скидка,
+/// Пять случаев, не один: "всё заполнено" задевает каждую ветку НАЛИЧИЯ (скидка,
 /// бегунок, все четыре реквизита), но ни одной ветки ОТСУТСТВИЯ — а именно там
 /// сидит самый частый чек вообще (обычная продажа без акции) и офлайновый
 /// (пустые реквизиты). Рефакторинг, уронивший "Subtotal:" при нулевой скидке,
-/// проходил бы замок из одного случая мимо. И ни один из этих трёх не задевает
+/// проходил бы замок из одного случая мимо. Ни один из первых трёх не задевает
 /// ширину ленты: и название товара, и название акции там короче 32 колонок.
 /// Четвёртый случай — с обоими длиной 40 символов — держит на месте
 /// Math.Max(1, spaces) в PadLine и Truncate(discountName, 32), которые сейчас
 /// пришпилены только этим тестом и разъедутся вместе с восемью литералами 32,
-/// когда ширина ленты станет параметром слоя рендеринга.
+/// когда ширина ленты станет параметром слоя рендеринга. Пятый случай закрывает
+/// последнюю непокрытую ветку самого метода: скидка есть, а названия у неё нет —
+/// ручная скидка кассира или акция без имени, обе достижимы в бою. Строка
+/// "Discount:" обязана остаться, строка с названием под ней — не появиться.
 ///
 /// Фикстуры перегенерируются только при VVCASH_UPDATE_GOLDEN=1 и только руками —
 /// режим обновления оканчивается Assert.Fail, а не тихим "return", именно чтобы
@@ -135,12 +138,36 @@ public class SaleReceiptGoldenTest
             subtotal: 999m, discount: 100m, total: 899m,
             discountName: "Скидка выходного дня на весь ассортимент");
 
+    /// <summary>Последняя непокрытая ветка BuildSaleReceipt: скидка есть
+    /// (discount > 0), а имени у неё нет (discountName — пустая строка, а не
+    /// null — так её шлёт форма ручной скидки, где поле имени просто не
+    /// заполнено). Достижима в бою: ручная скидка кассира и акция без названия
+    /// дают ровно её. Ширина здесь ни при чём — короткое название товара и
+    /// пустая discountName эту ветку не задевают, её проверяет sale-receipt-wide.bin.
+    ///
+    /// На бумаге ожидается: строка "Discount:" есть, строки с названием акции
+    /// под ней — нет.</summary>
+    internal static byte[] BuildDiscountNoNameGolden() =>
+        EscPosPrinterService.BuildSaleReceipt(
+            EscPosCodePages.Cp866,
+            new[]
+            {
+                new CartItem
+                {
+                    Product = new Product { Id = "p5", Name = "Скотч", Price = 30m },
+                    Quantity = 2m,
+                },
+            },
+            subtotal: 60m, discount: 10m, total: 50m,
+            discountName: "");
+
     public static IEnumerable<object[]> GoldenCases()
     {
         yield return new object[] { "sale-receipt-default.bin", (Func<byte[]>)BuildGolden };
         yield return new object[] { "sale-receipt-bare.bin", (Func<byte[]>)BuildBareGolden };
         yield return new object[] { "sale-receipt-queue.bin", (Func<byte[]>)BuildQueueGolden };
         yield return new object[] { "sale-receipt-wide.bin", (Func<byte[]>)BuildWideGolden };
+        yield return new object[] { "sale-receipt-discount-no-name.bin", (Func<byte[]>)BuildDiscountNoNameGolden };
     }
 
     [Theory]
