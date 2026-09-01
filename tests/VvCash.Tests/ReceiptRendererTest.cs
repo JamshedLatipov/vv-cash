@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using VvCash.Models;
@@ -9,6 +10,14 @@ namespace VvCash.Tests;
 
 public class ReceiptRendererTest
 {
+    /// <summary>Тип блока, которого switch в RenderBlock не знает. ReceiptBlock
+    /// — обычный abstract class без явного конструктора, и компилятор
+    /// генерирует для него protected конструктор без параметров — этого
+    /// достаточно, чтобы унаследоваться из тестовой сборки.</summary>
+    private sealed class UnknownBlock : ReceiptBlock
+    {
+    }
+
     private static SaleReceiptData Sale(params CartItem[] items) => new(
         items, Subtotal: 100m, Discount: 0m, Total: 100m,
         DocumentNumber: "A-1", WarehouseName: "Склад", SellerName: "Пётр",
@@ -187,12 +196,17 @@ public class ReceiptRendererTest
     [Fact]
     public void NoPrintedContent_ProducesNoCut()
     {
-        // qr — тип известен парсеру шаблона, но печать ещё не реализована
-        // (Task 8): блок не выводит ни TextOp, ни FeedOp. Резать тут нечего —
-        // считать по длине списка операций было бы неверно: AlignOp/BoldOp/
-        // DoubleSizeOp сами по себе ничего не печатают, а их для этого блока
-        // достаточно, чтобы список не был пуст.
-        var ops = ReceiptRenderer.Render(One(new QrBlock { Data = "x" }), Sale(Glue()));
+        // Логотип-картинка пока не печатает ничего (растр подключается в
+        // Task 9) — блок отбрасывается целиком, до AlignOp, и список операций
+        // пуст. Резать тут нечего: считать по длине списка было бы неверно в
+        // общем случае (AlignOp/BoldOp/DoubleSizeOp сами по себе ничего не
+        // печатают), здесь же список пуст в буквальном смысле.
+        //
+        // qr/barcode/logo(Nv) сюда больше не годятся как пример: все три
+        // печатают графику (QrOp/BarcodeOp/NvLogoOp), а обрезка теперь
+        // учитывает графические операции наравне с текстовыми — см.
+        // ReceiptRenderer.Render и EscPosGraphicsTest.
+        var ops = ReceiptRenderer.Render(One(new LogoBlock { Source = LogoSource.Bitmap }), Sale(Glue()));
 
         Assert.DoesNotContain(ops, o => o is CutOp);
     }
@@ -214,6 +228,41 @@ public class ReceiptRendererTest
         var ops = ReceiptRenderer.Render(t, sale);
 
         Assert.DoesNotContain(ops, o => o is AlignOp { Align: ReceiptAlign.Right });
+    }
+
+    [Fact]
+    public void DroppedBitmapLogoBlock_LeavesNoDanglingAlignOp()
+    {
+        // Зеркало DroppedTextBlock_LeavesNoDanglingAlignOp: логотип-картинка
+        // тоже отбрасывается целиком (см. ReceiptRenderer.RenderBlock), и это
+        // тоже обязано случиться ДО AlignOp, а не после.
+        var t = new ReceiptTemplate
+        {
+            Width = 32,
+            Blocks = new List<ReceiptBlock>
+            {
+                new LogoBlock { Source = LogoSource.Bitmap, Align = ReceiptAlign.Right },
+                new TextBlock { Content = "OK" },
+            },
+        };
+
+        var ops = ReceiptRenderer.Render(t, Sale(Glue()));
+
+        Assert.DoesNotContain(ops, o => o is AlignOp { Align: ReceiptAlign.Right });
+    }
+
+    [Fact]
+    public void Render_ThrowsNotSupported_ForAnUnhandledBlockType()
+    {
+        // Тот же довод, что у EscPosEmitterTest.Emit_ThrowsNotSupported_ForAnUnhandledOpType:
+        // switch по типу блока не проверяется компилятором на полноту, и
+        // default обязан быть живой, закреплённой тестом веткой — иначе
+        // забытый в switch новый тип блока молча превратился бы в "решили не
+        // печатать" вместо ошибки, замеченной на этапе разработки.
+        var t = One(new UnknownBlock());
+
+        var ex = Assert.Throws<NotSupportedException>(() => ReceiptRenderer.Render(t, Sale(Glue())));
+        Assert.Contains(nameof(UnknownBlock), ex.Message);
     }
 
     [Fact]

@@ -236,6 +236,34 @@ public class EscPosEmitterTest
     }
 
     [Fact]
+    public void Emit_SkipsHeightAndHri_WhenBothAreAlreadyInEffect()
+    {
+        // Тот же принцип подавления, что у Align/Bold/DoubleSize (см. тесты
+        // выше в этом файле), но для GS h/GS H: два штрихкода подряд с
+        // одинаковой высотой и HRI не обязаны переиздавать обе команды
+        // дважды.
+        var bytes = Emit(
+            new BarcodeOp("111111111111", BarcodeSymbology.Ean13, Height: 50, PrintHri: true),
+            new BarcodeOp("222222222222", BarcodeSymbology.Ean13, Height: 50, PrintHri: true));
+
+        Assert.Single(FindAll(bytes, new byte[] { 0x1D, 0x68, 50 }));
+        Assert.Single(FindAll(bytes, new byte[] { 0x1D, 0x48, 0x02 }));
+        // Оба GS k всё же напечатаны — подавление касается только высоты и HRI.
+        Assert.Equal(2, FindAll(bytes, new byte[] { 0x1D, 0x6B, 67 }).Length);
+    }
+
+    [Fact]
+    public void Emit_ReemitsHeight_WhenItActuallyChangesBetweenBarcodes()
+    {
+        var bytes = Emit(
+            new BarcodeOp("111111111111", BarcodeSymbology.Ean13, Height: 50, PrintHri: true),
+            new BarcodeOp("222222222222", BarcodeSymbology.Ean13, Height: 80, PrintHri: true));
+
+        Assert.Single(FindAll(bytes, new byte[] { 0x1D, 0x68, 50 }));
+        Assert.Single(FindAll(bytes, new byte[] { 0x1D, 0x68, 80 }));
+    }
+
+    [Fact]
     public void Emit_WritesTheCutCommand()
     {
         var bytes = Emit(new CutOp());

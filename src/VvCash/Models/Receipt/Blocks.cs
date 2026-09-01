@@ -172,18 +172,34 @@ public sealed class TotalsBlock : ReceiptBlock
     public bool BoldTotal { get; set; } = true;
 }
 
-/// <remarks>Модель есть, печати ещё нет: у рендерера, который придёт следующей
-/// задачей, пока нет операции печати QR-кода для EscPosEmitter.</remarks>
+/// <remarks>Печатается в EscPosEmitter.WriteQr: модель 2, уровень коррекции
+/// ошибок M, данные в UTF-8 (это читает сканер, а не кодовая страница
+/// принтера). Пустая или отсутствующая после подстановки строка — повод не
+/// печатать блок вовсе, см. ReceiptRenderer.RenderBlock.</remarks>
 public sealed class QrBlock : ReceiptBlock
 {
     public string Data { get; set; } = string.Empty;
+
+    /// <summary>Диапазон 1–16 — то, что реально несёт байт m у GS ( k,
+    /// функции 167 (размер модуля в точках). Верхний потолок здесь не 255:
+    /// приведение к byte само по себе не спасает — 20 уже вне диапазона
+    /// этой функции задолго до того, как стать byte, и "moduleSize": 20 —
+    /// правдоподобная опечатка, которую стоит клампить с логом, а не
+    /// отправлять на принтер как есть.</summary>
+    private const int MaxModuleSize = 16;
 
     private int _moduleSize = 6;
 
     public int ModuleSize
     {
         get => _moduleSize;
-        set => _moduleSize = value > 0 ? value : 6;
+        set
+        {
+            var clamped = value > 0 ? Math.Min(value, MaxModuleSize) : 6;
+            if (clamped != value)
+                Console.WriteLine($"[QrBlock] ModuleSize {value} вне диапазона (0, {MaxModuleSize}], использую {clamped}");
+            _moduleSize = clamped;
+        }
     }
 }
 
@@ -193,19 +209,37 @@ public enum BarcodeSymbology
     Ean13,
 }
 
-/// <remarks>Модель есть, печати ещё нет: у рендерера, который придёт следующей
-/// задачей, пока нет операции печати штрихкода для EscPosEmitter.</remarks>
+/// <remarks>Печатается в EscPosEmitter.WriteBarcode. CODE128 идёт с
+/// селектором набора B и удвоением литеральной "{" — без этого GS k
+/// прекращает разбор данных на первом байте и печатает их обычным текстом.
+/// EAN-13 обязан быть ровно 12 или 13 цифрами. Рендерер отбрасывает блок
+/// целиком, с записью в лог, если данные пустые, не из печатного ASCII или
+/// не подходят под символику — печатать испорченный штрихкод хуже, чем не
+/// печатать вовсе, см. ReceiptRenderer.RenderBlock и
+/// EscPosEmitter.TryEncodeBarcode.</remarks>
 public sealed class BarcodeBlock : ReceiptBlock
 {
     public string Data { get; set; } = string.Empty;
     public BarcodeSymbology Symbology { get; set; } = BarcodeSymbology.Code128;
+
+    /// <summary>Диапазон 1–255 — то, что несёт однобайтовый параметр n у
+    /// GS h. Без верхнего потолка здесь 300 приведением к byte стало бы 44:
+    /// не отвергнутый вход, а другая высота, никак не связанная с тем, что
+    /// попросили.</summary>
+    private const int MaxHeight = 255;
 
     private int _height = 64;
 
     public int Height
     {
         get => _height;
-        set => _height = value > 0 ? value : 64;
+        set
+        {
+            var clamped = value > 0 ? Math.Min(value, MaxHeight) : 64;
+            if (clamped != value)
+                Console.WriteLine($"[BarcodeBlock] Height {value} вне диапазона (0, {MaxHeight}], использую {clamped}");
+            _height = clamped;
+        }
     }
 
     public bool PrintHri { get; set; } = true;
@@ -219,17 +253,31 @@ public enum LogoSource
     Bitmap,
 }
 
-/// <remarks>Модель есть, печати ещё нет: у рендерера, который придёт следующей
-/// задачей, пока нет операции печати логотипа для EscPosEmitter.</remarks>
+/// <remarks>Источник Nv печатается как FS p — слот, прошитый в память
+/// принтера. Источник Bitmap пока не печатает ничего: растр приезжает
+/// отдельной опцией конфига receipt_logo и подключается в Task 9 — блок с
+/// этим источником отбрасывается целиком, до пролога, см.
+/// ReceiptRenderer.RenderBlock.</remarks>
 public sealed class LogoBlock : ReceiptBlock
 {
     public LogoSource Source { get; set; } = LogoSource.Nv;
+
+    /// <summary>Диапазон 1–255 — то, что несёт однобайтовый параметр m у
+    /// FS p (слот логотипа). Без верхнего потолка здесь 1000 приведением к
+    /// byte стало бы 232: не отвергнутый вход, а чужой слот на бумаге.</summary>
+    private const int MaxNvSlot = 255;
 
     private int _nvSlot = 1;
 
     public int NvSlot
     {
         get => _nvSlot;
-        set => _nvSlot = value > 0 ? value : 1;
+        set
+        {
+            var clamped = value > 0 ? Math.Min(value, MaxNvSlot) : 1;
+            if (clamped != value)
+                Console.WriteLine($"[LogoBlock] NvSlot {value} вне диапазона (0, {MaxNvSlot}], использую {clamped}");
+            _nvSlot = clamped;
+        }
     }
 }

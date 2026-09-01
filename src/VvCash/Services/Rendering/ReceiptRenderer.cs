@@ -25,17 +25,20 @@ public static class ReceiptRenderer
             RenderBlock(block, template, sale, values, ops);
         }
 
-        // Резать нечего, если на бумагу не вышло ни одного символа. Считать по
-        // длине ops (как было раньше) неверно: AlignOp/BoldOp/DoubleSizeOp сами
-        // по себе ничего не печатают, а их достаточно, чтобы список не был
-        // пуст. Условие сознательно смотрит только на TextOp/FeedOp, а не на
-        // QrOp/BarcodeOp/NvLogoOp/BitmapOp тоже: чек из одной графики без
-        // единой текстовой строки — вырожденный случай, которого нет ни в
-        // одном шаблоне из конструктора, и плата за него — не пропавший чек, а
-        // отсутствие обрезки после него; поставщик такого шаблона одновременно
-        // ставит эмиттеру FeedBlock (см. дефолтный шаблон), так что на практике
-        // ножа это не касается.
-        if (ops.Any(o => o is TextOp or FeedOp)) ops.Add(new CutOp());
+        // Резать нечего, если на бумагу не вышло ни одного знака — ни
+        // текстового, ни графического. Считать по длине ops (как было раньше)
+        // неверно: AlignOp/BoldOp/DoubleSizeOp сами по себе ничего не
+        // печатают, а их достаточно, чтобы список не был пуст.
+        //
+        // QrOp/BarcodeOp/NvLogoOp/BitmapOp входят в условие наравне с
+        // TextOp/FeedOp: они кладут краску на бумагу точно так же, а не
+        // "меньше считаются". Раньше условие смотрело только на TextOp/FeedOp
+        // — это было верно ровно до тех пор, пока QR/штрихкод/логотип не
+        // печатали вовсе ничего (см. историю этого файла); теперь чек из
+        // одного QR без единой текстовой строки без графики в этом условии
+        // выходил бы без обрезки и склеивался со следующим чеком на ленте.
+        if (ops.Any(o => o is TextOp or FeedOp or QrOp or BarcodeOp or NvLogoOp or BitmapOp))
+            ops.Add(new CutOp());
         return ops;
     }
 
@@ -74,14 +77,50 @@ public static class ReceiptRenderer
         // значит и проверка для них стоит здесь же, а не внутри switch: там она
         // была бы уже ПОСЛЕ AlignOp двумя строками ниже и не спасла бы от той же
         // самой висячей команды, от которой спасает эта проверка для текста.
+        //
+        // Пустая строка — ДВЕ разные беды, а не одна. TrySubstitute ловит
+        // только подстановку, схлопнувшуюся в пустоту ({doc} у продажи без
+        // номера). Литеральная "" — значение по умолчанию у QrBlock.Data и
+        // BarcodeBlock.Data, когда блок добавили в конструкторе и не
+        // заполнили — вообще не проходит через подстановку (в строке без
+        // "{...}" Placeholder.Replace не находит совпадений), и TrySubstitute
+        // вернула бы true как для любой другой строки без плейсхолдеров.
+        // Поэтому итоговая строка ниже проверяется на пустоту ЯВНО, отдельно
+        // от dropped.
         string? line = null;
         if (block is TextBlock tb && !TrySubstitute(tb.Content, values, out line)) return;
 
         string? qrData = null;
-        if (block is QrBlock qrPre && !TrySubstitute(qrPre.Data, values, out qrData)) return;
+        if (block is QrBlock qrPre)
+        {
+            if (!TrySubstitute(qrPre.Data, values, out qrData) || string.IsNullOrWhiteSpace(qrData))
+                return;
+        }
 
         string? bcData = null;
-        if (block is BarcodeBlock bcPre && !TrySubstitute(bcPre.Data, values, out bcData)) return;
+        if (block is BarcodeBlock bcPre)
+        {
+            if (!TrySubstitute(bcPre.Data, values, out bcData) || string.IsNullOrWhiteSpace(bcData))
+                return;
+
+            // Длина, алфавит и формат — уже здесь, а не только в эмиттере:
+            // печатать испорченный штрихкод (обрезанный по однобайтовой
+            // длине, прочитанный как обычный текст из-за отсутствующего
+            // селектора CODE128, отвергнутый принтером как EAN-13 вне
+            // диапазона) хуже, чем не напечатать вовсе.
+            if (!EscPosEmitter.TryEncodeBarcode(bcData, bcPre.Symbology, out _, out var reason))
+            {
+                Console.WriteLine($"[ReceiptRenderer] штрихкод не напечатан: {reason}");
+                return;
+            }
+        }
+
+        // Логотип-картинка пока не печатает ничего: растр приезжает отдельной
+        // опцией конфига receipt_logo и подключается в Task 9. Блок
+        // отбрасывается целиком тем же приёмом, что и qr/barcode с пустыми
+        // данными — иначе чек с одним таким блоком получил бы висячий
+        // AlignOp в никуда.
+        if (block is LogoBlock { Source: LogoSource.Bitmap }) return;
 
         ops.Add(new AlignOp(block.Align));
 
@@ -151,25 +190,32 @@ public static class ReceiptRenderer
 
             case QrBlock qr:
                 // qrData уже проверен и подставлен выше, до AlignOp; здесь он
-                // гарантированно не null, потому что иначе метод вернулся раньше.
+                // гарантированно не null и не пуст, потому что иначе метод
+                // вернулся раньше.
                 ops.Add(new QrOp(qrData!, qr.ModuleSize));
                 break;
 
             case BarcodeBlock bc:
+                // bcData уже проверен, подставлен и провалидирован
+                // (TryEncodeBarcode) выше, до AlignOp.
                 ops.Add(new BarcodeOp(bcData!, bc.Symbology, bc.Height, bc.PrintHri));
                 break;
 
             case LogoBlock logo:
-                // AlignOp уже добавлен общим прологом выше — второй раз здесь
-                // не нужен, как и для всех остальных блоков ниже TextBlock.
-                if (logo.Source == LogoSource.Nv)
-                    ops.Add(new NvLogoOp(logo.NvSlot));
-                // Растровый логотип подключается в Task 9 вместе с опцией
-                // receipt_logo: без её содержимого печатать нечего.
+                // Source == Bitmap уже отфильтрован выше, до AlignOp — сюда
+                // попадает только Nv.
+                ops.Add(new NvLogoOp(logo.NvSlot));
                 break;
 
             default:
-                break;
+                // switch по типу блока не проверяется компилятором на
+                // полноту: все девять подтипов ReceiptBlock перечислены выше,
+                // и эта ветка недостижима, пока их ровно девять. Тихий
+                // no-op здесь замаскировал бы забытый новый тип блока под
+                // "решили не печатать" — тем же способом, каким рассогласован
+                // был бы EscPosEmitter.Emit, если бы её default молчал вместо
+                // NotSupportedException (см. EscPosEmitterTest).
+                throw new NotSupportedException($"Неизвестный тип блока чека: {block.GetType().Name}");
         }
 
         ops.Add(new BoldOp(false));

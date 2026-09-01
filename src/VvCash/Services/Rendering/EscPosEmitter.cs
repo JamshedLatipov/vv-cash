@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using VvCash.Models;
 using VvCash.Models.Receipt;
 
@@ -44,6 +45,20 @@ public static class EscPosEmitter
     private static readonly byte[] CmdCut = { 0x1D, 0x56, 0x42, 0x00 };
     private static readonly byte[] CmdLineFeed = { 0x0A };
 
+    // GS ( k, функция 165: модель 2 (0x32) — единственная, которую понимают
+    // все ходовые аппараты. Хвостовой 0x00 — это n самой функции 165, к
+    // модели отношения не имеет.
+    private static readonly byte[] QrSelectModel2 = { 0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00 };
+    // Функция 167 без последнего байта: он один меняется от QrOp к QrOp
+    // (размер модуля), остальные шесть — нет.
+    private static readonly byte[] QrModuleSizePrefix = { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43 };
+    // Функция 169: уровень коррекции ошибок. n=0x31 (49) — уровень M (15%), а
+    // не дефолтный после ESC @ уровень L (7%): чек живёт в кармане, мнётся и
+    // выцветает, и 7% избыточности для него мало.
+    private static readonly byte[] QrErrorCorrectionLevelM = { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31 };
+    // Функция 181: напечатать то, что уже сложено в буфер символа функцией 180.
+    private static readonly byte[] QrPrint = { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30 };
+
     public static byte[] Emit(IEnumerable<ReceiptOp> ops, EscPosCodePage codePage)
     {
         using var ms = new MemoryStream();
@@ -58,6 +73,15 @@ public static class EscPosEmitter
         var align = ReceiptAlign.Left;
         var bold = false;
         var doubleSize = false;
+        // -1 и null — недостижимые значения (Height клампится к [1, 255] в
+        // BarcodeBlock, а у PrintHri третьего состояния нет), поэтому первый
+        // же штрихкод в чеке гарантированно переиздаёт GS h и GS H. В отличие
+        // от align/bold/doubleSize чуть выше, для которых ESC @ документирует
+        // сброс в конкретное состояние (Left/false/false), для высоты
+        // штрихкода и режима HRI такого гарантированного стартового
+        // состояния принтера нет — подавлять первую команду не на чем.
+        var barcodeHeight = -1;
+        bool? barcodePrintHri = null;
 
         foreach (var op in ops)
         {
@@ -127,10 +151,21 @@ public static class EscPosEmitter
                     break;
 
                 case QrOp qr:
-                    WriteQr(ms, qr, codePage);
+                    WriteQr(ms, qr);
                     break;
 
                 case BarcodeOp bc:
+                    if (bc.Height != barcodeHeight)
+                    {
+                        barcodeHeight = bc.Height;
+                        ms.Write(new byte[] { 0x1D, 0x68, (byte)barcodeHeight }, 0, 3);   // GS h — высота
+                    }
+                    if (bc.PrintHri != barcodePrintHri)
+                    {
+                        barcodePrintHri = bc.PrintHri;
+                        // GS H — подпись снизу
+                        ms.Write(new byte[] { 0x1D, 0x48, bc.PrintHri ? (byte)0x02 : (byte)0x00 }, 0, 3);
+                    }
                     WriteBarcode(ms, bc);
                     break;
 
@@ -156,36 +191,106 @@ public static class EscPosEmitter
         return ms.ToArray();
     }
 
-    /// <summary>GS ( k тремя вызовами: выбрать модель, задать размер модуля,
-    /// сложить данные в буфер символа, напечатать. Порядок обязателен — печать
-    /// берёт то, что лежит в буфере на её момент.</summary>
-    private static void WriteQr(MemoryStream ms, QrOp qr, EscPosCodePage codePage)
+    /// <summary>GS ( k четырьмя вызовами: выбрать модель, задать размер
+    /// модуля, задать уровень коррекции ошибок, сложить данные в буфер
+    /// символа, напечатать. Порядок обязателен — печать берёт то, что лежит
+    /// в буфере на её момент.</summary>
+    private static void WriteQr(MemoryStream ms, QrOp qr)
     {
-        // Функция 165: модель 2 (0x32) — её понимают все ходовые аппараты.
-        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00 }, 0, 9);
-        // Функция 167: размер модуля в точках.
-        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, (byte)qr.ModuleSize }, 0, 8);
+        ms.Write(QrSelectModel2, 0, QrSelectModel2.Length);
 
-        var data = codePage.Encoding.GetBytes(qr.Data);
+        ms.Write(QrModuleSizePrefix, 0, QrModuleSizePrefix.Length);
+        ms.WriteByte((byte)qr.ModuleSize);
+
+        ms.Write(QrErrorCorrectionLevelM, 0, QrErrorCorrectionLevelM.Length);
+
+        // QR читает чужой сканер, а не наш принтер — кодовая страница
+        // принтера (CP866/CP1251) для сканера чужой алфавит: "Чек" в CP866 —
+        // это байты 97 A5 AA, и ни один сканер так не прочитает. UTF-8 — то,
+        // что ждёт любой сканер по умолчанию.
+        var data = System.Text.Encoding.UTF8.GetBytes(qr.Data);
         var len = data.Length + 3;
         // Функция 180: сложить данные. pL/pH считают ТРИ служебных байта следом,
         // а не только полезную нагрузку — отсюда +3.
         ms.Write(new byte[] { 0x1D, 0x28, 0x6B, (byte)(len & 0xFF), (byte)(len >> 8), 0x31, 0x50, 0x30 }, 0, 8);
         ms.Write(data, 0, data.Length);
-        // Функция 181: напечатать то, что в буфере.
-        ms.Write(new byte[] { 0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30 }, 0, 8);
+
+        ms.Write(QrPrint, 0, QrPrint.Length);
     }
 
     private static void WriteBarcode(MemoryStream ms, BarcodeOp bc)
     {
-        ms.Write(new byte[] { 0x1D, 0x68, (byte)bc.Height }, 0, 3);              // GS h — высота
-        ms.Write(new byte[] { 0x1D, 0x48, bc.PrintHri ? (byte)0x02 : (byte)0x00 }, 0, 3); // GS H — подпись снизу
+        // Рендерер уже вызвал TryEncodeBarcode и отбросил блок целиком при
+        // провале, с логом (см. ReceiptRenderer.RenderBlock) — сюда попадают
+        // только уже проверенные данные. Повторный провал здесь означает, что
+        // BarcodeOp собрали в обход рендерера: тогда не написать GS k вовсе
+        // безопаснее, чем написать обрезанный или пустой штрихкод.
+        if (!TryEncodeBarcode(bc.Data, bc.Symbology, out var data, out _)) return;
 
         // m ≥ 65 — форма с длиной вместо NUL-терминатора: она принимает данные с
         // любым байтом внутри, включая ноль, и не зависит от терминатора.
         var m = bc.Symbology == BarcodeSymbology.Ean13 ? (byte)67 : (byte)73;
-        var data = System.Text.Encoding.ASCII.GetBytes(bc.Data);
         ms.Write(new byte[] { 0x1D, 0x6B, m, (byte)data.Length }, 0, 4);
         ms.Write(data, 0, data.Length);
     }
+
+    /// <summary>Единственное место, знающее, как GS k кодирует данные для
+    /// двух поддерживаемых символик. Рендерер зовёт её, чтобы решить,
+    /// печатать ли блок вообще (см. ReceiptRenderer.RenderBlock); эмиттер
+    /// зовёт её же перед тем, как писать GS k, чтобы не разойтись с
+    /// рендерером в деталях кодирования.
+    ///
+    /// "ASCII" здесь — печатный ASCII 0x20–0x7E, а не весь диапазон 0–127:
+    /// набор B у CODE128 физически несёт только эти байты, управляющих
+    /// символов среди них нет — тот же практический запрет, что и на
+    /// кириллицу, только про другую часть алфавита.</summary>
+    internal static bool TryEncodeBarcode(string data, BarcodeSymbology symbology, out byte[] bytes, out string? reason)
+    {
+        bytes = Array.Empty<byte>();
+
+        if (string.IsNullOrEmpty(data))
+        {
+            reason = "данные пусты";
+            return false;
+        }
+
+        if (!data.All(IsPrintableAscii))
+        {
+            reason = "данные вне печатного ASCII — ни CODE128, ни EAN-13 такое не кодируют";
+            return false;
+        }
+
+        if (symbology == BarcodeSymbology.Ean13)
+        {
+            if (data.Length is not (12 or 13) || !data.All(char.IsAsciiDigit))
+            {
+                reason = $"EAN-13 требует ровно 12 или 13 цифр, получено \"{data}\"";
+                return false;
+            }
+
+            bytes = System.Text.Encoding.ASCII.GetBytes(data);
+            reason = null;
+            return true;
+        }
+
+        // CODE128, набор B: GS k при m=73 требует, чтобы данные начинались с
+        // селектора набора ({A/{B/{C) — без него принтер прекращает разбор
+        // команды на первом байте и печатает всё как обычный текст.
+        // Литеральная "{" внутри данных обязана удваиваться, иначе сама
+        // читается как начало нового селектора.
+        var payload = "{B" + data.Replace("{", "{{");
+        var payloadBytes = System.Text.Encoding.ASCII.GetBytes(payload);
+        if (payloadBytes.Length > byte.MaxValue)
+        {
+            reason = $"CODE128 после служебного префикса и удвоения '{{' занимает {payloadBytes.Length} байт " +
+                     $"— GS k хранит длину в одном байте (максимум {byte.MaxValue})";
+            return false;
+        }
+
+        bytes = payloadBytes;
+        reason = null;
+        return true;
+    }
+
+    private static bool IsPrintableAscii(char c) => c is >= (char)0x20 and <= (char)0x7E;
 }

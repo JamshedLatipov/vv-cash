@@ -1,3 +1,4 @@
+using System;
 using VvCash.Models.Receipt;
 
 namespace VvCash.Services.Rendering;
@@ -34,5 +35,20 @@ public sealed record BarcodeOp(string Data, BarcodeSymbology Symbology, int Heig
 public sealed record NvLogoOp(int Slot) : ReceiptOp;
 
 /// <summary>Растр, приехавший с сервера уже сведённым в один бит. Ширина здесь
-/// в БАЙТАХ, высота в точках — так требует GS v 0, и путать их нельзя.</summary>
-public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : ReceiptOp;
+/// в БАЙТАХ, высота в точках — так требует GS v 0, и путать их нельзя.
+///
+/// Инвариант — раз и навсегда здесь, в конструкторе, а не у каждого будущего
+/// вызывающего: растр короче WidthBytes×Height даёт на бумаге ту же беду, что
+/// и перепутанные местами ширина и высота выше — GS v 0 берёт из потока то,
+/// чего там нет, и печатает как логотип весь текст и команду обрезки следом.
+/// Сегодня этот конструктор не вызывает никто (растровый логотип подключается
+/// в Task 9), но заряженная сейчас мина по-прежнему мина.</summary>
+public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : ReceiptOp
+{
+    public byte[] Raster { get; init; } = WidthBytes >= 0 && Height >= 0 && Raster.Length >= WidthBytes * Height
+        ? Raster
+        : throw new ArgumentException(
+            $"Растр логотипа не сходится с объявленным размером: {Raster.Length} байт, " +
+            $"WidthBytes={WidthBytes}, Height={Height}.",
+            nameof(Raster));
+}
