@@ -1,11 +1,18 @@
 using System;
 using System.Collections.Generic;
+using VvCash.Models;
 
 namespace VvCash.Services.Hardware;
 
 /// <summary>Одна комбинация автоподбора и её номер — то самое число, которое кассир
-/// читает на табло.</summary>
-public sealed record DisplayProbe(int Number, IDisplayProtocol Protocol, int BaudRate);
+/// читает на табло или выбирает из списка после «Стоп».</summary>
+public sealed record DisplayProbe(
+    int Number,
+    string PortName,
+    IDisplayProtocol Protocol,
+    int BaudRate,
+    SerialFraming Framing,
+    bool DtrRts);
 
 /// <summary>Что перебирает автоподбор и в каком порядке.
 ///
@@ -13,50 +20,74 @@ public sealed record DisplayProbe(int Number, IDisplayProtocol Protocol, int Bau
 /// CustomerDisplayPlacementSelector: решение, зависящее только от каталогов, должно
 /// проверяться без Avalonia и без COM-порта.
 ///
-/// Формат кадра и DTR/RTS сюда не входят намеренно. Они редкие, а в кресте с ними
-/// перебор вырос бы с 28 шагов до 112 — почти три минуты, столько кассир за табло не
-/// отследит. Не нашлось — ставятся руками, и перебор гоняется ещё раз.</summary>
+/// Перебираются все пять осей — порт, скорость, формат кадра, DTR/RTS и диалект.
+/// Раньше две из них были вынесены в ручные поля ради короткого прогона, но живой
+/// разбор показал, что угадать их с экрана нечем: касса не может отличить «порт
+/// принял байты» от «табло их поняло», а материнский UART принимает всё и всегда.
+/// Полный крест длиннее, зато не оставляет угла, куда можно не заглянуть.</summary>
 public static class DisplayProbePlan
 {
-    /// <summary>Низ списка включён по следу живого разбора: встречалось табло, которое
-    /// гасло на всём выше 2400. Перебор, начинающийся с 9600, такое не находит.</summary>
+    /// <summary>Порядок не косметика: кассир смотрит на табло вживую, и чем раньше
+    /// встретится рабочая скорость, тем меньше шансов, что он устанет и бросит.
+    /// 9600 и 2400 — самые частые на этих панелях, поэтому идут первыми.
+    ///
+    /// Низ списка при этом обязан остаться. Встречалось табло, которое гасло на всём
+    /// выше 2400: перебор, начинающийся с 9600 и не доходящий до 600, такое находит
+    /// только случайно.</summary>
     public static IReadOnlyList<int> BaudRates { get; } =
-        Array.AsReadOnly(new[] { 600, 1200, 2400, 4800, 9600, 19200, 38400 });
+        Array.AsReadOnly(new[] { 9600, 2400, 19200, 38400, 4800, 1200, 600 });
 
-    private static readonly IReadOnlyList<DisplayProbe> Plan = BuildPlan();
-
-    /// <summary>Протокол снаружи, скорость внутри: соседние номера отличаются только
-    /// скоростью, и кассиру, который видит на табло два читаемых числа подряд, сразу
-    /// понятно, что дело в ней, а не в диалекте.</summary>
-    private static IReadOnlyList<DisplayProbe> BuildPlan()
+    /// <summary>Строит план для этих портов.
+    ///
+    /// Порядок вложенности выбран под то, как это читается глазами: диалект меняется
+    /// быстрее всего, поэтому четыре подряд идущих шага делят порт, скорость и формат
+    /// кадра. Если транспорт угадан, оживёт хотя бы один из четырёх — кассир видит
+    /// вспышку подряд, а не одиночную, которую легко проморгать. Вынеси протокол
+    /// наружу — и верные комбинации размажутся по всему прогону поодиночке.</summary>
+    public static IReadOnlyList<DisplayProbe> Build(IReadOnlyList<string> ports)
     {
         var probes = new List<DisplayProbe>();
         var number = 1;
 
-        foreach (var protocol in DisplayProtocols.All)
+        foreach (var port in ports)
         {
             foreach (var baud in BaudRates)
             {
-                probes.Add(new DisplayProbe(number, protocol, baud));
-                number++;
+                foreach (var framing in SerialFramings.All)
+                {
+                    foreach (var dtrRts in new[] { true, false })
+                    {
+                        foreach (var protocol in DisplayProtocols.All)
+                        {
+                            probes.Add(new DisplayProbe(number, port, protocol, baud, framing, dtrRts));
+                            number++;
+                        }
+                    }
+                }
             }
         }
 
         return probes.AsReadOnly();
     }
 
-    public static IReadOnlyList<DisplayProbe> Build() => Plan;
-
-    /// <summary>Комбинация по номеру, или null, если такого номера нет. Экран
-    /// настроек отличает «кассир ошибся при вводе» от «номер есть» только по этому
-    /// null.</summary>
-    public static DisplayProbe? Find(int number)
+    /// <summary>Комбинация по номеру, или null, если такого номера нет. Экран настроек
+    /// отличает «кассир ошибся при вводе» от «номер есть» только по этому null.</summary>
+    public static DisplayProbe? Find(IReadOnlyList<DisplayProbe> plan, int number)
     {
-        foreach (var probe in Plan)
+        foreach (var probe in plan)
         {
             if (probe.Number == number) return probe;
         }
 
         return null;
     }
+
+    /// <summary>Строка для экрана: все пять осей словами.
+    ///
+    /// Перечислено всё до единой оси намеренно. По этой же строке кассир ставит
+    /// настройки руками, если применение по номеру почему-то не подошло, — пропущенная
+    /// ось означает найденную комбинацию, которую нельзя повторить.</summary>
+    public static string Describe(DisplayProbe probe)
+        => $"{probe.PortName} {probe.BaudRate} {probe.Framing.Id} " +
+           $"DTR{(probe.DtrRts ? "+" : "-")} {probe.Protocol.DisplayName}";
 }
