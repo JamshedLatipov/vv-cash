@@ -49,9 +49,18 @@ public sealed class ReceiptTemplate
     /// печатает дефолт. Бросать нельзя: значение приходит с сервера и из кэша,
     /// а чек обязан выйти.
     ///
+    /// Отсутствие ключа "blocks" — тоже такая беда, а не осознанно пустой
+    /// шаблон: receiptTemplate живёт в конфиге с 2019 года и шесть лет
+    /// рендерился обычным текстовым полем в бэкофисе, и случайный валидный
+    /// JSON-объект без нужных ключей там вполне мог осесть. "blocks":[] —
+    /// наоборот, осознанный выбор администратора, стёршего все блоки в
+    /// конструкторе шаблонов, и его нельзя подменять дефолтом.
+    ///
     /// Незнакомый type блока выбрасывается, а остальные печатаются: касса и
     /// админка обновляются врозь, и блок из более новой админки не повод
-    /// потерять весь чек.</summary>
+    /// потерять весь чек. То же — для элемента, который вообще не объект
+    /// (голый null, строка, число): это такой же чужой блок, просто без type,
+    /// а не повод откатить весь чек в дефолт.</summary>
     public static ReceiptTemplate Parse(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return Default;
@@ -64,12 +73,28 @@ public sealed class ReceiptTemplate
             var version = node["version"]?.GetValue<int>() ?? CurrentVersion;
             if (version != CurrentVersion) return Default;
 
+            // Ключа "blocks" нет вовсе — печатать нечего, и это не то же самое,
+            // что "blocks":[] (см. комментарий к методу). Различие ровно в
+            // присутствии ключа, поэтому здесь ContainsKey, а не проверка на
+            // null/пустоту значения.
+            if (!node.ContainsKey("blocks")) return Default;
+
             var kept = new JsonArray();
             foreach (var block in node["blocks"]?.AsArray() ?? new JsonArray())
             {
-                var type = block?["type"]?.GetValue<string>();
+                // Элемент массива, который не является JSON-объектом (null,
+                // строка, число), не имеет и не может иметь "type" — это такой
+                // же чужой блок, как и объект с незнакомым type, и должен
+                // выбрасываться поштучно. Раньше проверялась только null-ность
+                // ("block?[...]"), а на скаляре сам индексатор JsonNode звал
+                // AsObject() и бросал InvalidOperationException — это ловил
+                // внешний catch и откатывал в Default весь шаблон целиком,
+                // а не только сломанный элемент.
+                if (block is not JsonObject obj) continue;
+
+                var type = obj["type"]?.GetValue<string>();
                 if (type != null && KnownTypes.Contains(type))
-                    kept.Add(block!.DeepClone());
+                    kept.Add(obj.DeepClone());
             }
             node["blocks"] = kept;
 

@@ -67,6 +67,22 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void Parse_DropsANonObjectBlockEntry_AndKeepsTheRest()
+    {
+        // Симметрично уже проверенным null и объекту без "type": голая строка в
+        // массиве blocks — тоже просто чужой блок без type, а не повод откатить
+        // весь чек. Раньше индексация "block?["type"]" защищала только от null,
+        // а на скаляре сам индексатор JsonNode звал AsObject() и бросал — это
+        // ловил внешний catch и стирал весь распарсенный шаблон, а не только
+        // сломанный элемент.
+        var json = """{"version":1,"blocks":[{"type":"text","content":"A"},"oops",{"type":"text","content":"B"}]}""";
+
+        var t = ReceiptTemplate.Parse(json);
+
+        Assert.Equal(new[] { "A", "B" }, t.Blocks.Cast<TextBlock>().Select(b => b.Content));
+    }
+
+    [Fact]
     public void Parse_IgnoresAnUnknownFieldInsideAKnownBlock()
     {
         var t = ReceiptTemplate.Parse("""{"version":1,"blocks":[{"type":"text","content":"A","glitter":true}]}""");
@@ -79,6 +95,41 @@ public class ReceiptTemplateTest
     {
         // Несовместимый формат лучше не печатать вовсе, чем печатать наполовину.
         Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("""{"version":99,"blocks":[]}"""));
+    }
+
+    [Fact]
+    public void Parse_FallsBackToTheDefault_OnAnObjectWithNoRecognizableKeys()
+    {
+        // receiptTemplate живёт в конфиге с 2019 года и шесть лет рендерился
+        // обычным текстовым полем в бэкофисе — случайный валидный JSON-объект
+        // без нужных ключей там вполне мог осесть. Без "blocks" это на бумаге
+        // пустой чек: одна обрезка, без шапки, позиций и итогов. Формально
+        // касса "напечатала", но выдала бессодержательный документ — это хуже,
+        // чем напечатать дефолт.
+        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("{}"));
+        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("""{"a":1}"""));
+    }
+
+    [Fact]
+    public void Parse_FallsBackToTheDefault_WhenTheBlocksKeyIsMissing()
+    {
+        // Тот же случай, что и выше, но с валидной версией: версия сама по себе
+        // не спасает документ без "blocks" — это всё ещё мусор, а не шаблон.
+        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("""{"version":1}"""));
+    }
+
+    [Fact]
+    public void Parse_KeepsAnIntentionallyEmptyBlockList()
+    {
+        // А вот "blocks":[] — это не порча данных, а осознанный выбор
+        // администратора, стёршего все блоки в конструкторе шаблонов: ключ
+        // присутствует, значит про блоки решение уже приняли. Отличие от
+        // предыдущих двух тестов ровно в присутствии ключа "blocks", а не в
+        // том, пуст он или нет.
+        var t = ReceiptTemplate.Parse("""{"version":1,"blocks":[]}""");
+
+        Assert.NotSame(ReceiptTemplate.Default, t);
+        Assert.Empty(t.Blocks);
     }
 
     [Fact]
