@@ -597,8 +597,18 @@ public class SyncServiceTest
     [Fact]
     public async Task SyncReceiptTemplateAsync_KeepsTheCache_OnANegativeBackendStatus()
     {
+        // Тело — валидный массив С опцией receipt_template внутри, а не null: с
+        // null-телом тест гасится соседней проверкой "тело не массив" раньше, чем
+        // успевает сработать проверка статуса, и мутация "отключить проверку
+        // статуса" не красит тест (см. ревью Task 10). Ненулевое тело с реальной
+        // опцией заставляет именно статус быть тем, что останавливает сохранение.
         var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
-        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, """{"status":-1,"body":null}""")), storage);
+        var body = """
+        {"status":-1,"body":[{"id":"g1","name":"Чек","options":[
+          {"id":"o1","name":"receiptTemplate","description":"","value":"{\"version\":1,\"width\":99,\"blocks\":[]}",
+           "code":"receipt_template","value_type":"json"}]}]}
+        """;
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
 
         await sync.SyncReceiptTemplateAsync("http://x/");
 
@@ -615,22 +625,5 @@ public class SyncServiceTest
         await sync.SyncReceiptTemplateAsync("http://x/");
 
         Assert.Contains("\"width\":48", storage.ReceiptTemplate);
-    }
-
-    [Fact]
-    public async Task SyncReceiptTemplateAsync_IgnoresAnOptionWithAnEmptyCode()
-    {
-        // Каждая опция, засеянная до 20260728000800, приезжает с code = "" —
-        // сегодня их два десятка. Совпадение по пустой строке склеило бы их все.
-        var body = """
-        {"status":0,"body":[{"id":"g1","name":"Прочее","options":[
-          {"id":"o9","name":"storeName","description":"","value":"Лавка","code":"","value_type":"string"}]}]}
-        """;
-        var storage = new FakeStorage();
-        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
-
-        await sync.SyncReceiptTemplateAsync("http://x/");
-
-        Assert.Equal(string.Empty, storage.ReceiptTemplate);
     }
 }

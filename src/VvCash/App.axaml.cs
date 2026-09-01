@@ -85,9 +85,23 @@ public partial class App : Application
             // построения в тестах, и ещё один параметр конструктора обошёлся бы
             // дороже, чем эта строка.
             //
+            // InitializeAsync() перед RefreshAsync — обязательно, не для порядка:
+            // именно он создаёт таблицу Settings, из которой ReceiptTemplateService
+            // читает. Та же таблица, что PosViewModel.InitializeAsync создаёт перед
+            // ICashFeatureService.RefreshAsync (см. её собственный комментарий) — там
+            // нарушение этого порядка уже однажды роняло прод (см. SettingsViewModel,
+            // "expired-session-escape fix"). Здесь тот же риск наступает раньше, на
+            // свежем профиле без единого входа кассира: PosViewModel, чей конструктор
+            // обычно и создаёт эту таблицу, к этому моменту ещё не построен. Вызов
+            // идемпотентен (CREATE TABLE IF NOT EXISTS с проверкой _isInitialized),
+            // так что более поздний вызов из PosViewModel ничего не переделывает.
+            //
             // GetAwaiter().GetResult() вместо await: OnFrameworkInitializationCompleted
-            // не async, а RefreshAsync читает только локальный SQLite — миллисекунды,
-            // окно этим не задержит.
+            // не async, а оба вызова читают/создают только локальный SQLite —
+            // миллисекунды, окно этим не задержит.
+            var offlineStorageForTemplate = Services.GetRequiredService<IOfflineStorageService>();
+            offlineStorageForTemplate.InitializeAsync().GetAwaiter().GetResult();
+
             var receiptTemplates = Services.GetRequiredService<IReceiptTemplateService>();
             receiptTemplates.RefreshAsync().GetAwaiter().GetResult();
             Services.GetRequiredService<ISyncService>().ProductsSynced +=

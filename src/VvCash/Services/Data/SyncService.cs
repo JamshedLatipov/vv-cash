@@ -526,9 +526,16 @@ public class SyncService : ISyncService
         }
     }
 
-    /// <summary>Ищет значение опции по коду. Пустой код пропускается: каждая
-    /// опция, засеянная до 20260728000800, приезжает с code = "" — сегодня их
-    /// два десятка, и совпадение по пустой строке склеило бы их все в одну.</summary>
+    /// <summary>Ищет значение опции по коду. Опция, засеянная до 20260728000800,
+    /// приезжает с code = "" — сегодня таких два десятка, — но отдельной проверки
+    /// на пустую строку здесь нет: сравнение по строгому равенству само отсекает
+    /// её, потому что обе вызывающие стороны просят только непустой код
+    /// ("receipt_template", "receipt_logo"), и "" с ним никогда не совпадёт.
+    /// Раньше явная проверка string.IsNullOrEmpty(value) стояла "на всякий
+    /// случай"; ревью Task 10 нашло её мёртвой мутационным тестированием —
+    /// отключение проверки не красило ни один тест ни на одном достижимом
+    /// входе — и она была убрана вместе с тестом, который её не проверял, а
+    /// лишь дублировал сценарий "опция отсутствует".</summary>
     private static string? FindOptionValue(JsonElement groups, string code)
     {
         foreach (var group in groups.EnumerateArray())
@@ -538,9 +545,7 @@ public class SyncService : ISyncService
 
             foreach (var option in options.EnumerateArray())
             {
-                if (!option.TryGetProperty("code", out var c)) continue;
-                var value = c.GetString();
-                if (string.IsNullOrEmpty(value) || value != code) continue;
+                if (!option.TryGetProperty("code", out var c) || c.GetString() != code) continue;
 
                 return option.TryGetProperty("value", out var v) ? v.GetString() : null;
             }
