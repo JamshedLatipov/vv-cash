@@ -5,3 +5,10 @@
 # machine. build/installer/build_mac.sh is run on a Mac by definition, so it would hit
 # this on its first use.
 *.sh text eol=lf
+
+# Golden receipt fixtures are compared byte-for-byte in SaleReceiptGoldenTest.
+# Today they happen to survive autocrlf because git sees a NUL byte inside and
+# guesses "binary" on its own; a future fixture with no NUL byte would not be
+# so lucky and would get silently rewritten on checkout. Force it instead of
+# relying on the guess.
+tests/VvCash.Tests/Fixtures/** binary
