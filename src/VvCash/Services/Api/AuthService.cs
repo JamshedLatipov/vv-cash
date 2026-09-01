@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
+using VvCash.Services.Logging;
 
 namespace VvCash.Services.Api;
 
@@ -123,12 +124,11 @@ public class AuthService : IAuthService
         }
         catch (HttpRequestException ex)
         {
-            Console.WriteLine($"[AuthService] Network error during login: {ex.Message}");
-            Debug.WriteLine($"[AuthService] Network error during login: {ex.Message}");
-            if (ex.InnerException != null)
-            {
-                Console.WriteLine($"[AuthService] Inner Exception: {ex.InnerException.Message}");
-            }
+            // Вся цепочка, а не два верхних уровня: на отказе TLS оба верхних говорят
+            // лишь «рукопожатие не состоялось», а причина — третьим. См. DescribeChain.
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"[AuthService] Network error during login: {chain}");
+            Debug.WriteLine($"[AuthService] Network error during login: {chain}");
             return false;
         }
         catch (JsonException ex)

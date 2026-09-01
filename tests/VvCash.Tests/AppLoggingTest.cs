@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using VvCash.Services.Logging;
 using Xunit;
@@ -208,6 +209,41 @@ public class AppLoggingTest : IDisposable
         Assert.Contains("TaskScheduler.UnobservedTaskException", formatted);
         Assert.False(string.IsNullOrWhiteSpace(formatted));
     }
+
+    /// <summary>Форма ровно та, что пришла с боевой кассы на Windows 7: два верхних
+    /// уровня говорят «рукопожатие не состоялось», а причина лежит в третьем. Пока
+    /// журнал печатал только два, ответ искали снаружи перебором шифров.</summary>
+    [Fact]
+    public void DescribeChain_ReachesTheInnermostCause_NotJustTheTopTwo()
+    {
+        var innermost = new Exception("The client and server cannot communicate, because they do not possess a common algorithm");
+        var middle = new Exception("Authentication failed, see inner exception.", innermost);
+        var top = new HttpRequestException("The SSL connection could not be established, see inner exception.", middle);
+
+        var described = AppLogging.DescribeChain(top);
+
+        Assert.Contains("common algorithm", described);
+        Assert.Contains("HttpRequestException", described);
+        Assert.DoesNotContain("   at ", described); // без стеков — см. докстринг DescribeChain
+    }
+
+    [Fact]
+    public void DescribeChain_SurvivesASelfReferencingChain()
+    {
+        // AggregateException, вложенный сам в себя, эта программа не создаёт — но
+        // строка в журнале не то место, где стоит выяснять это переполнением стека.
+        var deepest = new Exception("bottom");
+        var current = deepest;
+        for (var i = 0; i < 50; i++) current = new Exception($"level {i}", current);
+
+        var described = AppLogging.DescribeChain(current);
+
+        Assert.Contains("цепочка длиннее", described);
+    }
+
+    [Fact]
+    public void DescribeChain_HandlesNoException()
+        => Assert.False(string.IsNullOrWhiteSpace(AppLogging.DescribeChain(null)));
 
     /// <summary>A TextWriter double whose every member throws, standing in for "the
     /// original Console.Out" behaving badly, or the file sink failing in a way its own

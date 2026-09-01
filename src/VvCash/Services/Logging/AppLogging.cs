@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace VvCash.Services.Logging;
@@ -86,5 +87,43 @@ public static class AppLogging
         // password or raw response body is logged anywhere in this app).
         var body = ex?.ToString() ?? "(no exception object)";
         return $"[{origin}] {body}";
+    }
+
+    /// <summary>Разворачивает цепочку InnerException в одну строку: тип и сообщение
+    /// на каждом уровне, без стеков.
+    ///
+    /// Заведено по следу реального разбора. Касса на Windows 7 не могла войти, и в
+    /// журнале было ровно два уровня: «The SSL connection could not be established»
+    /// и «Authentication failed» — оба говорят, что рукопожатие не состоялось, и ни
+    /// один не говорит почему. Причина лежала в третьем, который никто не печатал:
+    /// у клиента и сервера нет общего алгоритма. Выяснять это пришлось снаружи,
+    /// перебирая наборы шифров, хотя касса знала ответ и молчала.
+    ///
+    /// Без стеков намеренно, в отличие от FormatUnhandledException выше: обрыв связи
+    /// на точке с плохим интернетом — рядовое событие, и стек на каждый обрыв
+    /// вытеснит из журнала всё остальное задолго до того, как его успеют прочитать.
+    /// У необработанного исключения повод обратный — оно случается один раз, и после
+    /// него процесса уже нет.</summary>
+    public static string DescribeChain(Exception? ex)
+    {
+        if (ex == null) return "(no exception object)";
+
+        var parts = new List<string>();
+        for (var current = ex; current != null; current = current.InnerException)
+        {
+            parts.Add($"{current.GetType().Name}: {current.Message}");
+
+            // Оборванная петля вместо переполнения стека: цепочку строит не этот код,
+            // и AggregateException, вложенный сам в себя, здесь встречать не должен,
+            // но зависшая касса из-за строки в журнале — цена, которой не стоит
+            // рисковать ради экономии одной проверки.
+            if (parts.Count >= 10)
+            {
+                parts.Add("... (цепочка длиннее 10 уровней, дальше не разворачиваем)");
+                break;
+            }
+        }
+
+        return string.Join(" -> ", parts);
     }
 }
