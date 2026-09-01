@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace VvCash.Models.Receipt;
@@ -11,18 +12,48 @@ public sealed class TextBlock : ReceiptBlock
     public bool DoubleSize { get; set; }
 }
 
-/// <summary>Разделитель. Count = 0 означает «во всю ширину ленты»; дефолтный
-/// шаблон ставит 28 явно, потому что столько дефисов печатает нынешний чек, а
-/// замок совместимости считает байты.</summary>
+/// <summary>Разделитель. Count = 0 означает «во всю ширину ленты» — это
+/// классовый дефолт сам по себе; дефолтный шаблон ставит 28 явно в
+/// ReceiptTemplate.Default, потому что столько дефисов печатает нынешний чек,
+/// а замок совместимости считает байты.</summary>
 public sealed class LineBlock : ReceiptBlock
 {
-    public string Char { get; set; } = "-";
-    public int Count { get; set; } = 28;
+    /// <summary>Пустая строка уронила бы рендер на первом же символе
+    /// (IndexOutOfRangeException) — разбор JSON не единственный вход, тот же
+    /// довод, что у ReceiptTemplate.Width.</summary>
+    private string _char = "-";
+
+    public string Char
+    {
+        get => _char;
+        set => _char = string.IsNullOrEmpty(value) ? "-" : value;
+    }
+
+    /// <summary>Отрицательное число уронило бы рендер (повторяемая строка не
+    /// принимает отрицательную длину), а огромное — ленту и память. Потолок —
+    /// 200, вдвое больше самой широкой из поддерживаемых лент.</summary>
+    private const int MaxCount = 200;
+
+    private int _count;
+
+    public int Count
+    {
+        get => _count;
+        set => _count = value < 0 ? 0 : Math.Min(value, MaxCount);
+    }
 }
 
 public sealed class FeedBlock : ReceiptBlock
 {
-    public int Lines { get; set; } = 1;
+    /// <summary>Отрицательное число строк подачи бессмысленно и уронило бы
+    /// рендер тем же способом, что и отрицательный Count у LineBlock.</summary>
+    private int _lines = 1;
+
+    public int Lines
+    {
+        get => _lines;
+        set => _lines = value < 0 ? 0 : value;
+    }
 }
 
 /// <summary>Одно поле реквизитов: что подставить и что написать перед ним.
@@ -59,10 +90,19 @@ public sealed class TotalsBlock : ReceiptBlock
     public bool BoldTotal { get; set; } = true;
 }
 
+/// <remarks>Модель есть, печати ещё нет: у рендерера, который придёт следующей
+/// задачей, пока нет операции печати QR-кода для EscPosEmitter.</remarks>
 public sealed class QrBlock : ReceiptBlock
 {
     public string Data { get; set; } = string.Empty;
-    public int ModuleSize { get; set; } = 6;
+
+    private int _moduleSize = 6;
+
+    public int ModuleSize
+    {
+        get => _moduleSize;
+        set => _moduleSize = value > 0 ? value : 6;
+    }
 }
 
 public enum BarcodeSymbology
@@ -71,11 +111,21 @@ public enum BarcodeSymbology
     Ean13,
 }
 
+/// <remarks>Модель есть, печати ещё нет: у рендерера, который придёт следующей
+/// задачей, пока нет операции печати штрихкода для EscPosEmitter.</remarks>
 public sealed class BarcodeBlock : ReceiptBlock
 {
     public string Data { get; set; } = string.Empty;
     public BarcodeSymbology Symbology { get; set; } = BarcodeSymbology.Code128;
-    public int Height { get; set; } = 64;
+
+    private int _height = 64;
+
+    public int Height
+    {
+        get => _height;
+        set => _height = value > 0 ? value : 64;
+    }
+
     public bool PrintHri { get; set; } = true;
 }
 
@@ -87,8 +137,17 @@ public enum LogoSource
     Bitmap,
 }
 
+/// <remarks>Модель есть, печати ещё нет: у рендерера, который придёт следующей
+/// задачей, пока нет операции печати логотипа для EscPosEmitter.</remarks>
 public sealed class LogoBlock : ReceiptBlock
 {
     public LogoSource Source { get; set; } = LogoSource.Nv;
-    public int NvSlot { get; set; } = 1;
+
+    private int _nvSlot = 1;
+
+    public int NvSlot
+    {
+        get => _nvSlot;
+        set => _nvSlot = value > 0 ? value : 1;
+    }
 }
