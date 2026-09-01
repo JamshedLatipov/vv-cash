@@ -37,18 +37,84 @@ public sealed record NvLogoOp(int Slot) : ReceiptOp;
 /// <summary>Растр, приехавший с сервера уже сведённым в один бит. Ширина здесь
 /// в БАЙТАХ, высота в точках — так требует GS v 0, и путать их нельзя.
 ///
-/// Инвариант — раз и навсегда здесь, в конструкторе, а не у каждого будущего
-/// вызывающего: растр короче WidthBytes×Height даёт на бумаге ту же беду, что
-/// и перепутанные местами ширина и высота выше — GS v 0 берёт из потока то,
-/// чего там нет, и печатает как логотип весь текст и команду обрезки следом.
+/// Инвариант — раз и навсегда здесь, а не у каждого будущего вызывающего: растр
+/// КОРОЧЕ ИЛИ ДЛИННЕЕ WidthBytes×Height (не только короче — эмиттер пишет
+/// РОВНО <see cref="Raster"/> целиком, ни байтом больше и не меньше) даёт на
+/// бумаге ту же беду, что и перепутанные местами ширина и высота выше: лишние
+/// байты растра GS v 0 не отбросит — они и команда следом (например, обрезка)
+/// уедут в поток как ещё пиксели картинки. Отсюда `==`, а не `>=`.
+///
+/// WidthBytes и Height ограничены 0..65535 порознь — это ровно то, что несёт
+/// каждое из двухбайтовых полей xL/xH и yL/yH у GS v 0; без потолка
+/// `(bmp.WidthBytes & 0xFF)` в эмиттере тихо теряет старшие биты, и на бумагу
+/// уходит не то число, которое просили. Произведение двух валидных 65535
+/// переполняет int, поэтому сравнение — в long.
+///
+/// Проверка стоит И в инициализаторе свойства (следит за конструктором: там
+/// все три параметра доступны разом, порядок объявления полей роли не
+/// играет), И в init-аксессоре (следит за `with`, который инициализаторы
+/// вообще не перевызывает — копирует объект и лишь переприсваивает указанные
+/// свойства через их init). Без второй проверки ровно то, что нашло ревью:
+/// `bitmapOp with { Raster = new byte[1] }` и `with { WidthBytes = 9999 }`
+/// тихо принимались бы — конструктор уже отработал, инициализатор больше не
+/// выполняется, а тривиальный init без переопределения просто кладёт
+/// значение как есть.
+///
+/// Известный компромисс: `with`, меняющий НЕСКОЛЬКО из трёх полей ОДНИМ
+/// выражением на новый, но взаимно согласованный набор — например
+/// `with { Raster = new byte[8], WidthBytes = 2, Height = 4 }` — может
+/// упасть на промежуточном состоянии (первое изменённое поле проверяется
+/// против ещё не обновлённых соседей). Стандартная плата за проверку в
+/// каждом init независимо, а не единой проверкой после конструктора; сегодня
+/// не задета — `BitmapOp` никто не конструирует, а обе дыры из ревью были
+/// одиночными заменами ОДНОГО поля, которые это не касается.
 /// Сегодня этот конструктор не вызывает никто (растровый логотип подключается
 /// в Task 9), но заряженная сейчас мина по-прежнему мина.</summary>
 public sealed record BitmapOp(byte[] Raster, int WidthBytes, int Height) : ReceiptOp
 {
-    public byte[] Raster { get; init; } = WidthBytes >= 0 && Height >= 0 && Raster.Length >= WidthBytes * Height
-        ? Raster
-        : throw new ArgumentException(
-            $"Растр логотипа не сходится с объявленным размером: {Raster.Length} байт, " +
-            $"WidthBytes={WidthBytes}, Height={Height}.",
-            nameof(Raster));
+    private const int MaxDimension = 65535;
+
+    public byte[] Raster
+    {
+        get;
+        init => field = ValidateRaster(value, WidthBytes, Height);
+    } = ValidateRaster(Raster, WidthBytes, Height);
+
+    public int WidthBytes
+    {
+        get;
+        init => field = ValidateDimension(value, Height, Raster, isWidth: true);
+    } = ValidateDimension(WidthBytes, Height, Raster, isWidth: true);
+
+    public int Height
+    {
+        get;
+        init => field = ValidateDimension(value, WidthBytes, Raster, isWidth: false);
+    } = ValidateDimension(Height, WidthBytes, Raster, isWidth: false);
+
+    private static byte[] ValidateRaster(byte[] raster, int widthBytes, int height)
+    {
+        var expected = (long)widthBytes * height;
+        if (raster.LongLength != expected)
+            throw new ArgumentException(
+                $"Растр логотипа не сходится с объявленным размером: {raster.Length} байт, " +
+                $"WidthBytes={widthBytes}, Height={height} (нужно ровно {expected}).",
+                nameof(Raster));
+        return raster;
+    }
+
+    private static int ValidateDimension(int value, int otherDimension, byte[] raster, bool isWidth)
+    {
+        if (value < 0 || value > MaxDimension)
+            throw new ArgumentOutOfRangeException(nameof(value), value,
+                $"Размер вне диапазона GS v 0 (0..{MaxDimension}).");
+
+        var expected = isWidth ? (long)value * otherDimension : (long)otherDimension * value;
+        if (raster.LongLength != expected)
+            throw new ArgumentException(
+                $"Растр логотипа не сходится с объявленным размером: {raster.Length} байт, " +
+                $"нужно ровно {expected}.");
+
+        return value;
+    }
 }

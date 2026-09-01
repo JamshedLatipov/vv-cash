@@ -202,9 +202,16 @@ public static class ReceiptRenderer
                 break;
 
             case LogoBlock logo:
-                // Source == Bitmap уже отфильтрован выше, до AlignOp — сюда
-                // попадает только Nv.
-                ops.Add(new NvLogoOp(logo.NvSlot));
+                // Source == Bitmap уже отфильтрован выше, до AlignOp — сегодня
+                // сюда попадает только Nv. Условие всё равно ЯВНОЕ, а не
+                // "раз не Bitmap, значит Nv": молчаливый вывод из исключения
+                // — тот самый способ, которым третье значение LogoSource,
+                // если оно появится, напечаталось бы как чужой логотип со
+                // случайным слотом вместо того, чтобы просто не напечататься.
+                // Та же дисциплина, что у default в этом switch чуть ниже —
+                // там неизвестный тип блока бросает, а не молчит.
+                if (logo.Source == LogoSource.Nv)
+                    ops.Add(new NvLogoOp(logo.NvSlot));
                 break;
 
             default:

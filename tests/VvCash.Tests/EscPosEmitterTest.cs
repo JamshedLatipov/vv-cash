@@ -264,6 +264,19 @@ public class EscPosEmitterTest
     }
 
     [Fact]
+    public void Emit_EmitsHri_OnTheFirstBarcode_EvenWhenPrintHriIsFalse()
+    {
+        // Замок против регрессии: засев состояния HRI обязан быть null
+        // (недостижимое значение), а не false. Засей его false — и самый
+        // первый штрихкод чека с PrintHri=false ("false != false" — уже
+        // "в силе") молча не издал бы GS H вовсе, полагаясь на состояние
+        // принтера после ESC @, которое для HRI нигде не документировано.
+        var bytes = Emit(new BarcodeOp("111111111111", BarcodeSymbology.Ean13, Height: 50, PrintHri: false));
+
+        Assert.Single(FindAll(bytes, new byte[] { 0x1D, 0x48, 0x00 }));
+    }
+
+    [Fact]
     public void Emit_WritesTheCutCommand()
     {
         var bytes = Emit(new CutOp());

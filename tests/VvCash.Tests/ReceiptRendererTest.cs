@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Text.Json.Serialization;
 using VvCash.Models;
 using VvCash.Models.Receipt;
 using VvCash.Services.Rendering;
@@ -194,6 +196,19 @@ public class ReceiptRendererTest
     }
 
     [Fact]
+    public void Render_ClosesWithACut_WhenTheOnlyPrintedContentIsAQrCode()
+    {
+        // Замок против регрессии: предикат обрезки одно время смотрел только
+        // на TextOp/FeedOp, и чек из одного QR (или штрихкода, или логотипа)
+        // уезжал без ножа, склеиваясь со следующим на ленте. Ни один другой
+        // тест этого не ловит — все существующие проверки "печатает ли
+        // блок графику" смотрят на состав ops, а не на CutOp в его хвосте.
+        var ops = ReceiptRenderer.Render(One(new QrBlock { Data = "A-1" }), Sale(Glue()));
+
+        Assert.IsType<CutOp>(ops[^1]);
+    }
+
+    [Fact]
     public void NoPrintedContent_ProducesNoCut()
     {
         // Логотип-картинка пока не печатает ничего (растр подключается в
@@ -263,6 +278,39 @@ public class ReceiptRendererTest
 
         var ex = Assert.Throws<NotSupportedException>(() => ReceiptRenderer.Render(t, Sale(Glue())));
         Assert.Contains(nameof(UnknownBlock), ex.Message);
+    }
+
+    [Fact]
+    public void RenderBlock_HandlesEveryKnownBlockType_WithoutFallingToDefault()
+    {
+        // Зеркало ReceiptTemplateTest.KnownTypes_MatchesTheJsonDerivedTypeAttributes,
+        // но для switch в RenderBlock, а не для ReceiptTemplate.KnownTypes.
+        // Render_ThrowsNotSupported_ForAnUnhandledBlockType выше проверяет
+        // собственный приватный UnknownBlock — он доказывает, что default
+        // вообще бросает, но НЕ доказывает полноту switch относительно
+        // реальных типов чека. Добавление десятого блока со всеми
+        // атрибутами и записью в ReceiptTemplate.KnownTypes, но без ветки в
+        // этом switch, прошло бы сборку молча и упало бы на кассе только при
+        // первой продаже с этим блоком в шаблоне. Этот тест строит по
+        // экземпляру КАЖДОГО типа, объявленного через [JsonDerivedType] на
+        // ReceiptBlock, и проверяет, что рендер не проваливается в default.
+        var knownTypes = typeof(ReceiptBlock)
+            .GetCustomAttributes<JsonDerivedTypeAttribute>(inherit: false)
+            .Select(a => a.DerivedType)
+            .ToList();
+
+        Assert.NotEmpty(knownTypes);
+
+        foreach (var type in knownTypes)
+        {
+            var block = (ReceiptBlock)Activator.CreateInstance(type)!;
+            var t = One(block);
+
+            var ex = Record.Exception(() => ReceiptRenderer.Render(t, Sale(Glue())));
+
+            Assert.True(ex is not NotSupportedException,
+                $"{type.Name} провалился в default рендерера: {ex?.Message}");
+        }
     }
 
     [Fact]

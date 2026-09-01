@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -66,10 +67,14 @@ public class EscPosGraphicsTest
     public void Barcode_PrintsEan13Digits_WithoutASetSelector()
     {
         // EAN-13 не пользуется механизмом {A/{B/{C} — это особенность только
-        // CODE128. Данные идут как есть, ровно 13 цифр.
-        var bytes = Emit(new BarcodeOp("4600000000000", BarcodeSymbology.Ean13, Height: 50, PrintHri: false));
+        // CODE128. Данные идут как есть, ровно 13 цифр. "4006381333931" —
+        // валидная контрольная цифра (проверено вручную по стандартной
+        // формуле EAN-13): TryEncodeBarcode теперь её тоже проверяет, и
+        // случайные 13 цифр вроде "4600000000000" (контрольная не сходится)
+        // отбрасывались бы.
+        var bytes = Emit(new BarcodeOp("4006381333931", BarcodeSymbology.Ean13, Height: 50, PrintHri: false));
 
-        var payload = Encoding.ASCII.GetBytes("4600000000000");
+        var payload = Encoding.ASCII.GetBytes("4006381333931");
         var expected = new List<byte> { 0x1D, 0x6B, 67, (byte)payload.Length };
         expected.AddRange(payload);
 
@@ -106,6 +111,104 @@ public class EscPosGraphicsTest
         var bytes = Emit(new BitmapOp(raster, WidthBytes: 6, Height: 1));
 
         Assert.True(Contains(bytes, new byte[] { 0x1D, 0x76, 0x30, 0x00, 6, 0, 1, 0 }));
+    }
+
+    [Fact]
+    public void BitmapOp_ThrowsWhenTheRasterDoesNotMatchTheDeclaredSize()
+    {
+        // Замок против регрессии: инвариант проверялся через `>=`, пропуская
+        // растр ДЛИННЕЕ объявленного размера — эмиттер пишет его ВЕСЬ, и
+        // лишние байты вместе со следующей командой (например, обрезкой)
+        // уезжают в поток как ещё пиксели картинки. Обе стороны — короче и
+        // длиннее — обязаны падать.
+        Assert.Throws<ArgumentException>(() => new BitmapOp(new byte[2], WidthBytes: 6, Height: 4));   // короче
+        Assert.Throws<ArgumentException>(() => new BitmapOp(new byte[10], WidthBytes: 1, Height: 1));  // длиннее
+    }
+
+    [Fact]
+    public void BitmapOp_ThrowsWhenAWithExpressionBreaksTheInvariant()
+    {
+        // Классическая ловушка записей: проверка только в конструкторе не
+        // держится против `with` — он идёт через копирующий конструктор и
+        // init-сеттер, а не через конструктор целиком.
+        var original = new BitmapOp(new byte[24], WidthBytes: 6, Height: 4);
+
+        Assert.Throws<ArgumentException>(() => original with { Raster = new byte[1] });
+        Assert.Throws<ArgumentException>(() => original with { WidthBytes = 9999 });
+    }
+
+    [Theory]
+    [InlineData(20)]
+    [InlineData(300)]
+    public void QrBlock_ClampsModuleSizeToTheSpecMaximum(int input)
+    {
+        // GS ( k, функция 167 принимает размер модуля 1..16 — не 1..255.
+        // "moduleSize": 20 (правдоподобная опечатка) уже вне диапазона
+        // задолго до приведения к byte, и верхняя граница обязана быть 16,
+        // а не 255.
+        Assert.Equal(16, new QrBlock { ModuleSize = input }.ModuleSize);
+    }
+
+    [Fact]
+    public void BarcodeBlock_ClampsHeightToAByte()
+    {
+        // GS h принимает высоту 1..255. Без верхнего потолка здесь 1000
+        // приведением к byte стало бы 232 — другая высота, а не отказ.
+        Assert.Equal(255, new BarcodeBlock { Height = 1000 }.Height);
+    }
+
+    [Fact]
+    public void LogoBlock_ClampsNvSlotToAByte()
+    {
+        // FS p n m принимает слот (n) 1..255. Без верхнего потолка здесь
+        // 1000 приведением к byte стало бы 232 — чужой слот, а не отказ.
+        Assert.Equal(255, new LogoBlock { NvSlot = 1000 }.NvSlot);
+    }
+
+    [Fact]
+    public void TryEncodeBarcode_RejectsEmptyData()
+    {
+        Assert.False(EscPosEmitter.TryEncodeBarcode("", BarcodeSymbology.Code128, out _, out _));
+    }
+
+    [Theory]
+    [InlineData("46000000000")]     // 11 цифр — на одну короче нормы
+    [InlineData("46000000000000")]  // 14 цифр — на одну длиннее нормы
+    public void TryEncodeBarcode_RejectsEan13WithTheWrongDigitCount(string data)
+    {
+        Assert.False(EscPosEmitter.TryEncodeBarcode(data, BarcodeSymbology.Ean13, out _, out _));
+    }
+
+    [Fact]
+    public void TryEncodeBarcode_RejectsEan13WithANonDigitCharacter()
+    {
+        // Ровно 12 символов (а не 13) — намеренно: при 13 срабатывает ЕЩЁ и
+        // проверка контрольной цифры (см. TryEncodeBarcode_RejectsEan13WithAWrongCheckDigit
+        // рядом), которая тоже отбросила бы "460000000000A" по своей причине
+        // и замаскировала бы дыру именно в проверке алфавита. При 12 цифрах
+        // контрольная цифра не проверяется вовсе (её нет), так что здесь
+        // остаётся только алфавит.
+        Assert.False(EscPosEmitter.TryEncodeBarcode("46000000000A", BarcodeSymbology.Ean13, out _, out _));
+    }
+
+    [Fact]
+    public void TryEncodeBarcode_RejectsEan13WithAWrongCheckDigit()
+    {
+        // "4006381333931" — контрольная цифра верна (стандартная формула
+        // EAN-13, проверено вручную). Меняем последнюю цифру на заведомо
+        // неверную контрольную — 13 цифр, все цифры, длина и алфавит в
+        // порядке, но сумма не сходится.
+        Assert.False(EscPosEmitter.TryEncodeBarcode("4006381333930", BarcodeSymbology.Ean13, out _, out _));
+    }
+
+    [Fact]
+    public void TryEncodeBarcode_RejectsDelTheFirstCodeAbovePrintableAscii()
+    {
+        // 0x7F (DEL) идёт СРАЗУ ЗА верхней границей печатного ASCII (0x7E) —
+        // ровно то значение, которое ловит мутацию "<= 0x7E" -> "<= 0x7F".
+        var data = "A" + (char)0x7F + "B";
+
+        Assert.False(EscPosEmitter.TryEncodeBarcode(data, BarcodeSymbology.Code128, out _, out _));
     }
 
     [Fact]
