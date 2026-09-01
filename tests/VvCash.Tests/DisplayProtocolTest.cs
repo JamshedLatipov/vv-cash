@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using VvCash.Models;
 using VvCash.Services.Hardware;
@@ -124,5 +125,54 @@ public class DisplayProtocolTest
 
         Assert.All(bytes, b => Assert.True(b <= 0x7F));
         Assert.Contains("17", Encoding.ASCII.GetString(bytes));
+    }
+
+    [Fact]
+    public void Raw_SendsFortyCharactersAndNotOneCommandByte()
+    {
+        // Для табло, которые принимают текст как есть. Ни одного управляющего байта:
+        // именно этим RAW и отличается от ESCPOS, и именно это надо сторожить -
+        // добавь сюда ESC @ "на всякий случай", и протокол перестанет быть собой.
+        var cp = EscPosCodePages.Cp866;
+        var actual = new RawDisplayProtocol().BuildItem("Молоко", 50m, cp);
+
+        Assert.Equal(cp.Encoding.GetBytes("Молоко".PadRight(20) + "50.00".PadRight(20)), actual);
+        Assert.All(actual, b => Assert.True(b >= 0x20));
+    }
+
+    [Fact]
+    public void Raw_Probe_IsPlainAscii()
+    {
+        var bytes = new RawDisplayProtocol().BuildProbe(17);
+
+        Assert.All(bytes, b => Assert.True(b <= 0x7F));
+        Assert.Contains("17", Encoding.ASCII.GetString(bytes));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("AEDEX")]
+    public void Resolve_EmptyOrUnknown_IsEscPos(string? id)
+    {
+        // Это и есть то, что делает обновление пустым для уже настроенных касс: у них
+        // в settings.json нового ключа нет вовсе, и они обязаны продолжить работать
+        // ровно так же, как работали.
+        Assert.Same(DisplayProtocols.EscPos, DisplayProtocols.Resolve(id));
+    }
+
+    [Fact]
+    public void Resolve_KnownId_IsCaseInsensitive()
+    {
+        Assert.Same(DisplayProtocols.Cd5220, DisplayProtocols.Resolve("cd5220"));
+    }
+
+    [Fact]
+    public void Catalog_HoldsFourProtocolsWithDistinctIds()
+    {
+        Assert.Equal(4, DisplayProtocols.All.Count);
+        Assert.Equal(4, DisplayProtocols.All.Select(p => p.Id).Distinct().Count());
+        Assert.Same(DisplayProtocols.EscPos, DisplayProtocols.Default);
     }
 }
