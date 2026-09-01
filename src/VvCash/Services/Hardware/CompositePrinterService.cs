@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Models.Receipt;
 
 namespace VvCash.Services.Hardware;
 
@@ -41,13 +42,17 @@ public class CompositePrinterService : IPrinterService
     /// <summary>Фабрика существует ради проверки маршрутизации: без неё состав
     /// принтеров создаётся внутри и подменить его нечем. По умолчанию — обычное
     /// создание, боевой путь тот же, что был.</summary>
+    /// <param name="template">Поставщик шаблона чека. Отдаётся каждому принтеру
+    /// как есть — читается он в момент печати, поэтому смена шаблона состава не
+    /// пересобирает.</param>
     public CompositePrinterService(ISettingsService settingsService,
-        Func<PrinterConfig, EscPosPrinterService>? printerFactory = null)
+        Func<PrinterConfig, EscPosPrinterService>? printerFactory = null,
+        Func<ReceiptTemplate>? template = null)
     {
         _settingsService = settingsService;
         _factory = printerFactory ?? (config => new EscPosPrinterService(
             config.ConnectionType, config.ConnectionString,
-            EscPosCodePages.Resolve(config.CodePageId), config.Roles));
+            EscPosCodePages.Resolve(config.CodePageId), config.Roles, template));
         _settingsService.SettingsChanged += OnSettingsChanged;
         InitializePrinters();
     }

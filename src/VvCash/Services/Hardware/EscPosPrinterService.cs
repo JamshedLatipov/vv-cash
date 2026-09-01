@@ -19,6 +19,7 @@ public class EscPosPrinterService : IPrinterService
     private readonly string _connectionString;
     private readonly EscPosCodePage _codePage;
     private readonly PrintRole _roles;
+    private readonly Func<ReceiptTemplate> _template;
     private PrinterStatus _status = PrinterStatus.Ready;
 
     public PrinterStatus Status => _status;
@@ -85,14 +86,48 @@ public class EscPosPrinterService : IPrinterService
     private static readonly byte[] CmdLineFeed = { 0x0A };
     public static readonly byte[] CmdDrawerKick = { 0x1B, 0x70, 0x00, 0x19, 0xFA };
 
+    /// <param name="template">Поставщик, а не значение: шаблон приезжает
+    /// синхронизацией в произвольный момент, и читать его надо в момент печати.
+    /// Иначе новый шаблон ждал бы перезапуска кассы. Null — печатать дефолтом;
+    /// служба, собранная на экране настроек ради пробной печати, шаблон не
+    /// использует вовсе.</param>
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
-        EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt)
+        EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt,
+        Func<ReceiptTemplate>? template = null)
     {
         _connectionType = connectionType;
         _connectionString = connectionString;
         _codePage = codePage;
         _roles = roles;
+        _template = template ?? (() => ReceiptTemplate.Default);
     }
+
+    /// <summary>Чек этого принтера, собранный по действующему шаблону. Экземплярный
+    /// в отличие от статического BuildSaleReceipt: шаблон — свойство принтера, а
+    /// не аргумента вызова.
+    ///
+    /// Через перегрузку BuildSaleReceipt по готовой записи, а не по десяти
+    /// позиционным аргументам, которую заводил план этой задачи: та перегрузка
+    /// уже существует (см. её комментарий выше) именно ради того, чтобы вызывающий
+    /// код с набором отдельных полей не собирал их в SaleReceiptData вручную.</summary>
+    public byte[] BuildConfiguredSaleReceipt(IEnumerable<CartItem> items,
+        decimal subtotal, decimal discount, decimal total,
+        string? discountName = null, string? documentNumber = null, string? warehouseName = null,
+        string? sellerName = null, string? saleDate = null, string? queueNumber = null)
+        => BuildSaleReceipt(_codePage, new SaleReceiptData(
+            new List<CartItem>(items), subtotal, discount, total,
+            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber), _template());
+
+    /// <summary>Та же сборка, но из готовой записи — вход для PrintKitchenOrderAsync.
+    /// Не перегрузка выше плюс раскладка sale на десять аргументов: у
+    /// SaleReceiptData.QueueNumber уже есть отдельный документированный
+    /// комментарий о том, почему так раскладывать нельзя — раскладка читает
+    /// queueNumber, переданный отдельным параметром, и никогда не заглядывает
+    /// в само поле записи, так что значение, уже лежащее в sale.QueueNumber,
+    /// молча перебивалось бы. Эта перегрузка передаёт запись как есть, без
+    /// промежуточной пересборки.</summary>
+    public byte[] BuildConfiguredSaleReceipt(SaleReceiptData sale)
+        => BuildSaleReceipt(_codePage, sale, _template());
 
     /// <summary>Собирает байты чека продажи из десяти позиционных аргументов.
     /// Раскладка живёт в ReceiptRenderer, байты — в EscPosEmitter; эта
@@ -206,7 +241,7 @@ public class EscPosPrinterService : IPrinterService
     {
         try
         {
-            await SendAsync(BuildSaleReceipt(_codePage, items, subtotal, discount, total, discountName,
+            await SendAsync(BuildConfiguredSaleReceipt(items, subtotal, discount, total, discountName,
                 documentNumber, warehouseName, sellerName, saleDate));
             SetStatus(PrinterStatus.Ready);
             return true;
@@ -313,7 +348,7 @@ public class EscPosPrinterService : IPrinterService
             // sale.QueueNumber, так что любое значение этого поля молча
             // пропадало. With-выражение несёт запись целиком дальше одним
             // объектом, с бегунком в ней.
-            await SendAsync(BuildSaleReceipt(_codePage, sale with { QueueNumber = queueNumber }));
+            await SendAsync(BuildConfiguredSaleReceipt(sale with { QueueNumber = queueNumber }));
             SetStatus(PrinterStatus.Ready);
             return true;
         }
