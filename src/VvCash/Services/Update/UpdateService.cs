@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using VvCash.Services.Logging;
 
 namespace VvCash.Services.Update;
 
@@ -72,7 +73,7 @@ public sealed class UpdateService : IUpdateService
         _manifestHost = new Uri(_manifestUrl).Host;
     }
 
-    public async Task<UpdateInfo?> CheckAsync(CancellationToken ct)
+    public async Task<UpdateCheckResult> CheckAsync(CancellationToken ct)
     {
         try
         {
@@ -80,25 +81,39 @@ public sealed class UpdateService : IUpdateService
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
 
             using var response = await _httpClient.GetAsync(_manifestUrl, timeout.Token);
-            if (!response.IsSuccessStatusCode) return null;
+            if (!response.IsSuccessStatusCode)
+                return UpdateCheckResult.Failed($"HTTP {(int)response.StatusCode}");
 
             // proffi.io serves a single-page app: a path it does not know answers 200
             // with index.html. The status code alone proves nothing.
+            //
+            // Named explicitly in the failure text rather than lumped in with the rest:
+            // this is what a manifest that never uploaded looks like from here, and it
+            // is the one failure the person reading the message can fix themselves.
             var mediaType = response.Content.Headers.ContentType?.MediaType;
             if (!string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase))
-                return null;
+                return UpdateCheckResult.Failed($"{mediaType ?? "?"} != application/json");
 
             var body = await response.Content.ReadAsStringAsync(timeout.Token);
             var info = Parse(body);
-            if (info is null) return null;
+            if (info is null)
+                return UpdateCheckResult.Failed("manifest rejected");
 
-            return info.Version > AppVersion.Normalize(_versionProvider.Current) ? info : null;
+            return info.Version > AppVersion.Normalize(_versionProvider.Current)
+                ? UpdateCheckResult.Found(info)
+                : UpdateCheckResult.UpToDate();
         }
-        catch
+        catch (Exception ex)
         {
-            // No network, DNS failure, timeout, torn connection. All the same to the
-            // cashier: nothing appears, and the loop tries again in an hour.
-            return null;
+            // No network, DNS failure, timeout, torn connection, TLS handshake. The
+            // hourly loop still says nothing and retries in an hour; only a check the
+            // cashier asked for shows this.
+            //
+            // DescribeChain, not ex.Message: the message at the top of the chain is
+            // routinely useless. A register on Windows 7 once reported "The SSL
+            // connection could not be established" and "Authentication failed", neither
+            // of which said why — the answer was in the third level nobody printed.
+            return UpdateCheckResult.Failed(AppLogging.DescribeChain(ex));
         }
     }
 
