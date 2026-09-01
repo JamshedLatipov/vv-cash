@@ -640,6 +640,26 @@ git commit -m "refactor(receipt): move Money/PadLine/Truncate into the rendering
 
 ## Task 4: Модель шаблона
 
+> **Задача выполнена, и листинг ниже устарел — читайте его как замысел, а не как
+> итоговый код.** Ревью вскрыло в нём несколько дыр, и реализация ушла вперёд.
+> Фактическое состояние — в `src/VvCash/Models/Receipt/`. Что разошлось:
+>
+> - `Default` стал **фабрикой** (`=> new()`), а не статическим экземпляром: общий
+>   изменяемый объект мог быть испорчен любым вызывающим на весь остаток жизни
+>   процесса. Следствие для всех будущих тестов: **`Assert.Same` на `Default`
+>   больше не работает**, сравнивайте сериализованный JSON.
+> - Разбор идёт **поблочно**, каждый блок в своём try/catch: одно кривое поле
+>   больше не уносит соседние блоки.
+> - `catch` ловит все исключения: дубль ключа в JSON бросал `ArgumentException`
+>   мимо прежнего фильтра, и касса не печатала чек вовсе.
+> - `blocks` проверяется как `is not JsonArray` — это разом закрывает отсутствие
+>   ключа, `null` и не-массив. Каждый из них давал пустой чек.
+> - `LineBlock.Count` в классе теперь `0` («во всю ширину»), а `Default` ставит 28
+>   явно. Значения из JSON клампятся в сеттерах — иначе `char: ""` и `count: -5`
+>   роняли рендерер.
+> - `Options` и `KnownTypes` стали `internal`: генератору эталона превью они нужны,
+>   а вторая копия настроек разъехалась бы.
+
 **Files:**
 - Create: `src/VvCash/Models/Receipt/ReceiptBlock.cs`
 - Create: `src/VvCash/Models/Receipt/Blocks.cs`
@@ -2103,7 +2123,15 @@ public class ReceiptTemplateStorageTest
         var storage = await NewStorage();
         await storage.SaveReceiptTemplateAsync("{это не json");
 
-        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse(await storage.GetReceiptTemplateAsync()));
+        // Сравнение сериализованного JSON, а НЕ Assert.Same: ReceiptTemplate.Default
+        // это фабрика (`=> new()`), новый объект на каждое обращение, поэтому
+        // ссылочная тождественность здесь никогда не выполнится. Тот же приём
+        // используют тесты ReceiptTemplateTest.
+        var parsed = ReceiptTemplate.Parse(await storage.GetReceiptTemplateAsync());
+
+        Assert.Equal(
+            JsonSerializer.Serialize(ReceiptTemplate.Default, ReceiptTemplate.Options),
+            JsonSerializer.Serialize(parsed, ReceiptTemplate.Options));
     }
 
     [Fact]
