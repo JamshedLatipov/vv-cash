@@ -48,7 +48,10 @@ public class ConfiguredCustomerDisplayService : ICustomerDisplayService
             : new VfdDisplayService(
                 port,
                 _settingsService.CustomerDisplayBaudRate,
-                EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId));
+                EscPosCodePages.Resolve(_settingsService.CustomerDisplayCodePageId),
+                DisplayProtocols.Resolve(_settingsService.CustomerDisplayProtocolId),
+                SerialFramings.Resolve(_settingsService.CustomerDisplayFramingId),
+                _settingsService.CustomerDisplayDtrRts);
     }
 
     public Task<bool> ShowLineAsync(string line1, string line2) => _inner.ShowLineAsync(line1, line2);

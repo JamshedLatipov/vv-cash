@@ -135,6 +135,30 @@ public class CustomerDisplayTest
     }
 
     [Fact]
+    public async Task ConfiguredDisplay_CarriesTheProtocolFramingAndDtrToTheHardware()
+    {
+        // Все три - не дефолты, ровно по той же причине, что и в тесте порта, скорости
+        // и кодовой страницы рядом: подмена Rebuild на конструкцию, забывшую один из
+        // параметров, обязана провалить хотя бы одну проверку, а не уцелеть на
+        // случайном совпадении со значением по умолчанию.
+        var settings = new FakeSettings
+        {
+            CustomerDisplayPort = "COM-does-not-exist",
+            CustomerDisplayProtocolId = "CD5220",
+            CustomerDisplayFramingId = "7E1",
+            CustomerDisplayDtrRts = true,
+        };
+
+        var display = new ConfiguredCustomerDisplayService(settings);
+        Assert.False(await display.ShowTotalAsync(10m));
+
+        var vfd = Assert.IsType<VfdDisplayService>(display.Inner);
+        Assert.Same(DisplayProtocols.Cd5220, vfd.Protocol);
+        Assert.Same(SerialFramings.SevenE1, vfd.Framing);
+        Assert.True(vfd.DtrRts);
+    }
+
+    [Fact]
     public async Task ConfiguredDisplay_WithNoPortSet_IsSilentAndSucceeds()
     {
         var settings = new FakeSettings { CustomerDisplayPort = string.Empty };
