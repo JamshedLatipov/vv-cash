@@ -134,9 +134,11 @@ public class EscPosUnitTest
         var bytes = EscPosPrinterService.BuildSaleReceipt(
             EscPosCodePages.Cp866, new[] { line }, subtotal: 10m, discount: 0m, total: 10m);
 
-        // ESC @ первым, ESC t n сразу за ним: таблица должна быть выбрана до
-        // первой буквы, иначе шапка уходит в дефолтную.
-        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
+        // ESC @ первым, FS . за ним, ESC t n третьим: таблица должна быть выбрана
+        // до первой буквы, иначе шапка уходит в дефолтную, — а выбор таблицы
+        // должен идти после выхода из китайского режима, иначе принтер его не
+        // рассматривает и печатает иероглифами независимо от селектора.
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1C, 0x2E, 0x1B, 0x74, 17 }, bytes[..7]);
     }
 
     [Fact]
@@ -146,7 +148,7 @@ public class EscPosUnitTest
 
         var bytes = EscPosPrinterService.BuildPreReceipt(EscPosCodePages.Cp866, new[] { line }, total: 10m);
 
-        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1C, 0x2E, 0x1B, 0x74, 17 }, bytes[..7]);
     }
 
     [Fact]
@@ -173,7 +175,7 @@ public class EscPosUnitTest
             EscPosCodePages.Cp866, new[] { new ReturnReceiptLine("Товар", 1, 10m) },
             totalRefund: 10m, documentNumber: "RT-1");
 
-        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1C, 0x2E, 0x1B, 0x74, 17 }, bytes[..7]);
     }
 
     [Fact]
@@ -185,7 +187,7 @@ public class EscPosUnitTest
             new[] { new ReturnReceiptLine("Другой", 1, 12m) },
             difference: 2m, documentNumber: "EX-1");
 
-        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 17 }, bytes[..5]);
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1C, 0x2E, 0x1B, 0x74, 17 }, bytes[..7]);
     }
 
     [Fact]
@@ -195,7 +197,7 @@ public class EscPosUnitTest
         // сказать, что именно пробовала, не глядя в настройки.
         var bytes = EscPosPrinterService.BuildTestReceipt(EscPosCodePages.Cp1251);
 
-        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1B, 0x74, 46 }, bytes[..5]);
+        Assert.Equal(new byte[] { 0x1B, 0x40, 0x1C, 0x2E, 0x1B, 0x74, 46 }, bytes[..7]);
 
         var text = EscPosCodePages.Cp1251.Encoding.GetString(bytes);
         Assert.Contains("CP1251", text);

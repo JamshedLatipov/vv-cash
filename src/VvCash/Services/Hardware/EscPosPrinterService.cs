@@ -59,6 +59,19 @@ public class EscPosPrinterService : IPrinterService
 
     private static readonly byte[] CmdInit = { 0x1B, 0x40 };
     private static readonly byte[] CmdSelectCodeTable = { 0x1B, 0x74 };
+    /// <summary>FS . — выход из двухбайтового режима китайских иероглифов.
+    ///
+    /// Xprinter XP-80 приезжает с завода с включённым этим режимом, и пока он
+    /// включён, ESC t принтером просто игнорируется, а каждый байт от 0x80 и выше
+    /// читается как половина иероглифа. Кириллица в CP866 вся лежит выше 0x80,
+    /// поэтому чек выходил иероглифами при ЛЮБОЙ выбранной таблице — настройка
+    /// кодовой страницы на такой кассе не действовала вовсе. Проверено разовой
+    /// развёрткой ESC t 0..50 на живом XP-80: без FS . читаемой кириллицы нет ни
+    /// под одним селектором, с FS . она читается под 9, 17 и 23 в CP866.
+    ///
+    /// Шлётся всегда, а не под настройку: у принтера без китайского режима
+    /// команда — no-op, а угадывать по модели нечего.</summary>
+    private static readonly byte[] CmdCancelKanji = { 0x1C, 0x2E };
     private static readonly byte[] CmdAlignLeft = { 0x1B, 0x61, 0x00 };
     private static readonly byte[] CmdAlignCenter = { 0x1B, 0x61, 0x01 };
     private static readonly byte[] CmdAlignRight = { 0x1B, 0x61, 0x02 };
@@ -325,6 +338,9 @@ public class EscPosPrinterService : IPrinterService
     private static void WriteInit(MemoryStream ms, EscPosCodePage codePage)
     {
         Write(ms, CmdInit);
+        // Строго до ESC t: в китайском режиме выбор таблицы принтером не
+        // рассматривается, и порядок здесь — не вкусовщина.
+        Write(ms, CmdCancelKanji);
         Write(ms, CmdSelectCodeTable);
         ms.WriteByte(codePage.EscTSelector);   // единственное, что действительно рантайм
     }
