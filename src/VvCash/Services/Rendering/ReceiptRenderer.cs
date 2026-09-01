@@ -101,6 +101,13 @@ public static class ReceiptRenderer
                 ops.Add(new BoldOp(false));
                 foreach (var field in fields.Fields)
                 {
+                    // Пустой ключ — это "поле ещё не выбрали в конструкторе",
+                    // а не опечатка: показывать "{}" покупателю незачем.
+                    // Проверка ДО ветки "неизвестный ключ", иначе пустой Key
+                    // (гарантированно не найдётся в values — там пустых
+                    // ключей нет) попал бы в неё и напечатал бы Label + "{}".
+                    if (string.IsNullOrEmpty(field.Key)) continue;
+
                     // Незнакомый ключ и известный-но-пустой — разные беды и не
                     // должны молча схлопываться в одно и то же "пропустить".
                     // Опечатка в ключе (field.Key вроде "sellr") обязана быть
@@ -165,8 +172,12 @@ public static class ReceiptRenderer
         if (cfg.ShowSecondaryUnit && item.Product.HasSecondaryUnit)
             AddText(ops, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}");
 
+        // Label настраиваемый (ItemsBlock.LineDiscountLabel), а не зашитая
+        // латиница: этот же чек несёт TotalsBlock.DiscountLabel из настроек
+        // администратора, и два разных слова для одного смысла на одной
+        // бумаге были бы хуже одного непереведённого.
         if (cfg.ShowLineDiscount && item.HasLineDiscount)
-            AddText(ops, ReceiptText.PadLine("    Discount:", $"-{ReceiptText.Money(item.LineDiscount)}", width));
+            AddText(ops, ReceiptText.PadLine("    " + cfg.LineDiscountLabel, $"-{ReceiptText.Money(item.LineDiscount)}", width));
     }
 
     private static void RenderTotals(TotalsBlock cfg, SaleReceiptData sale, int width, List<ReceiptOp> ops)
@@ -252,5 +263,26 @@ public static class ReceiptRenderer
     /// каждый новый источник текста.</summary>
     private static void AddText(List<ReceiptOp> ops, string line) => ops.Add(new TextOp(Sanitize(line)));
 
-    private static string Sanitize(string s) => s.Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
+    /// <summary>Снимает ВСЕ управляющие символы, не только перевод строки.
+    /// Таб и ESC проходили бы иначе сырыми: PadLine считает их печатными
+    /// колонками (строка "шириной 32" выходит короче на бумаге), а сырой ESC
+    /// в потоке — это первый байт чужой команды принтера (например ESC C —
+    /// "задать длину страницы"), которая съест следующий байт как свой
+    /// параметр. LineBlock.Char в этой же фиче уже снимает все char.IsControl
+    /// этим же доводом; было бы две политики на один класс беды в одном файле.
+    ///
+    /// "\r\n" схлопывается в ОДИН пробел, а не в два отдельных: так же
+    /// нормализует его TextBlock.Content, и этот метод обязан совпасть с ним
+    /// на строке, которая раньше шла только через тот сеттер. Замена идёт до
+    /// общего фильтра по char.IsControl нарочно — если сначала снимать
+    /// одиночные управляющие, "\r" и "\n" превратятся в два независимых
+    /// пробела до того, как заменится их пара. TS-двойник обязан повторить
+    /// именно порядок "сначала \r\n целиком, потом остальные управляющие".</summary>
+    private static string Sanitize(string s)
+    {
+        var normalized = s.Replace("\r\n", " ");
+        return normalized.Any(char.IsControl)
+            ? new string(normalized.Select(c => char.IsControl(c) ? ' ' : c).ToArray())
+            : normalized;
+    }
 }

@@ -335,4 +335,81 @@ public class ReceiptRendererTest
 
         Assert.Equal(new[] { "Seller: {sellr}" }, Lines(t, Sale(Glue())));
     }
+
+    [Fact]
+    public void Fields_SkipsAnEmptyKey_WithoutPrintingAPlaceholder()
+    {
+        // Незаполненная строка в конструкторе — это "поле ещё не выбрали",
+        // а не опечатка. Показывать "X: {}" покупателю незачем: пустой ключ
+        // проверяется до ветки "неизвестный ключ", а не попадает в неё.
+        var t = One(new FieldsBlock
+        {
+            Fields = new List<ReceiptField> { new() { Key = "", Label = "X: " } },
+        });
+
+        Assert.Empty(Lines(t, Sale(Glue())));
+    }
+
+    [Fact]
+    public void Render_SurvivesATemplateWithANullFieldsList()
+    {
+        // Штатный, а не гипотетический вход: сервер на Go сериализует так
+        // nil-слайс, тем же доводом, что и "blocks":null у ReceiptTemplate.
+        // Раньше foreach по null-списку ронял чек целиком —
+        // NullReferenceException на каждой продаже, пока кто-то не поправит
+        // шаблон, и PrintReceiptAsync возвращал бы false без единого чека.
+        var t = ReceiptTemplate.Parse("""{"blocks":[{"type":"fields","fields":null}]}""");
+
+        var ops = ReceiptRenderer.Render(t, Sale(Glue()));
+
+        Assert.Empty(ops.OfType<TextOp>());
+    }
+
+    [Fact]
+    public void Render_SurvivesATemplateWithANullFieldKey()
+    {
+        // "key":null — та же категория штатного JSON, что и "fields":null.
+        // Раньше values.TryGetValue(field.Key, ...) с null ронял
+        // ArgumentNullException прямо из рендерера.
+        var t = ReceiptTemplate.Parse(
+            """{"blocks":[{"type":"fields","fields":[{"key":null,"label":"X: "}]}]}""");
+
+        Assert.Empty(Lines(t, Sale(Glue())));
+    }
+
+    [Fact]
+    public void Items_LineDiscountLabel_IsConfigurable()
+    {
+        // TotalsBlock.DiscountLabel рядом настраивается из локали
+        // администратора; зашитая в код латиница на строке позиции была бы
+        // вторым, непереводимым словом для того же смысла на одном чеке.
+        var item = Glue();
+        item.QuotedUnitDiscount = 5m; // LineDiscount = 5 * 3 = 15.00
+
+        var lines = Lines(
+            One(new ItemsBlock { ShowLineDiscount = true, LineDiscountLabel = "Skidka:" }),
+            Sale(item));
+
+        Assert.Contains(lines, l => l.StartsWith("    Skidka:"));
+        Assert.DoesNotContain(lines, l => l.Contains("Discount:"));
+    }
+
+    [Fact]
+    public void Items_StripsAllControlCharacters_NotJustNewlines()
+    {
+        // Таб и ESC — не перевод строки, но тот же класс беды: PadLine
+        // считает их печатными колонками (строка "шириной 32" выходит короче
+        // на бумаге), а сырой ESC — первый байт чужой команды принтера,
+        // которая съест следующий байт как свой параметр.
+        var item = new CartItem
+        {
+            Product = new Product { Id = "p10", Name = "A\tB" + (char)27 + "C", Price = 10m },
+            Quantity = 1m,
+        };
+
+        var lines = Lines(One(new ItemsBlock()), Sale(item));
+
+        Assert.DoesNotContain(lines, l => l.Any(char.IsControl));
+        Assert.Contains(lines, l => l.StartsWith("A B C x1"));
+    }
 }

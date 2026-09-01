@@ -9,6 +9,14 @@ namespace VvCash.Models;
 /// PrintReceiptAsync намеренно оставлен со своим прежним списком параметров.
 /// Переписать его — значит тронуть возвраты, обмены и три вью-модели ради
 /// нулевого выигрыша; новый код берёт запись, старый остаётся как есть.</summary>
+/// <param name="QueueNumber">Номер бегунка на кухню. Пусто на клиентском чеке —
+/// блок с подстановкой {queue} тогда не печатается, ровно как решено спекой.</param>
+/// <remarks>QueueNumber пока не заполняется никем: живой путь через
+/// PrintKitchenOrderAsync/BuildSaleReceipt(queueNumber:) ещё не переведён на
+/// шаблон и рендерер. Заполнит задача, которая схлопнёт этот путь до
+/// Emit(Render(...)). До тех пор отказ немой: пустая строка читается правилом
+/// пустой подстановки как «поле не заполнено», без ошибки и без строки в лог,
+/// ровно как для DocumentNumber у офлайновой продажи.</remarks>
 public sealed record SaleReceiptData(
     IReadOnlyList<CartItem> Items,
     decimal Subtotal,
@@ -19,13 +27,4 @@ public sealed record SaleReceiptData(
     string? WarehouseName = null,
     string? SellerName = null,
     string? SaleDate = null,
-    /// <summary>Номер бегунка на кухню. Пусто на клиентском чеке — блок с
-    /// подстановкой {queue} тогда не печатается, ровно как решено спекой.
-    ///
-    /// <remarks>Пока не заполняется никем: живой путь через
-    /// PrintKitchenOrderAsync/BuildSaleReceipt(queueNumber:) ещё не переведён
-    /// на шаблон и рендерер. Заполнит задача, которая схлопнёт этот путь до
-    /// Emit(Render(...)). До тех пор отказ немой: пустая строка читается
-    /// правилом пустой подстановки как «поле не заполнено», без ошибки и без
-    /// строки в лог, ровно как для DocumentNumber у офлайновой продажи.</remarks></summary>
     string? QueueNumber = null);

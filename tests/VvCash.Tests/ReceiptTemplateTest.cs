@@ -342,6 +342,52 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void ReceiptField_ClampsANullKeyAndLabel_ToEmptyString()
+    {
+        // "key":null — законный JSON, не гипотеза: сервер на Go сериализует
+        // так нулевую строку в структуре ничуть не реже, чем nil-слайс для
+        // "blocks":null, от которого уже защищается ReceiptTemplate.Parse.
+        // Без клампа null долетал бы до values.TryGetValue(field.Key, ...) в
+        // рендерере и ронял бы ArgumentNullException на каждой продаже.
+#pragma warning disable CS8625
+        var field = new ReceiptField { Key = null, Label = null };
+#pragma warning restore CS8625
+
+        Assert.Equal(string.Empty, field.Key);
+        Assert.Equal(string.Empty, field.Label);
+    }
+
+    [Fact]
+    public void FieldsBlock_ClampsANullFieldsList_ToAnEmptyList()
+    {
+        // "fields":null — то же самое "blocks":null у ReceiptTemplate, только
+        // на уровень ниже: nil-слайс, который json.Marshal на сервере пишет
+        // как literal null. Без клампа рендерер упал бы на foreach по
+        // null-списку — NullReferenceException на каждой продаже.
+#pragma warning disable CS8625
+        var block = new FieldsBlock { Fields = null };
+#pragma warning restore CS8625
+
+        Assert.NotNull(block.Fields);
+        Assert.Empty(block.Fields);
+    }
+
+    [Fact]
+    public void Parse_ClampsANullFieldsListAndANullFieldKey()
+    {
+        // Оба входа — штатный вывод сервера на Go (nil-слайс и нулевая
+        // строка в структуре), а не гипотетический мусор. ReceiptTemplate.Parse
+        // разбирает оба без исключения и без этого теста — беда раньше была
+        // не здесь, а в рендерере, у которого перехвата вовсе нет.
+        var withNullFields = ReceiptTemplate.Parse("""{"blocks":[{"type":"fields","fields":null}]}""");
+        Assert.Empty(Assert.IsType<FieldsBlock>(withNullFields.Blocks[0]).Fields);
+
+        var withNullKey = ReceiptTemplate.Parse(
+            """{"blocks":[{"type":"fields","fields":[{"key":null,"label":"X: "}]}]}""");
+        Assert.Equal(string.Empty, Assert.IsType<FieldsBlock>(withNullKey.Blocks[0]).Fields[0].Key);
+    }
+
+    [Fact]
     public void TextBlock_ReplacesNewlinesInContentWithASpace()
     {
         // TextOp прямо запрещает перевод строки в своей строке: он прошёл бы

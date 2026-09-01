@@ -100,16 +100,47 @@ public sealed class FeedBlock : ReceiptBlock
 
 /// <summary>Одно поле реквизитов: что подставить и что написать перед ним.
 /// Label — именно префикс, а не подпись с двоеточием от себя: нынешний чек
-/// печатает "Doc #A-42" без пробела и дату вовсе без подписи.</summary>
+/// печатает "Doc #A-42" без пробела и дату вовсе без подписи.
+///
+/// Key/Label клампятся в сеттере тем же доводом, что и ReceiptTemplate.Width:
+/// разбор — не единственный вход. "key":null — законный JSON, а не гипотеза:
+/// сервер на Go сериализует так нулевую строку в структуре ничуть не реже,
+/// чем nil-слайс для "blocks":null, от которого уже защищается
+/// ReceiptTemplate.Parse. Без клампа здесь null долетал бы до
+/// values.TryGetValue(field.Key, ...) в рендерере и ронял бы ArgumentNullException
+/// на КАЖДОЙ продаже, пока кто-то не поправит шаблон — то есть чек не выходил
+/// бы вовсе, ровно то, от чего защищается остальная часть этой фичи.</summary>
 public sealed class ReceiptField
 {
-    public string Key { get; set; } = string.Empty;
-    public string Label { get; set; } = string.Empty;
+    private string _key = string.Empty;
+    private string _label = string.Empty;
+
+    public string Key
+    {
+        get => _key;
+        set => _key = value ?? string.Empty;
+    }
+
+    public string Label
+    {
+        get => _label;
+        set => _label = value ?? string.Empty;
+    }
 }
 
 public sealed class FieldsBlock : ReceiptBlock
 {
-    public List<ReceiptField> Fields { get; set; } = new();
+    /// <summary>"fields":null — то же самое "blocks":null у ReceiptTemplate,
+    /// только на уровень ниже: nil-слайс, который json.Marshal на сервере
+    /// пишет как literal null, а не "[]". Без клампа рендерер упал бы на
+    /// foreach по null-списку — NullReferenceException на каждой продаже.</summary>
+    private List<ReceiptField> _fields = new();
+
+    public List<ReceiptField> Fields
+    {
+        get => _fields;
+        set => _fields = value ?? new();
+    }
 }
 
 public sealed class ItemsBlock : ReceiptBlock
@@ -119,6 +150,13 @@ public sealed class ItemsBlock : ReceiptBlock
     public bool ShowBarcode { get; set; }
     public bool ShowSecondaryUnit { get; set; } = true;
     public bool ShowLineDiscount { get; set; }
+
+    /// <summary>Подпись строки скидки позиции. Настраиваемая, как
+    /// TotalsBlock.DiscountLabel рядом — иначе один и тот же чек нёс бы два
+    /// разных слова для одного смысла: перевод из локали на итогах и зашитую
+    /// латиницу на самой позиции, непереводимую тем же конструктором, что
+    /// собирает остальной шаблон.</summary>
+    public string LineDiscountLabel { get; set; } = "Discount:";
 }
 
 public sealed class TotalsBlock : ReceiptBlock
