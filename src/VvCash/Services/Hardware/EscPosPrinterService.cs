@@ -7,6 +7,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Models.Receipt;
 using VvCash.Services.Rendering;
 
 namespace VvCash.Services.Hardware;
@@ -92,78 +93,28 @@ public class EscPosPrinterService : IPrinterService
         _roles = roles;
     }
 
-    /// <summary>Builds the sale receipt bytes. Static and separate from sending
-    /// so the layout can be asserted on, exactly as BuildReturnReceipt is.</summary>
+    /// <summary>Собирает байты чека продажи по шаблону. Раскладка живёт в
+    /// ReceiptRenderer, байты — в EscPosEmitter; здесь остался только стык.
+    ///
+    /// template = null означает «шаблон с сервера не доехал» и берёт
+    /// ReceiptTemplate.Default, который печатает ровно то, что печаталось до
+    /// перевода на блоки. Это свойство закреплено SaleReceiptGoldenTest.</summary>
     public static byte[] BuildSaleReceipt(
         EscPosCodePage codePage,
         IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
         string? discountName = null,
         string? documentNumber = null, string? warehouseName = null,
         string? sellerName = null, string? saleDate = null,
-        string? queueNumber = null)
+        string? queueNumber = null,
+        ReceiptTemplate? template = null)
     {
-        using var ms = new MemoryStream();
-        WriteInit(ms, codePage);
-        Write(ms, CmdAlignCenter);
-        Write(ms, CmdDoubleSizeOn);
-        WriteLine(ms, "VV CASH POS", codePage);
-        Write(ms, CmdDoubleSizeOff);
-        // Бегунок — это тот же чек с номером в шапке, а не отдельный документ:
-        // расходиться с чеком при первой правке раскладки ему незачем. Пусто —
-        // печатается клиентский чек, и номера на нём нет по решению спеки.
-        if (!string.IsNullOrWhiteSpace(queueNumber))
-        {
-            Write(ms, CmdDoubleSizeOn);
-            Write(ms, CmdBoldOn);
-            WriteLine(ms, $"# {queueNumber}", codePage);
-            Write(ms, CmdBoldOff);
-            Write(ms, CmdDoubleSizeOff);
-        }
-        // The same four facts the return and exchange receipts carry, and for the same
-        // reason: without them a sale receipt brought back to the till cannot be matched
-        // to its document. Each is omitted when absent rather than printed empty — an
-        // offline sale has no document number yet, and a register with seller switching
-        // off has no seller to name.
-        if (!string.IsNullOrWhiteSpace(documentNumber)) WriteLine(ms, $"Doc #{documentNumber}", codePage);
-        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate!, codePage);
-        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}", codePage);
-        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}", codePage);
-        WriteLine(ms, "----------------------------", codePage);
-        Write(ms, CmdAlignLeft);
-        foreach (var item in items)
-        {
-            var line = $"{item.Product.Name} x{item.QuantityDisplay}";
-            // No currency symbol. It was hardcoded to "$" on every line and total of
-            // every sale, in stores that do not take dollars — and the return and
-            // exchange receipts next to it have always printed the bare amount.
-            var price = ReceiptText.Money(item.LineTotal);
-            WriteLine(ms, ReceiptText.PadLine(line, price, 32), codePage);
+        var sale = new SaleReceiptData(
+            new List<CartItem>(items), subtotal, discount, total,
+            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber);
 
-            // A unit line prints both figures: the customer asked for square
-            // metres and is billed for whole tiles, and showing only one of the
-            // two makes the round-up look like an error.
-            if (item.Product.HasSecondaryUnit)
-                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
-        }
-        WriteLine(ms, "----------------------------", codePage);
-        WriteLine(ms, ReceiptText.PadLine("Subtotal:", ReceiptText.Money(subtotal), 32), codePage);
-        if (discount > 0)
-        {
-            WriteLine(ms, ReceiptText.PadLine("Discount:", $"-{ReceiptText.Money(discount)}", 32), codePage);
-            if (!string.IsNullOrWhiteSpace(discountName))
-                WriteLine(ms, ReceiptText.Truncate(discountName!, 32), codePage);
-        }
-
-        Write(ms, CmdBoldOn);
-        WriteLine(ms, ReceiptText.PadLine("TOTAL:", ReceiptText.Money(total), 32), codePage);
-        Write(ms, CmdBoldOff);
-        WriteLine(ms, "----------------------------", codePage);
-        Write(ms, CmdAlignCenter);
-        WriteLine(ms, "Thank you for shopping!", codePage);
-        Write(ms, CmdLineFeed);
-        Write(ms, CmdLineFeed);
-        Write(ms, CmdCut);
-        return ms.ToArray();
+        return EscPosEmitter.Emit(
+            ReceiptRenderer.Render(template ?? ReceiptTemplate.Default, sale),
+            codePage);
     }
 
     /// <summary>Образец, по которому на точке решают, угадана ли таблица.
