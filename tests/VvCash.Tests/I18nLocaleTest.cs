@@ -57,7 +57,14 @@ public class I18nLocaleTest
         // Проверяются именно эти три ключа, а не полное совпадение словарей: ru сегодня
         // расходится с остальными четырьмя на два десятка ключей, и тест «все словари
         // одинаковы» был бы красным с рождения по причинам, к дисплею не относящимся.
-        string[] keys = { "DisplayCheckOk", "DisplayCheckFailed", "DisplayCheckNoPort" };
+        string[] keys =
+        {
+            "DisplayCheckOk", "DisplayCheckFailed", "DisplayCheckNoPort",
+            "DisplayProtocol", "DisplayFraming", "DisplayDtrRts",
+            "ProbeDisplay", "StopProbe", "DisplayProbeProgress",
+            "DisplayProbeNumber", "ApplyProbeNumber", "DisplayProbeBadNumber",
+            "DisplayProbeApplied", "DisplayProbeDone",
+        };
 
         foreach (var locale in Locales)
         {
@@ -67,6 +74,29 @@ public class I18nLocaleTest
                 Assert.True(map.ContainsKey(key), $"{locale}.json: нет ключа {key}");
                 Assert.False(string.IsNullOrWhiteSpace(map[key]), $"{locale}.json: {key} пуст");
             }
+        }
+    }
+
+    [Fact]
+    public void DisplayProbeProgress_CarriesBothPlaceholders()
+    {
+        // Строка идёт через string.Format с номером шага и их общим числом. Перевод,
+        // потерявший {1}, покажет кассиру «Подбор: 12 из» — формат не упадёт, а
+        // строка станет бессмысленной, и поймать это может только проверка текста.
+        foreach (var locale in Locales)
+        {
+            var value = Load(locale)["DisplayProbeProgress"];
+            Assert.Contains("{0}", value);
+            Assert.Contains("{1}", value);
+        }
+    }
+
+    [Fact]
+    public void DisplayProbeApplied_CarriesItsPlaceholder()
+    {
+        foreach (var locale in Locales)
+        {
+            Assert.Contains("{0}", Load(locale)["DisplayProbeApplied"]);
         }
     }
 
