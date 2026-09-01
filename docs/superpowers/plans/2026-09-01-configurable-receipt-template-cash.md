@@ -728,6 +728,40 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void Parse_FallsBackToTheDefault_WhenTheBlocksKeyIsAbsent()
+    {
+        // Пустой чек хуже дефолтного: на бумаге вышла бы одна обрезка, без шапки,
+        // позиций и итогов. А случайно валидный JSON без нужных ключей в этой
+        // колонке вполне возможен — опция засеяна в 2019 и шесть лет рендерилась
+        // в бэкофисе обычным текстовым полем.
+        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("{}"));
+        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("""{"a":1}"""));
+        Assert.Same(ReceiptTemplate.Default, ReceiptTemplate.Parse("""{"version":1}"""));
+    }
+
+    [Fact]
+    public void Parse_KeepsAnExplicitlyEmptyBlockList()
+    {
+        // Присутствующий пустой массив — не порча данных, а администратор,
+        // стёрший в конструкторе все блоки. Отличается от предыдущего случая
+        // ровно наличием ключа.
+        Assert.NotSame(ReceiptTemplate.Default, ReceiptTemplate.Parse("""{"version":1,"blocks":[]}"""));
+    }
+
+    [Fact]
+    public void Parse_DropsAScalarInsideBlocks_WithoutLosingTheRest()
+    {
+        // Скаляр посреди массива обязан вести себя как null и как блок без type:
+        // выбрасывается он один. Иначе строка, попавшая в blocks при сбое
+        // сериализации, уносила бы весь шаблон магазина.
+        var t = ReceiptTemplate.Parse(
+            """{"version":1,"blocks":[{"type":"text","content":"A"},"oops",{"type":"text","content":"B"}]}""");
+
+        Assert.Equal(2, t.Blocks.Count);
+        Assert.Equal(new[] { "A", "B" }, t.Blocks.Cast<TextBlock>().Select(b => b.Content));
+    }
+
+    [Fact]
     public void Parse_FallsBackToTheDefault_OnAFutureVersion()
     {
         // Несовместимый формат лучше не печатать вовсе, чем печатать наполовину.
@@ -977,12 +1011,30 @@ public sealed class ReceiptTemplate
             var version = node["version"]?.GetValue<int>() ?? CurrentVersion;
             if (version != CurrentVersion) return Default;
 
+            // Отсутствие ключа blocks — мусор, а не пустой шаблон. Различие
+            // существенное: шаблона без этого ключа конструктор не пишет никогда,
+            // зато случайно валидный JSON вроде {} в этой колонке вполне возможен —
+            // опция засеяна в 2019 и шесть лет рендерилась текстовым полем. Без
+            // этой проверки {} давал бы шаблон с нулём блоков, то есть пустой чек
+            // на бумаге: одна обрезка, без шапки, позиций и итогов.
+            //
+            // Присутствующий пустой массив, наоборот, сохраняется: так выглядит
+            // осознанный выбор администратора, стёршего в конструкторе все блоки.
+            if (node["blocks"] is not JsonArray blocks) return Default;
+
             var kept = new JsonArray();
-            foreach (var block in node["blocks"]?.AsArray() ?? new JsonArray())
+            foreach (var block in blocks)
             {
-                var type = block?["type"]?.GetValue<string>();
+                // Проверка типа узла, а не просто ?. — индексатор JsonNode внутри
+                // зовёт AsObject() и бросает на скаляре. Без неё строка посреди
+                // массива уносила в Default ВЕСЬ шаблон, тогда как null и блок без
+                // type выбрасывались поштучно. Асимметрия противоречила бы обещанию
+                // ниже: блок из более новой админки не повод потерять весь чек.
+                if (block is not JsonObject obj) continue;
+
+                var type = obj["type"]?.GetValue<string>();
                 if (type != null && KnownTypes.Contains(type))
-                    kept.Add(block!.DeepClone());
+                    kept.Add(obj.DeepClone());
             }
             node["blocks"] = kept;
 
@@ -1040,7 +1092,7 @@ public sealed class ReceiptTemplate
 - [ ] **Step 6: Прогнать тесты**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~ReceiptTemplateTest"`
-Expected: PASS, 8 тестов.
+Expected: PASS, 10 тестов.
 
 - [ ] **Step 7: Commit**
 
