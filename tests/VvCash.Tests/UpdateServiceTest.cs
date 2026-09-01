@@ -55,7 +55,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(version: "1.1.0"), currentVersion: "1.0.0");
 
-        var info = await service.CheckAsync(CancellationToken.None);
+        var info = (await service.CheckAsync(CancellationToken.None)).Update;
 
         Assert.NotNull(info);
         Assert.Equal(new Version(1, 1, 0), info!.Version);
@@ -73,7 +73,7 @@ public class UpdateServiceTest
         // newer than the release it was cut from.
         var (service, _) = Build(Manifest(version: "1.0.0"), currentVersion: "1.0.0.0");
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(version: "0.9.0"), currentVersion: "1.0.0");
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class UpdateServiceTest
             "<!doctype html><html lang=\"ru\"><head><title>CRM</title></head></html>",
             contentType: "text/html");
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(product: "softphone"));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(url: "http://proffi.io/downloads/proffi-kassa-setup.exe"));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(url: "/downloads/proffi-kassa-setup.exe"));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public class UpdateServiceTest
         // register at their own server.
         var (service, _) = Build(Manifest(url: "https://evil.example/downloads/proffi-kassa-setup.exe"));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public class UpdateServiceTest
         // download directory must not silently stop all updates.
         var (service, _) = Build(Manifest(url: "https://proffi.io/downloads/v2/proffi-kassa-setup.exe"));
 
-        Assert.NotNull(await service.CheckAsync(CancellationToken.None));
+        Assert.NotNull((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(url: "https://PROFFI.IO/downloads/proffi-kassa-setup.exe"));
 
-        Assert.NotNull(await service.CheckAsync(CancellationToken.None));
+        Assert.NotNull((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Theory]
@@ -160,7 +160,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(sha256: sha256));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(version: "next-friday"));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build("{ \"product\": \"vvcash\", ");
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public class UpdateServiceTest
     {
         var (service, _) = Build(Manifest(), status: HttpStatusCode.NotFound);
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public class UpdateServiceTest
         var service = new UpdateService(new HttpClient(handler), new FakeVersionProvider("1.0.0"));
 
         // A register with no internet must not see an error — it just keeps trading.
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     // ------------------------------------------------------------------ flavors
@@ -251,7 +251,7 @@ public class UpdateServiceTest
             X86ManifestUrl,
             Manifest(url: "https://elsewhere.example/downloads/proffi-kassa-setup-x86.exe"));
 
-        Assert.Null(await service.CheckAsync(CancellationToken.None));
+        Assert.Null((await service.CheckAsync(CancellationToken.None)).Update);
     }
 
     [Fact]
@@ -261,7 +261,7 @@ public class UpdateServiceTest
             X86ManifestUrl,
             Manifest(url: "https://proffi.io/downloads/proffi-kassa-setup-x86.exe"));
 
-        var info = await service.CheckAsync(CancellationToken.None);
+        var info = (await service.CheckAsync(CancellationToken.None)).Update;
 
         Assert.NotNull(info);
         Assert.Equal("https://proffi.io/downloads/proffi-kassa-setup-x86.exe", info!.Url);

@@ -682,7 +682,22 @@
                 <!-- Was the i18n key V240TERMINALIDLXP099, a leftover from the mockup that
                      read "V 2.4.0 • TERMINAL ID: LXP-09921" on every register regardless of
                      what was installed. Now the actual build. -->
-                <TextBlock Grid.Column="2" Text="{Binding Update.AppVersionText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
+                <!-- Версия и ручная проверка рядом: кассир, которому сказали «обновись»,
+                     смотрит именно на номер версии, и кнопка должна найтись там же.
+                     Автопроверка ходит раз в час и только с этого экрана, поторопить её
+                     иначе нечем. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Update.CheckResultText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" VerticalAlignment="Center"
+                               MaxWidth="360" TextTrimming="CharacterEllipsis"
+                               IsVisible="{Binding Update.CheckResultText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               ToolTip.Tip="{Binding Update.CheckResultText}"/>
+                    <Button Command="{Binding Update.CheckNowCommand}" IsEnabled="{Binding !Update.IsCheckingForUpdate}"
+                            Background="Transparent" BorderThickness="0" Padding="6,2" VerticalAlignment="Center"
+                            ToolTip.Tip="{Binding [CheckForUpdate], Source={x:Static services:I18nService.Instance}}">
+                        <material:MaterialIcon Kind="Refresh" Width="14" Height="14" Foreground="{StaticResource Slate400Brush}"/>
+                    </Button>
+                    <TextBlock Text="{Binding Update.AppVersionText}" Foreground="{StaticResource Slate400Brush}" FontSize="10" FontWeight="Bold" LetterSpacing="1" VerticalAlignment="Center"/>
+                </StackPanel>
             </Grid>
         </Border>
 

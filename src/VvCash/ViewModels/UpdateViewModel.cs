@@ -23,6 +23,16 @@ public partial class UpdateViewModel : ViewModelBase
     [ObservableProperty] private string? _errorText;
     [ObservableProperty] private UpdateInfo? _availableUpdate;
 
+    /// <summary>Идёт ли проверка по нажатию. Гасит кнопку на время запроса: кассир, не
+    /// увидевший мгновенного ответа, жмёт ещё раз, а второй заход на сервер поверх
+    /// первого ничего не добавляет.</summary>
+    [ObservableProperty] private bool _isCheckingForUpdate;
+
+    /// <summary>Ответ ручной проверки. Отдельно от ErrorText, который принадлежит
+    /// установке: сбой проверки и сбой установки случаются в разных местах экрана и
+    /// не должны затирать друг друга.</summary>
+    [ObservableProperty] private string _checkResultText = string.Empty;
+
     /// <summary>The running build, formatted for the status bar.</summary>
     public string AppVersionText { get; }
 
@@ -72,11 +82,17 @@ public partial class UpdateViewModel : ViewModelBase
     partial void OnAvailableUpdateChanged(UpdateInfo? value) => OnPropertyChanged(nameof(AvailableVersionText));
 
     /// <summary>Called from PosViewModel's background loop. Never throws — the service
-    /// already swallows every failure and answers null.</summary>
+    /// already swallows every failure and reports it as an outcome.
+    ///
+    /// Deliberately silent about failures: this runs while the cashier is serving a
+    /// customer, and a network hiccup is not their problem. It retries in an hour.
+    /// Only <see cref="CheckNowAsync"/> — the check a person asked for — reports why.</summary>
     public async Task CheckAsync(CancellationToken ct)
     {
-        var info = await _updateService.CheckAsync(ct);
-        if (info is null) return;
+        var result = await _updateService.CheckAsync(ct);
+        if (result.Update is null) return;
+
+        var info = result.Update;
 
         // The loop runs on a background thread (Task.Run, no captured UI context), and
         // these two properties are bound. Same idiom as PosViewModel's own
@@ -86,6 +102,53 @@ public partial class UpdateViewModel : ViewModelBase
             AvailableUpdate = info;
             IsUpdateAvailable = true;
         });
+    }
+
+    /// <summary>Проверка по нажатию кассира.
+    ///
+    /// Автопроверка ходит на сервер раз в час и только с открытого экрана продажи, а
+    /// первый заход делает примерно через минуту после входа. Кассир, которому сказали,
+    /// что релиз уже выложен, не может её поторопить ничем — и ждать час у него нет
+    /// повода.
+    ///
+    /// Отвечает всегда, всеми тремя исходами. Молчание хоть на одном из них вернуло бы
+    /// нерешаемую задачу: кнопка, которая иногда ничего не говорит, неотличима от
+    /// сломанной, и кассир жмёт её снова.</summary>
+    [RelayCommand]
+    private async Task CheckNowAsync()
+    {
+        if (IsCheckingForUpdate) return;
+
+        IsCheckingForUpdate = true;
+        CheckResultText = string.Empty;
+        ErrorText = null;
+
+        try
+        {
+            var result = await _updateService.CheckAsync(CancellationToken.None);
+
+            if (result.IsFailure)
+            {
+                CheckResultText = string.Format(
+                    I18nService.Instance["UpdateCheckFailed"], result.Failure);
+                return;
+            }
+
+            if (result.Update is null)
+            {
+                CheckResultText = string.Format(
+                    I18nService.Instance["UpdateUpToDate"], AppVersionText);
+                return;
+            }
+
+            AvailableUpdate = result.Update;
+            IsUpdateAvailable = true;
+            IsModalVisible = true;
+        }
+        finally
+        {
+            IsCheckingForUpdate = false;
+        }
     }
 
     [RelayCommand]

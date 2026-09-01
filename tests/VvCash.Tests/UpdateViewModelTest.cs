@@ -21,15 +21,32 @@ public class UpdateViewModelTest
     private sealed class FakeUpdateService : IUpdateService
     {
         public UpdateInfo? Available;
+        public string? CheckFailure;
         public string? DownloadResult;
         public int DownloadCalls;
+        public int CheckCalls;
 
         /// <summary>Invoked right before DownloadAsync returns, standing in for
         /// something happening on the register while the (real, seconds-long) download
         /// is in flight — used to reproduce a scan landing mid-download.</summary>
         public Action? OnDownload;
 
-        public Task<UpdateInfo?> CheckAsync(CancellationToken ct) => Task.FromResult(Available);
+        /// <summary>Держит проверку незавершённой, пока тест не отпустит. Без него
+        /// фейк отвечает синхронно, первый вызов успевает закончиться до второго, и
+        /// проверить защиту от повторного нажатия нечем — она просто не задействуется.</summary>
+        public TaskCompletionSource<bool>? Gate;
+
+        public async Task<UpdateCheckResult> CheckAsync(CancellationToken ct)
+        {
+            CheckCalls++;
+            if (Gate is not null) await Gate.Task;
+
+            return CheckFailure is not null
+                ? UpdateCheckResult.Failed(CheckFailure)
+                : Available is not null
+                    ? UpdateCheckResult.Found(Available)
+                    : UpdateCheckResult.UpToDate();
+        }
 
         public Task<string?> DownloadAsync(UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
         {
@@ -284,5 +301,127 @@ public class UpdateViewModelTest
 
         cart.ClearCart();
         Assert.False(vm.IsBlockedByCart);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Ручная проверка обновления
+    // ---------------------------------------------------------------------------------
+
+    // Автопроверка ходит на сервер раз в час и только с открытого экрана продажи.
+    // Кассир, который знает, что релиз уже выложен, не может её поторопить ничем — а
+    // ждать час у него нет ни времени, ни повода. Отсюда кнопка.
+    //
+    // Три исхода, и все три обязаны быть различимы. Молчание на любом из них вернуло бы
+    // ровно ту болезнь, из-за которой этот день и случился: касса, которая не отвечает,
+    // неотличима от кассы, у которой всё хорошо.
+
+    [Fact]
+    public async Task CheckNow_WhenAnUpdateIsThere_ShowsItAndOpensTheDialog()
+    {
+        var (vm, service, _, _) = Build();
+        service.Available = SampleInfo();
+
+        await vm.CheckNowCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsUpdateAvailable);
+        Assert.True(vm.IsModalVisible);
+        Assert.False(vm.IsCheckingForUpdate);
+    }
+
+    [Fact]
+    public async Task CheckNow_WhenAlreadyCurrent_SaysSoInsteadOfSayingNothing()
+    {
+        // Самый частый исход и самый опасный: без ответа кассир решит, что кнопка
+        // сломана, и пойдёт жать её ещё раз.
+        var (vm, _, _, _) = Build();
+
+        await vm.CheckNowCommand.ExecuteAsync(null);
+
+        Assert.False(vm.IsUpdateAvailable);
+        Assert.False(vm.IsModalVisible);
+        Assert.NotEmpty(vm.CheckResultText);
+        Assert.Null(vm.ErrorText);
+    }
+
+    [Fact]
+    public async Task CheckNow_WhenTheCheckItselfFailed_SaysWhy()
+    {
+        // «Обновлений нет» и «до сервера не достучались» — разные новости, и чинятся
+        // они в разных местах. Раньше CheckAsync возвращал null на оба случая, потому
+        // что единственным вызывающим был часовой таймер, которому разница не нужна.
+        // У кнопки она нужна.
+        var (vm, service, _, _) = Build();
+        service.CheckFailure = "The SSL connection could not be established";
+
+        await vm.CheckNowCommand.ExecuteAsync(null);
+
+        // Сравнение с самим I18nService, а не с готовым текстом: в тестовом хосте
+        // Avalonia не поднята, словарь пуст, и любой ключ отдаёт заглушку "[ключ]" —
+        // подставленная причина в неё не попадает, потому что в заглушке нет {0}.
+        // Проверить здесь можно только «какая ветка выбрана», и это делается через
+        // разные ключи. Что {0} в переводе на месте и причина реально доезжает до
+        // кассира, стережёт I18nLocaleTest.
+        Assert.Equal(
+            string.Format(I18nService.Instance["UpdateCheckFailed"], service.CheckFailure),
+            vm.CheckResultText);
+        Assert.NotEqual(
+            string.Format(I18nService.Instance["UpdateUpToDate"], vm.AppVersionText),
+            vm.CheckResultText);
+
+        Assert.False(vm.IsUpdateAvailable);
+        Assert.False(vm.IsCheckingForUpdate);
+    }
+
+    [Fact]
+    public async Task CheckNow_DoesNotRunTwiceAtOnce()
+    {
+        // Кассир, не увидевший мгновенного ответа, жмёт ещё раз. Второй заход на
+        // сервер поверх первого ничего не добавляет.
+        //
+        // Проверка держится незавершённой через Gate: без него фейк отвечает
+        // синхронно, первый вызов заканчивается раньше, чем начинается второй, и тест
+        // проходил бы, ничего при этом не проверяя.
+        var (vm, service, _, _) = Build();
+        var gate = new TaskCompletionSource<bool>();
+        service.Gate = gate;
+
+        var first = vm.CheckNowCommand.ExecuteAsync(null);
+        var second = vm.CheckNowCommand.ExecuteAsync(null);
+        gate.SetResult(true);
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(1, service.CheckCalls);
+    }
+
+    [Theory]
+    [InlineData("CheckNowCommand")]
+    [InlineData("IsCheckingForUpdate")]
+    [InlineData("CheckResultText")]
+    [InlineData("AppVersionText")]
+    public void PosViewBindingPaths_ResolveOnTheViewModel(string path)
+    {
+        // AvaloniaUseCompiledBindingsByDefault выключен: опечатка в пути собирается
+        // начисто и молча даёт мёртвую кнопку. Свойство команды генерирует
+        // CommunityToolkit из [RelayCommand], грепом его в исходнике не найти —
+        // поэтому отражением.
+        var property = typeof(UpdateViewModel).GetProperty(path);
+
+        Assert.NotNull(property);
+        Assert.True(property!.GetMethod?.IsPublic, $"{path} не читается привязкой");
+    }
+
+    [Fact]
+    public async Task HourlyCheck_StaysSilentWhenTheCheckFails()
+    {
+        // Фоновая проверка не должна беспокоить кассира сбоями сети: она повторится
+        // через час, а кассир в этот момент обслуживает покупателя. Сообщать о причине
+        // обязана только та проверка, которую человек запросил сам.
+        var (vm, service, _, _) = Build();
+        service.CheckFailure = "no network";
+
+        await vm.CheckAsync(CancellationToken.None);
+
+        Assert.Empty(vm.CheckResultText);
+        Assert.False(vm.IsUpdateAvailable);
     }
 }

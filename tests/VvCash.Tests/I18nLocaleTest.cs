@@ -65,6 +65,7 @@ public class I18nLocaleTest
             "DisplayProbeNumber", "ApplyProbeNumber", "DisplayProbeBadNumber",
             "DisplayProbeApplied", "DisplayProbeDone", "DisplayProbePortBusy",
             "DisplayProbeRecent",
+            "CheckForUpdate", "UpdateUpToDate", "UpdateCheckFailed",
         };
 
         foreach (var locale in Locales)
@@ -91,6 +92,21 @@ public class I18nLocaleTest
             Assert.Contains("{0}", value);
             Assert.Contains("{1}", value);
             Assert.Contains("{2}", value);
+        }
+    }
+
+    [Fact]
+    public void UpdateCheckMessages_CarryTheirPlaceholders()
+    {
+        // UpdateCheckFailed без {0} — это «Не удалось проверить обновления» и точка:
+        // причина, ради которой всё и затевалось, теряется молча, формат при этом не
+        // падает. Проверить это может только чтение самого текста: тест на view model
+        // видит вместо строки заглушку "[ключ]" и подстановки не наблюдает.
+        foreach (var locale in Locales)
+        {
+            var map = Load(locale);
+            Assert.Contains("{0}", map["UpdateCheckFailed"]);
+            Assert.Contains("{0}", map["UpdateUpToDate"]);
         }
     }
 

@@ -763,8 +763,8 @@ public class PosViewModelSellerGateTest
 
     private sealed class NoUpdateService : VvCash.Services.Update.IUpdateService
     {
-        public Task<VvCash.Services.Update.UpdateInfo?> CheckAsync(CancellationToken ct)
-            => Task.FromResult<VvCash.Services.Update.UpdateInfo?>(null);
+        public Task<VvCash.Services.Update.UpdateCheckResult> CheckAsync(CancellationToken ct)
+            => Task.FromResult(VvCash.Services.Update.UpdateCheckResult.UpToDate());
 
         public Task<string?> DownloadAsync(
             VvCash.Services.Update.UpdateInfo info, IProgress<double>? progress, CancellationToken ct)
