@@ -63,8 +63,12 @@
 > `FindRepoRoot()`, а не из копии в `build/verify-tests` (`PreserveNewest` сравнивает
 > время, а не содержимое, и давал ложно-зелёный прогон); режим
 > `VVCASH_UPDATE_GOLDEN=1` завершается `Assert.Fail`, иначе утёкшая переменная
-> молча переписывала эталон под сломанный код. `GoldenItems()` и `BuildGolden()`
-> сохранены под прежними именами — на них опирается Task 12.
+> молча переписывала эталон под сломанный код.
+>
+> Task 12 больше НЕ опирается на `GoldenItems()` и заводит свои позиции: этим
+> фикстурам нужна серединная сумма (13.50 × 0.15), на которой C# и JS округляют
+> по-разному, а тронуть `GoldenItems()` нельзя — на нём стоят пять закреплённых
+> байтовых фикстур.
 
 Это делается **первым**, до единой правки боевого кода. Смысл: зафиксировать сегодняшний чек как эталон, чтобы весь дальнейший рефакторинг проверялся против него, а не против собственных представлений о том, каким чек был.
 
@@ -2652,6 +2656,10 @@ git commit -m "feat(receipt): print the synced bitmap logo"
 
 Превью в bozor — вторая реализация раскладки, на TypeScript. Этот файл — то единственное, что ловит их расхождение.
 
+**Округление через границу языков не переносится.** `ToString("F2")` в C# округляет от нуля, `toFixed(2)` в JavaScript — по двоичному представлению: 2.005 даёт «2.01» на кассе и «2.00» в браузере, 2.675 — «2.68» против «2.67». Достижимо обычной продажей: `LineTotal = UnitPrice * Quantity`, а количество делимого товара идёт до трёх знаков, так что 13.50 × 0.15 = 2.0250 печатается как 2.03 и показалось бы как 2.02.
+
+Отсюда два следствия, и оба обязательны. Суммы едут в превью **уже отформатированными строками**, то есть TS не форматирует деньги вовсе. И демо-продажа ниже обязана нести серединное значение — иначе эталон сертифицирует паритет, которого на этом краю нет.
+
 **Files:**
 - Create: `tests/VvCash.Tests/Fixtures/receipt-golden.json`
 - Create: `tests/VvCash.Tests/ReceiptPreviewGoldenTest.cs`
@@ -2698,9 +2706,40 @@ public class ReceiptPreviewGoldenTest
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    /// <summary>Позиции демо-продажи. СВОИ, а не GoldenItems() из байтового замка:
+    /// на тех стоят пять уже закреплённых фикстур, и добавить к ним позицию нельзя
+    /// не сдвинув байты. А позиция здесь нужна особая — с серединной суммой.
+    ///
+    /// 13.50 × 0.15 = 2.0250. Это ровно тот край, где ToString("F2") в C# (округление
+    /// от нуля) даёт 2.03, а toFixed(2) в JavaScript — 2.02. Демо-продажа из круглых
+    /// чисел сертифицировала бы паритет двух рендереров, которого на этом крае нет.</summary>
+    private static IReadOnlyList<CartItem> PreviewItems() => new[]
+    {
+        new CartItem
+        {
+            Product = new Product
+            {
+                Id = "p1", Name = "Плитка", Price = 100m,
+                UnitId = "u-1", UnitCode = "m2", UnitShortName = "м²",
+                UnitFactor = 0.24m, IsDivisible = false, SellInSecondaryUnit = true,
+            },
+            Quantity = 53m, QuantityInUnit = 12.72m, EnteredInUnit = true,
+        },
+        new CartItem
+        {
+            Product = new Product { Id = "p2", Name = "Клей", Price = 45m },
+            Quantity = 3m,
+        },
+        new CartItem
+        {
+            Product = new Product { Id = "p3", Name = "Смесь", Price = 13.50m, IsDivisible = true },
+            Quantity = 0.15m,
+        },
+    };
+
     private static SaleReceiptData DemoSale() => new(
-        SaleReceiptGoldenTest.GoldenItems(),
-        Subtotal: 5435m, Discount: 435m, Total: 5000m,
+        PreviewItems(),
+        Subtotal: 5437.03m, Discount: 435m, Total: 5002.03m,
         DiscountName: "Акция «Ремонт»",
         DocumentNumber: "A-42", WarehouseName: "Склад №1",
         SellerName: "Иванов", SaleDate: "01.09.2026 12:30");
@@ -2719,7 +2758,7 @@ public class ReceiptPreviewGoldenTest
                 template = ReceiptTemplate.Default,
                 sale = new
                 {
-                    subtotal = 5435m, discount = 435m, total = 5000m,
+                    subtotal = 5437.03m, discount = 435m, total = 5002.03m,
                     discountName = "Акция «Ремонт»", documentNumber = "A-42",
                     warehouseName = "Склад №1", sellerName = "Иванов",
                     saleDate = "01.09.2026 12:30",
@@ -2728,6 +2767,12 @@ public class ReceiptPreviewGoldenTest
                         new { name = "Плитка", quantity = "53", lineTotal = "5300.00",
                               secondaryUnit = "12.72 м²" },
                         new { name = "Клей", quantity = "3", lineTotal = "135.00",
+                              secondaryUnit = (string?)null },
+                        // Серединное значение намеренно: 13.50 × 0.15 = 2.0250 — ровно
+                        // тот край, где C# ("F2", округление от нуля) расходится с JS
+                        // toFixed(2). Без такой позиции эталон сертифицировал бы
+                        // паритет, которого нет.
+                        new { name = "Смесь", quantity = "0.15", lineTotal = "2.03",
                               secondaryUnit = (string?)null },
                     },
                 },
