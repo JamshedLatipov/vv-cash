@@ -1234,10 +1234,42 @@ public partial class PosViewModel : ViewModelBase, IDisposable
             CustomerDisplayViewModel.IsIdle = !CartItems.Any();
         }
 
-        _ = _customerDisplayService.ShowTotalAsync(TotalAmount);
+        PushToCustomerDisplay();
 
         if (!_applyingQuoteResult)
             TriggerRequote();
+    }
+
+    /// <summary>Название последнего пробитого товара — верхняя строка кадра витрины.
+    /// Живёт здесь, а не передаётся из AddToCart в отправку: изменение количества и
+    /// скидка тоже меняют итог и обязаны перерисовать кадр, а названия у них своего
+    /// нет.</summary>
+    private string _displayedItemName = string.Empty;
+
+    /// <summary>Один кадр на одно изменение корзины — и это главное, что здесь есть.
+    ///
+    /// Раньше отправок было две. AddToCart вызывал ShowItemAsync сам, а
+    /// _cartService.AddProduct поднимал CartChanged синхронно, и OnCartChanged успевал
+    /// поставить ShowTotalAsync в очередь раньше. Очередь в VfdDisplayService строго
+    /// FIFO (порядок кадров там гарантирован намеренно, см. её собственные примечания),
+    /// так что кадр товара всегда затирал итог: покупатель видел, что пробили, и не
+    /// видел, сколько должен, — итог держался ровно одну отправку в порт, ~45мс на
+    /// 9600 бод. Плюс лишнее открытие COM-порта с ESC @ на каждый скан, то есть
+    /// видимое мигание табло.
+    ///
+    /// Теперь кадр один и несёт обе половины: строка 1 — товар, строка 2 — итог по
+    /// чеку. Гонка исчезает не по счастливому порядку строк, а потому, что отправитель
+    /// остался один.</summary>
+    private void PushToCustomerDisplay()
+    {
+        // Пустая корзина — единственный момент, когда название можно и нужно забыть:
+        // иначе оно пережило бы чек и следующий начался бы с чужого товара на витрине.
+        if (!CartItems.Any())
+            _displayedItemName = string.Empty;
+
+        _ = string.IsNullOrEmpty(_displayedItemName)
+            ? _customerDisplayService.ShowTotalAsync(TotalAmount)
+            : _customerDisplayService.ShowItemAsync(_displayedItemName, TotalAmount);
     }
 
     private void TriggerRequote() => _ = RequoteSafeAsync();
@@ -1594,8 +1626,12 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         // at the checkout for a session that never lapsed.
         _sellerSession.Touch();
 
+        // Порядок обязателен. AddProduct поднимает CartChanged синхронно, кадр витрины
+        // собирается уже внутри него (OnCartChanged -> PushToCustomerDisplay) — значит
+        // название должно лежать на месте до вызова, а не после. Присвоение строкой
+        // ниже опоздало бы ровно на один скан: покупатель видел бы предыдущий товар.
+        _displayedItemName = product.Name;
         _cartService.AddProduct(product);
-        _ = _customerDisplayService.ShowItemAsync(product.Name, product.Price);
     }
 
     [RelayCommand]

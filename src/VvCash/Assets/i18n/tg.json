@@ -83,6 +83,7 @@
   "CheckDisplay": "Санҷиши дисплей",
   "DisplayCheckOk": "Сатри санҷишӣ ба дисплей фиристода шуд",
   "DisplayCheckFailed": "Санҷиши дисплей иҷро нашуд",
+  "DisplayCheckNoPort": "Порти дисплей интихоб нашудааст",
   "QueueSettings": "Навбати фармоишҳо",
   "QueueRole": "Нақш",
   "TillNumber": "Рақами касса",

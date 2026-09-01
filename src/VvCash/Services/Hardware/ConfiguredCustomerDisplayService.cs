@@ -52,7 +52,7 @@ public class ConfiguredCustomerDisplayService : ICustomerDisplayService
     }
 
     public Task<bool> ShowLineAsync(string line1, string line2) => _inner.ShowLineAsync(line1, line2);
-    public Task<bool> ShowItemAsync(string name, decimal price) => _inner.ShowItemAsync(name, price);
+    public Task<bool> ShowItemAsync(string name, decimal total) => _inner.ShowItemAsync(name, total);
     public Task<bool> ShowTotalAsync(decimal total) => _inner.ShowTotalAsync(total);
     public Task<bool> ClearAsync() => _inner.ClearAsync();
 }

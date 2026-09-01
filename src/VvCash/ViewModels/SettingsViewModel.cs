@@ -538,16 +538,30 @@ public partial class SettingsViewModel : ViewModelBase
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
 
-        ICustomerDisplayService display = string.IsNullOrWhiteSpace(CustomerDisplayPort)
-            ? new NullCustomerDisplayService()
-            : new VfdDisplayService(
-                CustomerDisplayPort,
-                // Тот же откат, что у Save чуть ниже по файлу, а не свои жёсткие
-                // 9600: иначе нечитаемое поле проверяется на одной скорости и
-                // сохраняется на другой — «проверка прошла» перестаёт значить
-                // что-либо про то, на чём касса в итоге заработает.
-                int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : _settingsService.CustomerDisplayBaudRate,
-                SelectedDisplayCodePage ?? EscPosCodePages.Default);
+        // Пустой порт — не «дисплей работает», и раньше кнопка отвечала именно так.
+        // Она строила NullCustomerDisplayService, тот по своему устройству возвращает
+        // true, и на выходе получалось зелёное «на дисплей отправлена проверочная
+        // строка» про кассу, в порт которой не уходило ни байта.
+        //
+        // Возврат true у самого Null остаётся правильным и не трогается: он держит путь
+        // продажи, где ненастроенная витрина не должна ронять чек. Ошибка была в том,
+        // что эта кнопка спрашивает другое — «дисплей отвечает?» — и обязана отличать
+        // ненастроенное от неисправного. Своё сообщение, а не DisplayCheckFailed:
+        // незаполненное поле чинится в соседней выпадашке, а не поиском обрыва в кабеле.
+        if (string.IsNullOrWhiteSpace(CustomerDisplayPort))
+        {
+            ErrorMessage = I18nService.Instance["DisplayCheckNoPort"];
+            return;
+        }
+
+        ICustomerDisplayService display = new VfdDisplayService(
+            CustomerDisplayPort,
+            // Тот же откат, что у Save чуть ниже по файлу, а не свои жёсткие
+            // 9600: иначе нечитаемое поле проверяется на одной скорости и
+            // сохраняется на другой — «проверка прошла» перестаёт значить
+            // что-либо про то, на чём касса в итоге заработает.
+            int.TryParse(CustomerDisplayBaudRateText, out var baud) && baud > 0 ? baud : _settingsService.CustomerDisplayBaudRate,
+            SelectedDisplayCodePage ?? EscPosCodePages.Default);
 
         // Своя отсечка по времени. WriteTimeout закрывает запись, но у Open()
         // таймаута нет и SerialPort его не предлагает: зависший драйвер

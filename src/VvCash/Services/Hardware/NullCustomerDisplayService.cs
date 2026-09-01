@@ -14,7 +14,7 @@ namespace VvCash.Services.Hardware;
 public class NullCustomerDisplayService : ICustomerDisplayService
 {
     public Task<bool> ShowLineAsync(string line1, string line2) => Task.FromResult(true);
-    public Task<bool> ShowItemAsync(string name, decimal price) => Task.FromResult(true);
+    public Task<bool> ShowItemAsync(string name, decimal total) => Task.FromResult(true);
     public Task<bool> ShowTotalAsync(decimal total) => Task.FromResult(true);
     public Task<bool> ClearAsync() => Task.FromResult(true);
 }
