@@ -1,5 +1,6 @@
 using Avalonia;
 using System;
+using VvCash.Services.Logging;
 using VvCash.Services.Rendering;
 
 namespace VvCash;
@@ -7,7 +8,14 @@ namespace VvCash;
 class Program
 {
     [STAThread]
-    public static void Main(string[] args) => BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    public static void Main(string[] args)
+    {
+        // Before anything else — see AppLogging.Start's own remarks for why this has to
+        // come before BuildAvaloniaApp() rather than, say, App.OnFrameworkInitializationCompleted.
+        AppLogging.Start();
+
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    }
 
     public static AppBuilder BuildAvaloniaApp()
     {
