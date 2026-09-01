@@ -77,6 +77,7 @@
   "TestPrint": "Test print",
   "TestPrintSent": "Test receipt sent",
   "TestPrintFailed": "Test print failed:",
+  "PaymentProcessedReceiptNotPrinted": "Payment processed, but the receipt was not printed.",
   "CustomerDisplay": "Customer display",
   "DisplayPort": "Port",
   "DisplayBaudRate": "Baud rate",

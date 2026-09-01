@@ -71,6 +71,23 @@ public class I18nLocaleTest
     }
 
     [Fact]
+    public void PaymentProcessedReceiptNotPrinted_ExistsInEveryLocale()
+    {
+        // PosViewModel reads this key when the sale posted but PrintReceiptAsync came
+        // back false — the one branch that used to tell the cashier "Thank you!" over a
+        // receipt that never printed. An untranslated locale would show "[key]" instead,
+        // which at least is not a false "all good", but a real translation is the point.
+        foreach (var locale in Locales)
+        {
+            var map = Load(locale);
+            Assert.True(map.ContainsKey("PaymentProcessedReceiptNotPrinted"),
+                $"{locale}.json: нет ключа PaymentProcessedReceiptNotPrinted");
+            Assert.False(string.IsNullOrWhiteSpace(map["PaymentProcessedReceiptNotPrinted"]),
+                $"{locale}.json: PaymentProcessedReceiptNotPrinted пуст");
+        }
+    }
+
+    [Fact]
     public void DisplayCheckNoPort_IsNotTheSameStringAsDisplayCheckFailed()
     {
         // Два исхода, которые чинятся в разных местах: незаполненное поле — в соседней

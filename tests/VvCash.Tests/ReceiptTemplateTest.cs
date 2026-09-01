@@ -271,6 +271,24 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void Width_ClampsAnExcessiveValue_ToTheCeiling()
+    {
+        // PadLine получает Width напрямую и строит строку такой длины, так что
+        // "width":2e9 из мусорного конфига (укладывается в int) — это не
+        // бросок на десериализации, а OutOfMemoryException в BuildSaleReceipt,
+        // и касса молча перестаёт печатать чеки. Потолок тот же, что у
+        // LineBlock.Count и FeedBlock.Lines — 200.
+        Assert.Equal(200, new ReceiptTemplate { Width = 2_000_000_000 }.Width);
+    }
+
+    [Fact]
+    public void Parse_ClampsAnExcessiveWidth_ToTheCeiling()
+    {
+        Assert.Equal(200,
+            ReceiptTemplate.Parse("""{"version":1,"width":2000000000,"blocks":[]}""").Width);
+    }
+
+    [Fact]
     public void Parse_ClampsAnEmptyLineCharAndANegativeCount()
     {
         // Тот же довод, что у Width: разбор — не единственный вход, но и не

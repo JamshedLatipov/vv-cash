@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
 using VvCash.Models.Receipt;
+using VvCash.Services.Logging;
 using VvCash.Services.Rendering;
 
 namespace VvCash.Services.Hardware;
@@ -93,8 +94,12 @@ public class EscPosPrinterService : IPrinterService
         _roles = roles;
     }
 
-    /// <summary>Собирает байты чека продажи по шаблону. Раскладка живёт в
-    /// ReceiptRenderer, байты — в EscPosEmitter; здесь остался только стык.
+    /// <summary>Собирает байты чека продажи из десяти позиционных аргументов.
+    /// Раскладка живёт в ReceiptRenderer, байты — в EscPosEmitter; эта
+    /// перегрузка только складывает аргументы в SaleReceiptData и передаёт
+    /// его перегрузке ниже. Она остаётся ради тестов и вызывающего кода,
+    /// который ещё не перешёл на запись целиком — PrintReceiptAsync такой
+    /// же намеренный долгожитель, что и BuildReturnReceipt рядом.
     ///
     /// template = null означает «шаблон с сервера не доехал» и берёт
     /// ReceiptTemplate.Default, который печатает ровно то, что печаталось до
@@ -112,6 +117,31 @@ public class EscPosPrinterService : IPrinterService
             new List<CartItem>(items), subtotal, discount, total,
             discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber);
 
+        return BuildSaleReceipt(codePage, sale, template);
+    }
+
+    /// <summary>Тот же чек, но из готовой записи — вход для вызывающего кода,
+    /// у которого SaleReceiptData уже есть целиком, а не из десяти отдельных
+    /// переменных. Заведена ради PrintKitchenOrderAsync: раньше он раскладывал
+    /// свой sale на те же десять аргументов и звал перегрузку выше, которая
+    /// тут же собирала из них новую такую же запись — круг, а не пропуск
+    /// значения, и на этом круге терялось QueueNumber самой записи, потому
+    /// что старый путь читал одноимённый позиционный параметр, а не поле
+    /// sale.QueueNumber. Через эту перегрузку запись едет до Render один раз,
+    /// без промежуточной пересборки.
+    ///
+    /// Чек продажи — единственный документ в этом файле, собранный так. Пять
+    /// остальных (пречек, талон, чек возврата, чек обмена, пробный чек) всё
+    /// ещё пишут байты сами, теми же WriteInit/Write/WriteLine и своими
+    /// строковыми литералами, что и этот метод писал до перевода на шаблон.
+    /// Это не недосмотр: план, который завёл ReceiptTemplate и рендерер, их
+    /// нарочно не трогает (см. Task 13 в плане), и EscPosEmitter держит
+    /// собственную копию CmdCancelKanji с комментарием об этом же дублировании.
+    /// Так что асимметрия — текущая граница объёма этой работы, а не
+    /// промежуточное состояние с известной датой закрытия; перевод остальных
+    /// пяти — отдельная, пока не заведённая задача.</summary>
+    public static byte[] BuildSaleReceipt(EscPosCodePage codePage, SaleReceiptData sale, ReceiptTemplate? template = null)
+    {
         return EscPosEmitter.Emit(
             ReceiptRenderer.Render(template ?? ReceiptTemplate.Default, sale),
             codePage);
@@ -173,7 +203,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -238,7 +269,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Pre-receipt print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Pre-receipt print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -254,7 +286,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ticket print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Ticket print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -264,15 +297,20 @@ public class EscPosPrinterService : IPrinterService
     {
         try
         {
-            await SendAsync(BuildSaleReceipt(_codePage, sale.Items, sale.Subtotal, sale.Discount, sale.Total,
-                sale.DiscountName, sale.DocumentNumber, sale.WarehouseName, sale.SellerName, sale.SaleDate,
-                queueNumber));
+            // sale with { QueueNumber = queueNumber }, а не sale.Items/.Subtotal/…
+            // разложенные по позиционным аргументам BuildSaleReceipt: тот путь
+            // собирал внутри себя новую SaleReceiptData и никогда не читал
+            // sale.QueueNumber, так что любое значение этого поля молча
+            // пропадало. With-выражение несёт запись целиком дальше одним
+            // объектом, с бегунком в ней.
+            await SendAsync(BuildSaleReceipt(_codePage, sale with { QueueNumber = queueNumber }));
             SetStatus(PrinterStatus.Ready);
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Kitchen order print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Kitchen order print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -502,7 +540,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Return receipt print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Return receipt print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -584,7 +623,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Exchange receipt print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Exchange receipt print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }

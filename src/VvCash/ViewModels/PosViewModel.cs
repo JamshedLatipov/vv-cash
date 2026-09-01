@@ -2404,7 +2404,13 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         // than posted — it has no number until it syncs — and the seller
                         // is absent on a register with switching off. The receipt prints
                         // neither line in those cases rather than an empty label.
-                        await _printerService.PrintReceiptAsync(
+                        //
+                        // The result is kept, not discarded: the payment already went
+                        // through by this point (outcome.Posted/Queued above), so a print
+                        // failure here cannot roll it back — only StatusMessage below can
+                        // still tell the cashier the paper did not come out, instead of the
+                        // success line that used to print regardless.
+                        var receiptPrinted = await _printerService.PrintReceiptAsync(
                             _cartService.Items,
                             Subtotal, TotalDiscount, TotalAmount,
                             _cartService.AppliedCoupons,
@@ -2518,7 +2524,9 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         // already carries this seller's id — from here on nobody is
                         // confirmed. Only on this success branch: see EndReceipt.
                         EndReceipt();
-                        StatusMessage = "Payment processed. Thank you!";
+                        StatusMessage = receiptPrinted
+                            ? "Payment processed. Thank you!"
+                            : I18nService.Instance["PaymentProcessedReceiptNotPrinted"];
 
                         if (CustomerDisplayViewModel != null && IsCustomerDisplayEnabled)
                         {

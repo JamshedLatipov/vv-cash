@@ -46,11 +46,22 @@ public class EscPosUnitTest
     [Fact]
     public void Receipt_IsUnchanged_ForAPieceOnlyLine()
     {
-        var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 2m };
+        // QuantityInUnit is set to a number that could only reach the paper through
+        // the secondary-unit sub-line, even though the product is piece-only
+        // (empty UnitId, so HasSecondaryUnit is false) and that line must not print.
+        // The assertion used to be Assert.DoesNotContain("м²", text): CP866 has no
+        // superscript two, so the glyph always comes out as "м?" and the check was
+        // true whether or not the sub-line printed — it could never fail.
+        var line = new CartItem
+        {
+            Product = new Product { Id = "p2", Name = "Товар", Price = 10m },
+            Quantity = 2m,
+            QuantityInUnit = 77.5m,
+        };
 
         var text = Render(new[] { line });
 
-        Assert.DoesNotContain("м²", text);
+        Assert.DoesNotContain("77.5", text);
         Assert.Contains("Товар x2", text);
     }
 
@@ -97,6 +108,12 @@ public class EscPosUnitTest
     {
         // An offline sale has no document number yet, and a register with seller
         // switching off has no seller to name. Neither may print an empty label.
+        //
+        // The labels themselves ("Doc #", "Seller:", "Whse:") live in
+        // ReceiptTemplate.Default's FieldsBlock now, not in this method's own
+        // literals — SaleReceiptGoldenTest is what guards their exact text. This
+        // test only guards the behaviour that survived the move: an absent field
+        // is omitted rather than printed with an empty value.
         var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 1m };
 
         var text = Render(new[] { line });
@@ -104,6 +121,24 @@ public class EscPosUnitTest
         Assert.DoesNotContain("Doc #", text);
         Assert.DoesNotContain("Seller:", text);
         Assert.DoesNotContain("Whse:", text);
+    }
+
+    [Fact]
+    public void BuildSaleReceipt_FromARecord_PrintsTheRecordsOwnQueueNumber()
+    {
+        // Task 6 review, finding 3: PrintKitchenOrderAsync used to hand this record's
+        // fields to the ten-argument overload one by one and let a *separate*
+        // queueNumber parameter win, so whatever sat in sale.QueueNumber itself never
+        // reached the paper — it was silently overridden every time. This overload is
+        // what a caller with a SaleReceiptData already in hand uses instead, and it must
+        // print exactly the QueueNumber the record carries, with no reassembly in between.
+        var line = new CartItem { Product = new Product { Id = "p2", Name = "Товар", Price = 10m }, Quantity = 1m };
+        var sale = new SaleReceiptData(new[] { line }, 10m, 0m, 10m, QueueNumber: "999");
+
+        var text = EscPosCodePages.Cp866.Encoding.GetString(
+            EscPosPrinterService.BuildSaleReceipt(EscPosCodePages.Cp866, sale));
+
+        Assert.Contains("# 999", text);
     }
 
     // -------------------------------------------------------------------------------

@@ -11,12 +11,16 @@ namespace VvCash.Models;
 /// нулевого выигрыша; новый код берёт запись, старый остаётся как есть.</summary>
 /// <param name="QueueNumber">Номер бегунка на кухню. Пусто на клиентском чеке —
 /// блок с подстановкой {queue} тогда не печатается, ровно как решено спекой.</param>
-/// <remarks>QueueNumber пока не заполняется никем: живой путь через
-/// PrintKitchenOrderAsync/BuildSaleReceipt(queueNumber:) ещё не переведён на
-/// шаблон и рендерер. Заполнит задача, которая схлопнёт этот путь до
-/// Emit(Render(...)). До тех пор отказ немой: пустая строка читается правилом
-/// пустой подстановки как «поле не заполнено», без ошибки и без строки в лог,
-/// ровно как для DocumentNumber у офлайновой продажи.</remarks>
+/// <remarks>Заполняется PrintKitchenOrderAsync через
+/// <c>sale with { QueueNumber = queueNumber }</c> перед вызовом
+/// BuildSaleReceipt(EscPosCodePage, SaleReceiptData, ReceiptTemplate?) — не
+/// раскладкой записи на десять позиционных аргументов и сборкой новой такой
+/// же внутри BuildSaleReceipt, как было раньше: тот путь читал явный параметр
+/// queueNumber и вообще не заглядывал в это поле записи, так что любое
+/// значение, уже лежавшее в QueueNumber у переданного sale, молча
+/// перебивалось. Пустая строка по-прежнему читается правилом пустой
+/// подстановки как «поле не заполнено», без ошибки и без строки в лог, ровно
+/// как для DocumentNumber у офлайновой продажи.</remarks>
 public sealed record SaleReceiptData(
     IReadOnlyList<CartItem> Items,
     decimal Subtotal,
