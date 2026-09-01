@@ -564,4 +564,73 @@ public class SyncServiceTest
         Assert.True(requests <= SyncService.MaxPages + 1,
             $"expected the walk to stop at the page ceiling ({SyncService.MaxPages}), saw {requests} requests");
     }
+
+    private const string ConfigOk = """
+    {"status":0,"body":[{"id":"g1","name":"Чек","options":[
+      {"id":"o1","name":"receiptTemplate","description":"","value":"{\"version\":1,\"width\":42,\"blocks\":[]}",
+       "code":"receipt_template","value_type":"json"}]}]}
+    """;
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_CachesTheRawValue_OnSuccess()
+    {
+        var storage = new FakeStorage();
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, ConfigOk)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Contains("\"width\":42", storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_KeepsTheCache_OnAnHttpFailure()
+    {
+        // Потеря эндпоинта не должна откатывать магазин на дефолтный чек.
+        var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.InternalServerError, "")), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Contains("\"width\":48", storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_KeepsTheCache_OnANegativeBackendStatus()
+    {
+        var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, """{"status":-1,"body":null}""")), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Contains("\"width\":48", storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_KeepsTheCache_WhenTheOptionIsAbsent()
+    {
+        // Тенант, где миграция ещё не прогнана: опции с этим кодом просто нет.
+        var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, """{"status":0,"body":[]}""")), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Contains("\"width\":48", storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_IgnoresAnOptionWithAnEmptyCode()
+    {
+        // Каждая опция, засеянная до 20260728000800, приезжает с code = "" —
+        // сегодня их два десятка. Совпадение по пустой строке склеило бы их все.
+        var body = """
+        {"status":0,"body":[{"id":"g1","name":"Прочее","options":[
+          {"id":"o9","name":"storeName","description":"","value":"Лавка","code":"","value_type":"string"}]}]}
+        """;
+        var storage = new FakeStorage();
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Equal(string.Empty, storage.ReceiptTemplate);
+    }
 }

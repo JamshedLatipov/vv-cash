@@ -79,6 +79,20 @@ public partial class App : Application
             // one at startup.
             _queueServerHost = Services.GetRequiredService<QueueServerHost>();
 
+            // Шаблон читается из кэша один раз на старте и заново после каждой
+            // успешной синхронизации. Подписка на ProductsSynced, а не инъекция
+            // службы в PosViewModel: у той вью-модели полтора десятка мест
+            // построения в тестах, и ещё один параметр конструктора обошёлся бы
+            // дороже, чем эта строка.
+            //
+            // GetAwaiter().GetResult() вместо await: OnFrameworkInitializationCompleted
+            // не async, а RefreshAsync читает только локальный SQLite — миллисекунды,
+            // окно этим не задержит.
+            var receiptTemplates = Services.GetRequiredService<IReceiptTemplateService>();
+            receiptTemplates.RefreshAsync().GetAwaiter().GetResult();
+            Services.GetRequiredService<ISyncService>().ProductsSynced +=
+                async (_, _) => await receiptTemplates.RefreshAsync();
+
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
 
@@ -326,6 +340,7 @@ public partial class App : Application
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
         services.AddSingleton<ICashFeatureService, CashFeatureService>();
+        services.AddSingleton<IReceiptTemplateService, ReceiptTemplateService>();
         services.AddSingleton<ISessionContext, SessionContext>();
 
         // SellerSession's parameterless constructor is a test/manual-usage
@@ -422,7 +437,14 @@ public partial class App : Application
         services.AddHttpClient<IQuoteService, QuoteService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // Hardware Services
-        services.AddSingleton<IPrinterService, CompositePrinterService>();
+        // Фабрика, а не регистрация по типу: составу принтеров нужен поставщик
+        // шаблона. Поставщик, а не значение — шаблон приезжает синхронизацией в
+        // произвольный момент и читается в момент печати, поэтому его смена
+        // состав принтеров не пересобирает.
+        services.AddSingleton<IPrinterService>(sp => new CompositePrinterService(
+            sp.GetRequiredService<ISettingsService>(),
+            printerFactory: null,
+            template: () => sp.GetRequiredService<IReceiptTemplateService>().Current));
         services.AddSingleton<ICustomerDisplayService, ConfiguredCustomerDisplayService>();
 
         // Queue Services (Task 22/23). QueueStorage gets a factory rather than a type
