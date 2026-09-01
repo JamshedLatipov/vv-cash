@@ -432,6 +432,10 @@ public class PosViewModelSellerGateTest
         public Task<MoneyPolicy> GetMoneyPolicyAsync() => Task.FromResult(MoneyPolicy.Default);
         public Task SaveCashFeaturesAsync(CashFeatures features) => Task.CompletedTask;
         public Task<CashFeatures> GetCashFeaturesAsync() => Task.FromResult(CashFeatures.Default);
+        public Task SaveReceiptTemplateAsync(string raw) => Task.CompletedTask;
+        public Task<string> GetReceiptTemplateAsync() => Task.FromResult(string.Empty);
+        public Task SaveReceiptLogoAsync(string base64) => Task.CompletedTask;
+        public Task<string> GetReceiptLogoAsync() => Task.FromResult(string.Empty);
         public Task SetLastSyncVersionAsync(int version) => Task.CompletedTask;
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult(Enumerable.Empty<KeyValuePair<string, string>>());

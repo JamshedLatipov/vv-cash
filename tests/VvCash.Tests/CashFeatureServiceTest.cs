@@ -25,6 +25,11 @@ public class CashFeatureServiceTest
 
         public Task<CashFeatures> GetCashFeaturesAsync() => Task.FromResult(Returns ?? CashFeatures.Default);
 
+        public Task SaveReceiptTemplateAsync(string raw) => Task.CompletedTask;
+        public Task<string> GetReceiptTemplateAsync() => Task.FromResult(string.Empty);
+        public Task SaveReceiptLogoAsync(string base64) => Task.CompletedTask;
+        public Task<string> GetReceiptLogoAsync() => Task.FromResult(string.Empty);
+
         public Task SaveProductsAsync(IEnumerable<Product> products) => Task.CompletedTask;
         public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());
         public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string categoryId) => Task.FromResult<IEnumerable<Product>>(Array.Empty<Product>());

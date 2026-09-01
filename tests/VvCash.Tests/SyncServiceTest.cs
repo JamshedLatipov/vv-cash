@@ -79,6 +79,14 @@ public class SyncServiceTest
         public Task<CashFeatures> GetCashFeaturesAsync()
             => Task.FromResult(SavedCashFeatures ?? CashFeatures.Default);
 
+        public string ReceiptTemplate = string.Empty;
+        public string ReceiptLogo = string.Empty;
+
+        public Task SaveReceiptTemplateAsync(string raw) { ReceiptTemplate = raw; return Task.CompletedTask; }
+        public Task<string> GetReceiptTemplateAsync() => Task.FromResult(ReceiptTemplate);
+        public Task SaveReceiptLogoAsync(string base64) { ReceiptLogo = base64; return Task.CompletedTask; }
+        public Task<string> GetReceiptLogoAsync() => Task.FromResult(ReceiptLogo);
+
         public Task SaveProductsAsync(IEnumerable<Product> products)
         {
             SavedProducts.AddRange(products);

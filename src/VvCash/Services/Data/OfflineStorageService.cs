@@ -819,6 +819,42 @@ public class OfflineStorageService : IOfflineStorageService
         return CashFeatures.Default;
     }
 
+    public Task SaveReceiptTemplateAsync(string raw) => SaveSettingAsync("ReceiptTemplate", raw);
+
+    public Task<string> GetReceiptTemplateAsync() => GetSettingAsync("ReceiptTemplate");
+
+    public Task SaveReceiptLogoAsync(string base64) => SaveSettingAsync("ReceiptLogo", base64);
+
+    public Task<string> GetReceiptLogoAsync() => GetSettingAsync("ReceiptLogo");
+
+    private async Task SaveSettingAsync(string key, string value)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO Settings (Key, Value) VALUES ($Key, $Value)
+            ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value;
+        ";
+        command.Parameters.AddWithValue("$Key", key);
+        command.Parameters.AddWithValue("$Value", value);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<string> GetSettingAsync(string key)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM Settings WHERE Key = $Key";
+        command.Parameters.AddWithValue("$Key", key);
+
+        return await command.ExecuteScalarAsync() as string ?? string.Empty;
+    }
+
     public async Task SetLastSyncVersionAsync(int version)
     {
         using var connection = new SqliteConnection(_connectionString);

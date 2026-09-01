@@ -37,6 +37,17 @@ public interface IOfflineStorageService
     Task SaveCashFeaturesAsync(CashFeatures features);
     Task<CashFeatures> GetCashFeaturesAsync();
 
+    /// <summary>Сырое значение опции receipt_template, как его вернул сервер.
+    /// Именно сырое, а не разобранное: разбор — дело ReceiptTemplate.Parse, и
+    /// держать его в двух местах незачем. Пусто — шаблон никогда не приезжал.</summary>
+    Task SaveReceiptTemplateAsync(string raw);
+    Task<string> GetReceiptTemplateAsync();
+
+    /// <summary>Растровый логотип в base64, уже сведённый в один бит бэкофисом.
+    /// Отдельно от шаблона: 7–8 КБ не должны ездить внутри каждого шаблона.</summary>
+    Task SaveReceiptLogoAsync(string base64);
+    Task<string> GetReceiptLogoAsync();
+
     Task SetLastSyncVersionAsync(int version);
     Task SaveUnsyncedDocumentAsync(string hash, string payload);
     Task<IEnumerable<System.Collections.Generic.KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync();
