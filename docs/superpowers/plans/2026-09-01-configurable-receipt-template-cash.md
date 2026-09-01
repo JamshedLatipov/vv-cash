@@ -744,6 +744,16 @@ public class ReceiptTemplateTest
     }
 
     [Fact]
+    public void Width_ClampsANonPositiveValue_WhateverTheEntryPoint()
+    {
+        // Кламп живёт в сеттере именно затем, чтобы объектный инициализатор его не
+        // обошёл: разбор JSON — не единственный вход, так пишут и тесты, и код.
+        Assert.Equal(32, new ReceiptTemplate { Width = 0 }.Width);
+        Assert.Equal(32, new ReceiptTemplate { Width = -5 }.Width);
+        Assert.Equal(42, new ReceiptTemplate { Width = 42 }.Width);
+    }
+
+    [Fact]
     public void Default_IsThirtyTwoColumnsWide()
     {
         Assert.Equal(32, ReceiptTemplate.Default.Width);
@@ -920,11 +930,23 @@ public sealed class ReceiptTemplate
 
     /// <summary>Колонок ленты: 32 на 58 мм, 42–48 на 80 мм.
     ///
-    /// Разбор клампит это значение к положительному (см. Parse). Валидация живёт
-    /// там, а не в ReceiptText: ноль или отрицательное из JSON ведут себя в
-    /// помощниках несогласованно — Truncate(s, 0) молча съедает название акции,
-    /// Truncate(s, -1) бросает. Один вход для проверки лучше двух.</summary>
-    public int Width { get; set; } = 32;
+    /// Кламп в СЕТТЕРЕ, а не в Parse: разбор — не единственный вход. Объектный
+    /// инициализатор (`new ReceiptTemplate { Width = ... }`) прошёл бы мимо
+    /// проверки в Parse молча, а так пишут и тесты этого плана, и рано или поздно
+    /// напишет боевой код.
+    ///
+    /// Проверка нужна потому, что непроверенная ширина ведёт себя в помощниках
+    /// несогласованно: Truncate(s, 0) молча съедает название акции, а
+    /// Truncate(s, -1) бросает. Сам ReceiptText при этом остаётся без ветвлений —
+    /// он объявлен контрактом для TS-двойника, и каждая ветка внутри него это
+    /// ветка, которую двойник обязан повторить.</summary>
+    private int _width = 32;
+
+    public int Width
+    {
+        get => _width;
+        set => _width = value > 0 ? value : 32;
+    }
 
     public List<ReceiptBlock> Blocks { get; set; } = new();
 
@@ -964,12 +986,10 @@ public sealed class ReceiptTemplate
             }
             node["blocks"] = kept;
 
-            var template = JsonSerializer.Deserialize<ReceiptTemplate>(node.ToJsonString(), Options) ?? Default;
-            // Ширина приезжает из JSON и может быть нулём или отрицательной. Кламп
-            // здесь, на границе разбора недоверенных данных, а не в ReceiptText —
-            // см. комментарий у Width.
-            if (template.Width <= 0) template.Width = 32;
-            return template;
+            // Ширина из JSON может быть нулём или отрицательной — её клампит сеттер
+            // Width, через который проходит и десериализация. Отдельной проверки
+            // здесь нет намеренно: она была бы вторым местом с той же политикой.
+            return JsonSerializer.Deserialize<ReceiptTemplate>(node.ToJsonString(), Options) ?? Default;
         }
         catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException)
         {
