@@ -391,6 +391,35 @@ public class SettingsViewModelTest
         Assert.True(settings.CustomerDisplayDtrRts);
     }
 
+    [Theory]
+    [InlineData("AvailableDisplayProtocols")]
+    [InlineData("SelectedDisplayProtocol")]
+    [InlineData("AvailableDisplayFramings")]
+    [InlineData("SelectedDisplayFraming")]
+    [InlineData("CustomerDisplayDtrRts")]
+    [InlineData("IsProbing")]
+    [InlineData("ProbeStatus")]
+    [InlineData("ProbeNumberText")]
+    [InlineData("ProbeDisplayCommand")]
+    [InlineData("StopProbeCommand")]
+    [InlineData("ApplyProbeNumberCommand")]
+    public void SettingsViewBindingPaths_ResolveOnTheViewModel(string path)
+    {
+        // AvaloniaUseCompiledBindingsByDefault выключен, то есть привязки в этом
+        // проекте рефлективные: опечатка в пути собирается начисто и молча даёт
+        // пустую выпадашку или мёртвую кнопку, а не ошибку. Каждый путь, добавленный
+        // в блок дисплея на SettingsView.axaml, перечислен здесь — это единственное
+        // место, где такая опечатка вообще может упасть до попадания на кассу.
+        //
+        // Свойства команд генерирует CommunityToolkit из [RelayCommand], поэтому в
+        // исходнике их grep-ом не найти, и проверка именно отражением, а не поиском
+        // по тексту.
+        var property = typeof(SettingsViewModel).GetProperty(path);
+
+        Assert.NotNull(property);
+        Assert.True(property!.GetMethod?.IsPublic, $"{path} не читается привязкой");
+    }
+
     [Fact]
     public async Task Probe_WalksTheWholePlanAndClearsItsFlagAtTheEnd()
     {
