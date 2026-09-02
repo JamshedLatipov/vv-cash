@@ -1,0 +1,155 @@
+{
+  "rendererVersion": 1,
+  "template": {
+    "version": 1,
+    "width": 32,
+    "blocks": [
+      {
+        "type": "text",
+        "content": "VV CASH POS",
+        "bold": false,
+        "doubleSize": true,
+        "enabled": true,
+        "align": "center"
+      },
+      {
+        "type": "text",
+        "content": "# {queue}",
+        "bold": true,
+        "doubleSize": true,
+        "enabled": true,
+        "align": "center"
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "key": "doc",
+            "label": "Doc #"
+          },
+          {
+            "key": "date",
+            "label": ""
+          },
+          {
+            "key": "warehouse",
+            "label": "Whse: "
+          },
+          {
+            "key": "seller",
+            "label": "Seller: "
+          }
+        ],
+        "enabled": true,
+        "align": "center"
+      },
+      {
+        "type": "line",
+        "char": "-",
+        "count": 28,
+        "enabled": true,
+        "align": "center"
+      },
+      {
+        "type": "items",
+        "showUnitPrice": false,
+        "showSku": false,
+        "showBarcode": false,
+        "showSecondaryUnit": true,
+        "showLineDiscount": false,
+        "lineDiscountLabel": "Discount:",
+        "enabled": true,
+        "align": "left"
+      },
+      {
+        "type": "line",
+        "char": "-",
+        "count": 28,
+        "enabled": true,
+        "align": "left"
+      },
+      {
+        "type": "totals",
+        "showSubtotal": true,
+        "subtotalLabel": "Subtotal:",
+        "showDiscount": true,
+        "discountLabel": "Discount:",
+        "showDiscountName": true,
+        "totalLabel": "TOTAL:",
+        "boldTotal": true,
+        "enabled": true,
+        "align": "left"
+      },
+      {
+        "type": "line",
+        "char": "-",
+        "count": 28,
+        "enabled": true,
+        "align": "left"
+      },
+      {
+        "type": "text",
+        "content": "Thank you for shopping!",
+        "bold": false,
+        "doubleSize": false,
+        "enabled": true,
+        "align": "center"
+      },
+      {
+        "type": "feed",
+        "lines": 2,
+        "enabled": true,
+        "align": "center"
+      }
+    ]
+  },
+  "sale": {
+    "subtotal": 5437.03,
+    "discount": 435,
+    "total": 5002.03,
+    "discountName": "Акция «Ремонт»",
+    "documentNumber": "A-42",
+    "warehouseName": "Склад №1",
+    "sellerName": "Иванов",
+    "saleDate": "01.09.2026 12:30",
+    "items": [
+      {
+        "name": "Плитка",
+        "quantity": "53",
+        "lineTotal": "5300.00",
+        "secondaryUnit": "12.72 м²"
+      },
+      {
+        "name": "Клей",
+        "quantity": "3",
+        "lineTotal": "135.00",
+        "secondaryUnit": null
+      },
+      {
+        "name": "Смесь",
+        "quantity": "0.15",
+        "lineTotal": "2.03",
+        "secondaryUnit": null
+      }
+    ]
+  },
+  "expectedLines": [
+    "VV CASH POS",
+    "Doc #A-42",
+    "01.09.2026 12:30",
+    "Whse: Склад №1",
+    "Seller: Иванов",
+    "----------------------------",
+    "Плитка x53               5300.00",
+    "    12.72 м²",
+    "Клей x3                   135.00",
+    "Смесь x0.15                 2.03",
+    "----------------------------",
+    "Subtotal:                5437.03",
+    "Discount:                -435.00",
+    "Акция «Ремонт»",
+    "TOTAL:                   5002.03",
+    "----------------------------",
+    "Thank you for shopping!"
+  ]
+}
