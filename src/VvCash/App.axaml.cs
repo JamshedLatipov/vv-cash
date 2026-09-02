@@ -457,7 +457,7 @@ public partial class App : Application
         services.AddSingleton<IPrinterService>(sp => new CompositePrinterService(
             sp.GetRequiredService<ISettingsService>(),
             printerFactory: null,
-            template: () => sp.GetRequiredService<IReceiptTemplateService>().Current));
+            template: () => sp.GetRequiredService<IReceiptTemplateService>().CurrentTemplateAndLogo));
         services.AddSingleton<ICustomerDisplayService, ConfiguredCustomerDisplayService>();
 
         // Queue Services (Task 22/23). QueueStorage gets a factory rather than a type

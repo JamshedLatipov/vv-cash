@@ -19,7 +19,7 @@ public class EscPosPrinterService : IPrinterService
     private readonly string _connectionString;
     private readonly EscPosCodePage _codePage;
     private readonly PrintRole _roles;
-    private readonly Func<ReceiptTemplate> _template;
+    private readonly Func<(ReceiptTemplate Template, string Logo)> _template;
     private PrinterStatus _status = PrinterStatus.Ready;
 
     public PrinterStatus Status => _status;
@@ -88,9 +88,18 @@ public class EscPosPrinterService : IPrinterService
 
     /// <param name="template">Поставщик, а не значение: шаблон приезжает
     /// синхронизацией в произвольный момент, и читать его надо в момент печати.
-    /// Иначе новый шаблон ждал бы перезапуска кассы. Null — печатать дефолтом;
-    /// служба, собранная на экране настроек ради пробной печати, шаблон не
-    /// использует вовсе.
+    /// Иначе новый шаблон ждал бы перезапуска кассы. Null — печатать дефолтом
+    /// без логотипа; служба, собранная на экране настроек ради пробной печати,
+    /// шаблон не использует вовсе.
+    ///
+    /// Пара (Template, Logo), а не один Template: логотип живёт в отдельной
+    /// опции конфига (receipt_logo) и обязан ехать до рендерера вместе с
+    /// шаблоном, но одним поколением — см. ReceiptTemplateService.Snapshot и
+    /// её CurrentTemplateAndLogo. Поставщик здесь обязан отдавать оба значения
+    /// ЗА ОДНО обращение к своему источнику: `() => (t.Current, t.Logo)` читал
+    /// бы источник дважды и мог бы вернуть шаблон одного поколения с
+    /// логотипом другого — ровно ту рассинхронизацию, которую снимок
+    /// ReceiptTemplateService чинит внутри себя.
     ///
     /// Контракт вызова — три требования, и все жёсткие:
     /// - дешёвый и неблокирующий, без ввода-вывода и без разбора JSON на каждый
@@ -109,33 +118,33 @@ public class EscPosPrinterService : IPrinterService
     ///   подсунуть на печать общий изменяемый экземпляр.</param>
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
         EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt,
-        Func<ReceiptTemplate>? template = null)
+        Func<(ReceiptTemplate Template, string Logo)>? template = null)
     {
         _connectionType = connectionType;
         _connectionString = connectionString;
         _codePage = codePage;
         _roles = roles;
-        _template = template ?? (() => ReceiptTemplate.Default);
+        _template = template ?? (() => (ReceiptTemplate.Default, string.Empty));
     }
 
     /// <summary>Чек этого принтера, собранный по действующему шаблону. Экземплярный
     /// в отличие от статического BuildSaleReceipt: шаблон — свойство принтера, а
     /// не аргумента вызова.
     ///
-    /// Зовёт статическую перегрузку по десяти аргументам ниже с _template()
-    /// последним параметром, а не собирает SaleReceiptData здесь заново: та
-    /// перегрузка уже делает ровно эту сборку (см. её комментарий), и повторять
-    /// её байт-в-байт в этом методе — значит держать два места, которые обязаны
-    /// перечислять одни и те же десять полей в одном и том же порядке и разойдутся
-    /// на первой же правке одного без другого. Порядок полей на этом стыке держит
+    /// Складывает аргументы в SaleReceiptData и зовёт перегрузку ниже, а не
+    /// сам поставщик шаблона: _template() читается там ровно один раз, и
+    /// звать его ещё раз здесь означало бы два отдельных обращения к
+    /// поставщику на одну печать — тот же довод, по которому его контракт
+    /// требует "потокобезопасный и дешёвый", а не "бесплатный и вызываемый
+    /// сколько угодно раз". Порядок полей на этом стыке держит
     /// ReceiptTemplateWiringTest.BuildConfiguredSaleReceipt_PlacesWarehouseAndSellerInTheirOwnFields —
     /// перестановка warehouseName/sellerName красит его в красный.</summary>
     public byte[] BuildConfiguredSaleReceipt(IEnumerable<CartItem> items,
         decimal subtotal, decimal discount, decimal total,
         string? discountName = null, string? documentNumber = null, string? warehouseName = null,
         string? sellerName = null, string? saleDate = null, string? queueNumber = null)
-        => BuildSaleReceipt(_codePage, items, subtotal, discount, total,
-            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber, _template());
+        => BuildConfiguredSaleReceipt(new SaleReceiptData(new List<CartItem>(items), subtotal, discount, total,
+            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber));
 
     /// <summary>Та же сборка, но из готовой записи — вход для PrintKitchenOrderAsync.
     /// Не перегрузка выше плюс раскладка sale на десять аргументов: у
@@ -146,7 +155,10 @@ public class EscPosPrinterService : IPrinterService
     /// молча перебивалось бы. Эта перегрузка передаёт запись как есть, без
     /// промежуточной пересборки.</summary>
     public byte[] BuildConfiguredSaleReceipt(SaleReceiptData sale)
-        => BuildSaleReceipt(_codePage, sale, _template());
+    {
+        var (template, logo) = _template();
+        return BuildSaleReceipt(_codePage, sale, template, logo);
+    }
 
     /// <summary>Собирает байты чека продажи из десяти позиционных аргументов.
     /// Раскладка живёт в ReceiptRenderer, байты — в EscPosEmitter; эта
@@ -206,11 +218,18 @@ public class EscPosPrinterService : IPrinterService
     /// сегодня единственный вызывающий (PrintKitchenOrderAsync) уже получает
     /// свой sale с items, снятыми через .ToList() выше по стеку, но по
     /// другой причине — ClearCart() очищает корзину раньше, чем письмо
-    /// успевает уйти в очередь.</summary>
-    public static byte[] BuildSaleReceipt(EscPosCodePage codePage, SaleReceiptData sale, ReceiptTemplate? template = null)
+    /// успевает уйти в очередь.
+    ///
+    /// logo — новый последний параметр со значением по умолчанию null:
+    /// каждый существующий вызывающий этой перегрузки (тесты в первую очередь)
+    /// продолжает собирать чек без логотипа, ничего не меняя в своём коде;
+    /// его передаёт только BuildConfiguredSaleReceipt(SaleReceiptData), уже
+    /// распаковавший пару (Template, Logo) из поставщика.</summary>
+    public static byte[] BuildSaleReceipt(EscPosCodePage codePage, SaleReceiptData sale,
+        ReceiptTemplate? template = null, string? logo = null)
     {
         return EscPosEmitter.Emit(
-            ReceiptRenderer.Render(template ?? ReceiptTemplate.Default, sale),
+            ReceiptRenderer.Render(template ?? ReceiptTemplate.Default, sale, logo),
             codePage);
     }
 

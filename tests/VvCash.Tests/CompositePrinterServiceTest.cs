@@ -170,7 +170,7 @@ public class CompositePrinterServiceTest
         };
 
         var current = ReceiptTemplate.Default;
-        var composite = new CompositePrinterService(settings, template: () => current);
+        var composite = new CompositePrinterService(settings, template: () => (current, ""));
 
         // Меняем шаблон ПОСЛЕ сборки состава — свойство, ради которого поставщик
         // вообще заведён: состав принтеров не пересобирается на смену шаблона, а

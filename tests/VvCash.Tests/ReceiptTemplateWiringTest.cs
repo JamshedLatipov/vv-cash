@@ -17,7 +17,7 @@ public class ReceiptTemplateWiringTest
         var current = ReceiptTemplate.Default;
         var printer = new EscPosPrinterService(
             PrinterConnectionType.LAN, "127.0.0.1:9100",
-            EscPosCodePages.Cp866, PrintRole.Receipt, () => current);
+            EscPosCodePages.Cp866, PrintRole.Receipt, () => (current, ""));
 
         current = new ReceiptTemplate
         {

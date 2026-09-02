@@ -699,6 +699,7 @@ public class PosViewModelSellerGateTest
     {
         public ReceiptTemplate Current { get; set; } = ReceiptTemplate.Default;
         public string Logo { get; set; } = string.Empty;
+        public (ReceiptTemplate Template, string Logo) CurrentTemplateAndLogo => (Current, Logo);
         public int RefreshCallCount { get; private set; }
 
         public Task RefreshAsync()

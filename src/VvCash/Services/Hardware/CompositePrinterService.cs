@@ -48,9 +48,12 @@ public class CompositePrinterService : IPrinterService
     /// собранному принтеру. Своя фабрика целиком отвечает за то, какой
     /// поставщик достанется собранному ею EscPosPrinterService, ровно как
     /// сегодня отвечает за CodePage и Roles.</summary>
-    /// <param name="template">Поставщик шаблона чека для принтеров фабрики по
-    /// умолчанию. Отдаётся каждому принтеру как есть — читается он в момент
-    /// печати, поэтому смена шаблона состава не пересобирает.
+    /// <param name="template">Поставщик шаблона и логотипа чека для принтеров
+    /// фабрики по умолчанию — пара (Template, Logo), а не один Template: см.
+    /// одноимённый параметр EscPosPrinterService(...) о том, почему это
+    /// именно пара за одно чтение источника, а не `() => (t.Current, t.Logo)`.
+    /// Отдаётся каждому принтеру как есть — читается он в момент печати,
+    /// поэтому смена шаблона состава не пересобирает.
     ///
     /// Контракт тот же, что у одноимённого параметра
     /// EscPosPrinterService(...): дешёвый и неблокирующий, без ввода-вывода и
@@ -61,7 +64,7 @@ public class CompositePrinterService : IPrinterService
     /// того параметра — там же цифры замера и причина требования).</param>
     public CompositePrinterService(ISettingsService settingsService,
         Func<PrinterConfig, EscPosPrinterService>? printerFactory = null,
-        Func<ReceiptTemplate>? template = null)
+        Func<(ReceiptTemplate Template, string Logo)>? template = null)
     {
         _settingsService = settingsService;
         _factory = printerFactory ?? (config => new EscPosPrinterService(

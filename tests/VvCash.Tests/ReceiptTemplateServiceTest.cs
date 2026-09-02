@@ -191,6 +191,58 @@ public class ReceiptTemplateServiceTest : IDisposable
         Assert.Equal("LOGO-B", svc.Logo);
     }
 
+    [Fact]
+    public async Task RefreshAsync_CurrentTemplateAndLogo_NeverExposesATornPairToAReaderMidUpdate()
+    {
+        // Тот же приём и та же подделка хранилища, что у
+        // RefreshAsync_NeverExposesATornPairToAReaderMidUpdate выше, но нацелен
+        // на CurrentTemplateAndLogo — единственный член, которым Task 11
+        // читает поставщик шаблона в EscPosPrinterService/CompositePrinterService.
+        //
+        // Тот тест уже доказывает, что сам _snapshot публикуется атомарно.
+        // Этот проверяет вторую половину: что публичный accessor,
+        // который отдаёт пару наружу, читает _snapshot РОВНО ОДИН раз, а не
+        // собирает кортеж как `(Current, Logo)` -- два отдельных обращения к
+        // снимку, между которыми завершившийся RefreshAsync подсунул бы
+        // половинки разных поколений. Именно эту регрессию предупреждает
+        // задача: план предлагал ровно `(t.Current, t.Logo)` в качестве
+        // поставщика шаблона принтера, и это был бы тот же баг, который
+        // Task 10 только что закрыла внутри самого RefreshAsync, на новом
+        // месте.
+        var storage = new LogoGatedStorage(blockAtLogoCallIndex: 1)
+        {
+            Templates = new[]
+            {
+                """{"version":1,"width":48,"blocks":[]}""",
+                """{"version":1,"width":80,"blocks":[]}""",
+            },
+            Logos = new[] { "LOGO-A", "LOGO-B" },
+        };
+        var svc = new ReceiptTemplateService(storage);
+
+        // Поколение A устаканивается полностью и синхронно.
+        await svc.RefreshAsync();
+        var (templateA, logoA) = svc.CurrentTemplateAndLogo;
+        Assert.Equal(48, templateA.Width);
+        Assert.Equal("LOGO-A", logoA);
+
+        // Чтение шаблона поколения B возвращается сразу; чтение его логотипа
+        // заблокировано. Читатель снаружи обязан всё ещё видеть полную пару
+        // поколения A -- ни в коем случае не (шаблон B, логотип A).
+        var second = svc.RefreshAsync();
+
+        var (frozenTemplate, frozenLogo) = svc.CurrentTemplateAndLogo;
+        Assert.Equal(48, frozenTemplate.Width);
+        Assert.Equal("LOGO-A", frozenLogo);
+
+        storage.ReleaseLogoRead();
+        await second;
+
+        var (templateB, logoB) = svc.CurrentTemplateAndLogo;
+        Assert.Equal(80, templateB.Width);
+        Assert.Equal("LOGO-B", logoB);
+    }
+
     private static void AssertIsDefault(ReceiptTemplateService svc)
     {
         // Structural comparison, not Assert.Same: ReceiptTemplate.Default is a

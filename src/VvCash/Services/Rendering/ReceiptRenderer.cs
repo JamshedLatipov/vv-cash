@@ -14,7 +14,8 @@ public static class ReceiptRenderer
 {
     private static readonly Regex Placeholder = new(@"\{([a-zA-Z]+)\}", RegexOptions.Compiled);
 
-    public static IReadOnlyList<ReceiptOp> Render(ReceiptTemplate template, SaleReceiptData sale)
+    public static IReadOnlyList<ReceiptOp> Render(ReceiptTemplate template, SaleReceiptData sale,
+        string? logoJson = null)
     {
         var ops = new List<ReceiptOp>();
         var values = Values(sale);
@@ -22,7 +23,7 @@ public static class ReceiptRenderer
         foreach (var block in template.Blocks)
         {
             if (!block.Enabled) continue;
-            RenderBlock(block, template, sale, values, ops);
+            RenderBlock(block, template, sale, values, logoJson, ops);
         }
 
         // Резать нечего, если на бумагу не вышло ни одного знака — ни
@@ -43,7 +44,7 @@ public static class ReceiptRenderer
     }
 
     private static void RenderBlock(ReceiptBlock block, ReceiptTemplate template, SaleReceiptData sale,
-        IReadOnlyDictionary<string, string> values, List<ReceiptOp> ops)
+        IReadOnlyDictionary<string, string> values, string? logoJson, List<ReceiptOp> ops)
     {
         // ПОРЯДОК ОПЕРАЦИЙ ВОКРУГ БЛОКА — НЕ ВКУСОВЩИНА, А УСЛОВИЕ БАЙТ-В-БАЙТ.
         //
@@ -115,12 +116,19 @@ public static class ReceiptRenderer
             }
         }
 
-        // Логотип-картинка пока не печатает ничего: растр приезжает отдельной
-        // опцией конфига receipt_logo и подключается в Task 9. Блок
-        // отбрасывается целиком тем же приёмом, что и qr/barcode с пустыми
-        // данными — иначе чек с одним таким блоком получил бы висячий
-        // AlignOp в никуда.
-        if (block is LogoBlock { Source: LogoSource.Bitmap }) return;
+        // Растровый логотип разбирается ДО пролога, тем же приёмом, что qr и
+        // barcode чуть выше: опция receipt_logo из бэкофиса могла ещё не
+        // доехать (наполовину настроенная касса) или прийти битой, и в обоих
+        // случаях блок не должен оставить за собой висячий AlignOp — как и
+        // qr/barcode с пустыми данными несколькими строками выше. Nv не
+        // проверяется здесь вовсе: его печать не зависит от logoJson и не
+        // может подвести.
+        BitmapOp? bitmapOp = null;
+        if (block is LogoBlock { Source: LogoSource.Bitmap })
+        {
+            bitmapOp = ParseLogo(logoJson);
+            if (bitmapOp == null) return;
+        }
 
         ops.Add(new AlignOp(block.Align));
 
@@ -202,16 +210,22 @@ public static class ReceiptRenderer
                 break;
 
             case LogoBlock logo:
-                // Source == Bitmap уже отфильтрован выше, до AlignOp — сегодня
-                // сюда попадает только Nv. Условие всё равно ЯВНОЕ, а не
-                // "раз не Bitmap, значит Nv": молчаливый вывод из исключения
-                // — тот самый способ, которым третье значение LogoSource,
-                // если оно появится, напечаталось бы как чужой логотип со
-                // случайным слотом вместо того, чтобы просто не напечататься.
-                // Та же дисциплина, что у default в этом switch чуть ниже —
-                // там неизвестный тип блока бросает, а не молчит.
+                // Условие ЯВНОЕ, а не "раз не Nv, значит Bitmap": молчаливый
+                // вывод из исключения — тот самый способ, которым третье
+                // значение LogoSource, если оно появится, напечаталось бы
+                // как логотип со случайным содержимым вместо того, чтобы
+                // просто не напечататься. Та же дисциплина, что у default в
+                // этом switch чуть ниже — там неизвестный тип блока бросает,
+                // а не молчит.
                 if (logo.Source == LogoSource.Nv)
+                {
                     ops.Add(new NvLogoOp(logo.NvSlot));
+                    break;
+                }
+                // bitmapOp уже разобран и провалидирован выше, до AlignOp —
+                // сюда попадает, только когда он гарантированно не null
+                // (иначе метод вернулся раньше).
+                ops.Add(bitmapOp!);
                 break;
 
             default:
@@ -367,5 +381,51 @@ public static class ReceiptRenderer
         return normalized.Any(char.IsControl)
             ? new string(normalized.Select(c => char.IsControl(c) ? ' ' : c).ToArray())
             : normalized;
+    }
+
+    /// <summary>Разбирает опцию receipt_logo: ширина в БАЙТАХ, высота в
+    /// точках, растр в base64 (см. BitmapOp — тот же порядок полей и та же
+    /// единица измерения ширины, потому что столько же требует GS v 0).
+    ///
+    /// Любая беда здесь — "логотипа нет", а не исключение, роняющее печать:
+    /// блок включён, а картинка ещё не доехала синхронизацией (или доехала
+    /// битой) — это наполовину настроенная касса, а не повод не напечатать
+    /// чек целиком. Список перехватываемых типов собран по факту того, что
+    /// умеет бросить каждый шаг разбора, а не расширен "на всякий случай":
+    /// - JsonException — сам JSON не разобрался (не json вовсе, оборванная
+    ///   строка);
+    /// - InvalidOperationException — root не объект (GetProperty), или
+    ///   widthBytes/height лежат не числом (GetInt32 требует
+    ///   JsonValueKind.Number), или raster — не строка (GetString);
+    /// - KeyNotFoundException — GetProperty не нашёл нужное поле;
+    /// - FormatException — raster не валидный base64;
+    /// - ArgumentException — бросает сам конструктор BitmapOp: размер вне
+    ///   диапазона 0..65535 (ArgumentOutOfRangeException) или объявленный
+    ///   WidthBytes×Height не сходится с фактической длиной растра
+    ///   (ArgumentException) — оба наследники ArgumentException, и один catch
+    ///   ловит оба. Без этого пункта испорченный (несходящийся по размеру)
+    ///   receipt_logo ронял бы печать целиком вместо того, чтобы остаться без
+    ///   логотипа, — то самое требование задачи: конструктор BitmapOp бросает
+    ///   на рассинхроне размера и длины, и разбор обязан это поймать.</summary>
+    private static BitmapOp? ParseLogo(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json!);
+            var root = doc.RootElement;
+            var widthBytes = root.GetProperty("widthBytes").GetInt32();
+            var height = root.GetProperty("height").GetInt32();
+            var raster = Convert.FromBase64String(root.GetProperty("raster").GetString() ?? "");
+
+            return new BitmapOp(raster, widthBytes, height);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException
+            or KeyNotFoundException or FormatException or ArgumentException)
+        {
+            Console.WriteLine($"[ReceiptRenderer] логотип не разобран, печатаю без него: {ex.Message}");
+            return null;
+        }
     }
 }
