@@ -11,14 +11,26 @@ using Xunit;
 
 namespace VvCash.Tests;
 
-/// <summary>Общий эталон для кассы и для превью в бэкофисе: шаблон, демо-продажа
-/// и строки, которые из них обязаны получиться. Копия файла лежит в bozor и
-/// проверяется его собственными тестами.
+/// <summary>Общий эталон для кассы и для превью в бэкофисе: список именованных
+/// случаев, для каждого — шаблон, продажа и строки, которые из них обязаны
+/// получиться. Копия файла лежит в bozor и проверяется его собственными
+/// тестами.
 ///
-/// rendererVersion поднимается РУКАМИ при каждой правке раскладки. Это и есть
-/// признанная слабость схемы: забыл поднять — расхождение не поймает никто.
-/// Полностью чинится только монорепой, пакетом или CI, чекаутящим оба
-/// репозитория; см. раздел спеки «Расхождение двух рендереров».</summary>
+/// Список случаев, а не один сценарий — тот же довод, которым в
+/// SaleReceiptGoldenTest обоснованы пять байтовых фикстур вместо одной: один
+/// сценарий задевает ветки НАЛИЧИЯ и почти не задевает ветки ОТСУТСТВИЯ и
+/// раскладку НЕШТАТНОГО (не ReceiptTemplate.Default) шаблона. Дешевле, чем
+/// там: байты здесь не пришпилены, только текст.
+///
+/// rendererVersion поднимается РУКАМИ при каждой правке раскладки — и это
+/// МЁРТВОЕ поле, пока сторона bozor не завела у себя ожидаемую константу и
+/// не сравнивает её с этим числом при КАЖДОМ чтении фикстуры. Без такого
+/// сравнения там номер версии — комментарий, а не защита: раскладку можно
+/// поменять, перегенерировать эталон, забыть поднять число — и всё останется
+/// зелёным по обе стороны, ровно тот случай, ради которого поле заведено. См.
+/// scripts/sync-receipt-fixture.ps1 — он печатает текущее значение при
+/// каждом копировании именно затем, чтобы это было на виду у того, кто
+/// копирует.</summary>
 public class ReceiptPreviewGoldenTest
 {
     public const int RendererVersion = 1;
@@ -27,101 +39,297 @@ public class ReceiptPreviewGoldenTest
     /// (ReceiptTemplate.Options — camelCase-политика и camelCase-конвертер
     /// перечислений), скопированные и дополненные только форматом ВЫВОДА:
     /// отступы и без экранирования кириллицы, чтобы эталон можно было
-    /// прочитать глазами (Step 4 этой задачи). Заведи здесь свою пару
-    /// PropertyNamingPolicy/Converters — и при следующей правке enum'а или
-    /// политики именования в ReceiptTemplate эта копия молча разъедется с
-    /// боевой, а тест продолжит зеленеть.</summary>
+    /// прочитать глазами.</summary>
     private static readonly JsonSerializerOptions Options = new(ReceiptTemplate.Options)
     {
         WriteIndented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    /// <summary>Позиции демо-продажи. СВОИ, а не GoldenItems() из байтового замка:
-    /// на тех стоят пять уже закреплённых фикстур, и добавить к ним позицию нельзя
-    /// не сдвинув байты. А позиция здесь нужна особая — с серединной суммой.
-    ///
-    /// 13.50 × 0.15 = 2.0250. Это ровно тот край, где ToString("F2") в C# (округление
-    /// от нуля) даёт 2.03, а toFixed(2) в JavaScript — 2.02. Демо-продажа из круглых
-    /// чисел сертифицировала бы паритет двух рендереров, которого на этом крае нет.</summary>
-    private static IReadOnlyList<CartItem> PreviewItems() => new[]
+    private sealed record Case(string Name, ReceiptTemplate Template, SaleReceiptData Sale);
+
+    /// <summary>Случай "по умолчанию": раскладка ReceiptTemplate.Default на
+    /// продаже, которая одним чеком задевает пять разных крайних случаев
+    /// формата — каждый подписан на своей позиции ниже.</summary>
+    private static SaleReceiptData DefaultSale()
     {
-        new CartItem
+        var items = new[]
         {
-            Product = new Product
+            new CartItem
             {
-                Id = "p1", Name = "Плитка", Price = 100m,
-                UnitId = "u-1", UnitCode = "m2", UnitShortName = "м²",
-                UnitFactor = 0.24m, IsDivisible = false, SellInSecondaryUnit = true,
+                Product = new Product
+                {
+                    Id = "p1", Name = "Плитка", Price = 100m,
+                    UnitId = "u-1", UnitCode = "m2", UnitShortName = "м²",
+                    UnitFactor = 0.24m, IsDivisible = false, SellInSecondaryUnit = true,
+                },
+                // 12.7255, не 12.72: у формата основного количества ("0.###",
+                // до трёх знаков) и вторичной единицы ("0.######", до шести)
+                // разное число знаков после запятой, а на значении с двумя
+                // знаками форматы неотличимы — двойник, взявший не тот формат,
+                // эталон бы не заметил.
+                Quantity = 53m, QuantityInUnit = 12.7255m, EnteredInUnit = true,
             },
-            Quantity = 53m, QuantityInUnit = 12.72m, EnteredInUnit = true,
-        },
-        new CartItem
+            new CartItem
+            {
+                Product = new Product { Id = "p2", Name = "Клей", Price = 45m },
+                Quantity = 3m,
+            },
+            // Серединное значение: 13.50 × 0.15 = 2.0250 — ровно тот край, где
+            // ToString("F2") в C# (округление от нуля) расходится с toFixed(2)
+            // в JavaScript. См. ItemJson/SaleJson — почему сумма позиции едет
+            // в JSON СЫРЫМ числом, а не уже отформатированной строкой.
+            new CartItem
+            {
+                Product = new Product { Id = "p3", Name = "Смесь", Price = 13.50m, IsDivisible = true },
+                Quantity = 0.15m,
+            },
+            // Точное совпадение с шириной ленты: "Дюбель-гвоздь 6х40 мм x50"
+            // (25 симв.) + "1234.50" (7 симв.) = 32 = ширина ленты ровно, без
+            // места на разделяющий пробел между колонками. ReceiptText.PadLine
+            // документирует это как намеренный компромисс (Math.Max(1, spaces)
+            // даёт строку в 33 символа, а не 32 слипшихся) — двойник,
+            // потянувшийся за padEnd(width), эту строку не воспроизведёт.
+            new CartItem
+            {
+                Product = new Product { Id = "p4", Name = "Дюбель-гвоздь 6х40 мм", Price = 24.69m },
+                Quantity = 50m,
+            },
+            // Переполнение: имя само по себе (40 символов) уже длиннее ленты —
+            // тот же класс беды, что байтовая фикстура sale-receipt-wide.bin,
+            // на своей отдельной строке и своих данных.
+            new CartItem
+            {
+                Product = new Product { Id = "p5", Name = "Керамогранит матовый тёмно-серый 60х60см", Price = 999m },
+                Quantity = 1m,
+            },
+        };
+
+        var subtotal = items.Sum(i => i.LineTotal);
+        const decimal discount = 435m;
+
+        return new SaleReceiptData(
+            items, Subtotal: subtotal, Discount: discount, Total: subtotal - discount,
+            // 40 символов, не 14: обрезка Truncate(discountName, width) этим
+            // эталоном раньше не проявлялась вовсе (ту же ветку на байтах
+            // ловит отдельная фикстура sale-receipt-wide.bin) — замена ничего
+            // не теряет.
+            DiscountName: "Скидка на весь ассортимент этой недели-2",
+            DocumentNumber: "A-42", WarehouseName: "Склад №1",
+            SellerName: "Иванов", SaleDate: "01.09.2026 12:30");
+    }
+
+    /// <summary>Самый частый чек вообще: скидки нет, все реквизиты пустые (не
+    /// null — так их шлёт офлайновая продажа или касса без переключения
+    /// продавцов, ровно как SaleReceiptGoldenTest.BuildBareGolden), одна
+    /// простая позиция. Закрывает разом ветку ОТСУТСТВИЯ скидки и ветку
+    /// ОТСУТСТВИЯ реквизитов — включая номер бегунка: единственный ключ
+    /// подстановки, которого раньше не было ни в одном случае эталона вовсе,
+    /// хотя правило "известно, но пусто" на нём и держится.</summary>
+    private static SaleReceiptData OfflineSale()
+    {
+        var items = new[]
         {
-            Product = new Product { Id = "p2", Name = "Клей", Price = 45m },
-            Quantity = 3m,
-        },
-        new CartItem
+            new CartItem
+            {
+                Product = new Product { Id = "p6", Name = "Батарейки", Price = 25m },
+                Quantity = 4m,
+            },
+        };
+        var subtotal = items.Sum(i => i.LineTotal);
+
+        return new SaleReceiptData(
+            items, Subtotal: subtotal, Discount: 0m, Total: subtotal,
+            DocumentNumber: "", WarehouseName: "", SellerName: "", SaleDate: "",
+            QueueNumber: "");
+    }
+
+    /// <summary>Позиция для случая "шаблон из конструктора": несёт цену за
+    /// единицу, артикул, штрихкод и скидку по строке разом — четыре поля,
+    /// которых не было ни у одной позиции остальных случаев, а ItemsBlock
+    /// этого случая включает флаги показа всех четырёх сразу.</summary>
+    private static SaleReceiptData ConstructorSale()
+    {
+        var items = new[]
         {
-            Product = new Product { Id = "p3", Name = "Смесь", Price = 13.50m, IsDivisible = true },
-            Quantity = 0.15m,
+            new CartItem
+            {
+                Product = new Product
+                {
+                    Id = "p7", Name = "Дрель ударная", Price = 3500m,
+                    Sku = "SKU-4471", Barcode = "4870000012345",
+                },
+                Quantity = 1m,
+                QuotedUnitPrice = 3325m,
+                QuotedUnitDiscount = 175m,
+            },
+        };
+        var subtotal = items.Sum(i => i.LineTotal);
+
+        return new SaleReceiptData(
+            items, Subtotal: subtotal, Discount: 0m, Total: subtotal,
+            DocumentNumber: "A-90", WarehouseName: "Склад №2",
+            SellerName: "Петров", SaleDate: "01.09.2026 13:15",
+            QueueNumber: "");
+    }
+
+    /// <summary>Шаблон, который реально мог бы собрать администратор в
+    /// конструкторе — не ReceiptTemplate.Default. Один случай ловит девять
+    /// правил разом, каждое — на своём блоке:
+    /// 1. Enabled=false — блок не печатается вовсе.
+    /// 2. Незнакомая подстановка ({unknown}) остаётся в строке буквально.
+    /// 3. Незнакомый ключ поля печатается как Label + "{key}".
+    /// 4. Пустой ключ поля пропускается целиком.
+    /// 5. LineBlock.Count=0 — разделитель на всю ширину ленты (32), а не на
+    ///    заданные литералом 28, как во всех LineBlock ReceiptTemplate.Default.
+    /// 6. ItemsBlock.ShowUnitPrice — подстрока "количество x цена".
+    /// 7. ItemsBlock.ShowSku — подстрока с артикулом.
+    /// 8. ItemsBlock.ShowBarcode — подстрока со штрихкодом.
+    /// 9. ItemsBlock.ShowLineDiscount — подстрока со скидкой по строке.</summary>
+    private static ReceiptTemplate ConstructorTemplate() => new()
+    {
+        Version = ReceiptTemplate.CurrentVersion,
+        Width = 32,
+        Blocks = new List<ReceiptBlock>
+        {
+            new TextBlock { Content = "VV CASH POS", Align = ReceiptAlign.Center, DoubleSize = true },
+            new TextBlock { Content = "Bonus: {unknown}", Align = ReceiptAlign.Center, Enabled = false },
+            new TextBlock { Content = "Промо: {unknown}", Align = ReceiptAlign.Center },
+            new FieldsBlock
+            {
+                Align = ReceiptAlign.Center,
+                Fields = new List<ReceiptField>
+                {
+                    new() { Key = "doc", Label = "Doc #" },
+                    new() { Key = "phone", Label = "Tel: " },
+                    new() { Key = "", Label = "ignored" },
+                },
+            },
+            new LineBlock { Align = ReceiptAlign.Center, Count = 0 },
+            new ItemsBlock
+            {
+                Align = ReceiptAlign.Left,
+                ShowUnitPrice = true, ShowSku = true, ShowBarcode = true,
+                ShowSecondaryUnit = true, ShowLineDiscount = true,
+            },
+            new LineBlock { Align = ReceiptAlign.Left, Count = 28 },
+            new TotalsBlock { Align = ReceiptAlign.Left },
+            new LineBlock { Align = ReceiptAlign.Left, Count = 28 },
+            new TextBlock { Content = "Thank you for shopping!", Align = ReceiptAlign.Center },
+            new FeedBlock { Lines = 2, Align = ReceiptAlign.Center },
         },
     };
 
-    private static SaleReceiptData DemoSale() => new(
-        PreviewItems(),
-        Subtotal: 5437.03m, Discount: 435m, Total: 5002.03m,
-        DiscountName: "Акция «Ремонт»",
-        DocumentNumber: "A-42", WarehouseName: "Склад №1",
-        SellerName: "Иванов", SaleDate: "01.09.2026 12:30");
+    /// <summary>Последняя непокрытая ветка блока итогов: скидка есть, а имени
+    /// у неё нет (discountName — пустая строка, не null: так её шлёт форма
+    /// ручной скидки кассира, где поле имени просто не заполнено). Строка
+    /// "Discount:" обязана остаться на бумаге, строка с названием под ней —
+    /// не появиться.</summary>
+    private static SaleReceiptData DiscountNoNameSale()
+    {
+        var items = new[]
+        {
+            new CartItem
+            {
+                Product = new Product
+                {
+                    Id = "p8", Name = "Скотч малярный жёлтый", Price = 25m,
+                    Sku = "SKU-1002", Barcode = "4870000054321",
+                },
+                Quantity = 4m,
+            },
+        };
+        var subtotal = items.Sum(i => i.LineTotal);
+        const decimal discount = 15m;
+
+        return new SaleReceiptData(
+            items, Subtotal: subtotal, Discount: discount, Total: subtotal - discount,
+            DiscountName: "",
+            DocumentNumber: "A-15", WarehouseName: "Склад №1",
+            SellerName: "Сидоров", SaleDate: "01.09.2026 14:00",
+            QueueNumber: "");
+    }
+
+    private static IReadOnlyList<Case> Cases() => new[]
+    {
+        new Case("default", ReceiptTemplate.Default, DefaultSale()),
+        new Case("offline", ReceiptTemplate.Default, OfflineSale()),
+        new Case("constructor-template", ConstructorTemplate(), ConstructorSale()),
+        new Case("discount-no-name", ReceiptTemplate.Default, DiscountNoNameSale()),
+    };
+
+    /// <summary>Сырые данные позиции — БЕЗ форматирования денег или
+    /// количества. Раньше сумма позиции ехала в JSON уже отформатированной
+    /// строкой ("2.03"), а итоги (subtotal/discount/total) — числами: эта
+    /// несогласованность и была дырой, которую нашло ревью. Строка не даёт
+    /// двойнику вообще ничего посчитать — он просто печатает то, что дали, и
+    /// расхождение F2/toFixed тогда ловилось бы только на итогах, но не на
+    /// позициях, хотя позиция "Смесь" заведена именно ради него. Число
+    /// заставляет двойника САМОМУ применить своё правило округления к сырому
+    /// значению — тем же способом, каким это делают
+    /// ReceiptRenderer.RenderItem/RenderTotals на стороне кассы — и только
+    /// тогда сравнение с expectedLines проверяет формат, а не дословную
+    /// передачу строки. Отсюда общее правило для всего объекта sale ниже:
+    /// деньги и количество — везде числа, ни одной готовой строки.</summary>
+    private static object ItemJson(CartItem i) => new
+    {
+        name = i.Product.Name,
+        quantity = i.Quantity,
+        lineTotal = i.LineTotal,
+        unitPrice = i.UnitPrice,
+        sku = string.IsNullOrWhiteSpace(i.Product.Sku) ? null : i.Product.Sku,
+        barcode = string.IsNullOrWhiteSpace(i.Product.Barcode) ? null : i.Product.Barcode,
+        lineDiscount = i.LineDiscount,
+        quantityInUnit = i.Product.HasSecondaryUnit ? i.QuantityInUnit : (decimal?)null,
+        secondaryUnitName = i.Product.HasSecondaryUnit ? i.Product.UnitShortName : null,
+    };
+
+    private static object SaleJson(SaleReceiptData s) => new
+    {
+        documentNumber = s.DocumentNumber,
+        warehouseName = s.WarehouseName,
+        sellerName = s.SellerName,
+        saleDate = s.SaleDate,
+        // Пустая строка, а не отсутствующий ключ: это и есть пример
+        // "известного, но пустого" имени подстановки на КОНКРЕТНЫХ данных —
+        // раньше ни у одного случая эталона не было позиции, которая
+        // отличала бы это правило от "неизвестного имени" (это второе
+        // правило показывает ключ "phone" в constructor-template).
+        queueNumber = s.QueueNumber ?? "",
+        discountName = s.DiscountName,
+        subtotal = s.Subtotal,
+        discount = s.Discount,
+        total = s.Total,
+        items = s.Items.Select(ItemJson).ToArray(),
+    };
 
     [Fact]
     public void PreviewGolden_MatchesWhatTheRendererProduces()
     {
-        var sale = DemoSale();
-        var expected = ReceiptRenderer.Render(ReceiptTemplate.Default, sale)
-            .OfType<TextOp>().Select(o => o.Line).ToArray();
+        var payload = new
+        {
+            rendererVersion = RendererVersion,
+            cases = Cases().Select(c => new
+            {
+                name = c.Name,
+                template = c.Template,
+                sale = SaleJson(c.Sale),
+                expectedLines = ReceiptRenderer.Render(c.Template, c.Sale)
+                    .OfType<TextOp>().Select(o => o.Line).ToArray(),
+            }).ToArray(),
+        };
 
+        var expectedText = NormalizeJsonText(JsonSerializer.Serialize(payload, Options));
         var fixturePath = FixturePath();
 
         if (Environment.GetEnvironmentVariable("VVCASH_UPDATE_GOLDEN") == "1")
         {
-            var payload = new
-            {
-                rendererVersion = RendererVersion,
-                template = ReceiptTemplate.Default,
-                sale = new
-                {
-                    subtotal = sale.Subtotal, discount = sale.Discount, total = sale.Total,
-                    discountName = sale.DiscountName, documentNumber = sale.DocumentNumber,
-                    warehouseName = sale.WarehouseName, sellerName = sale.SellerName,
-                    saleDate = sale.SaleDate,
-                    // Строки, не decimal: TS-превью не форматирует деньги вовсе —
-                    // сумма позиции "Смесь" едет уже посчитанной по C#-правилу
-                    // (ToString("F2"), округление от нуля), потому что именно
-                    // здесь, на 13.50 × 0.15 = 2.0250, JS toFixed(2) дал бы другую
-                    // цифру. Считаются той же парой ReceiptText.Money/QuantityDisplay
-                    // и тем же HasSecondaryUnit, что и боевой RenderItem — не
-                    // переписаны вручную второй раз, чтобы не разъехаться с ним.
-                    items = sale.Items.Select(i => new
-                    {
-                        name = i.Product.Name,
-                        quantity = i.QuantityDisplay,
-                        lineTotal = ReceiptText.Money(i.LineTotal),
-                        secondaryUnit = i.Product.HasSecondaryUnit
-                            ? $"{i.QuantityInUnitDisplay} {i.Product.UnitShortName}"
-                            : (string?)null,
-                    }).ToArray(),
-                },
-                expectedLines = expected,
-            };
-
             Directory.CreateDirectory(Path.GetDirectoryName(fixturePath)!);
-            File.WriteAllText(fixturePath, JsonSerializer.Serialize(payload, Options));
+            File.WriteAllText(fixturePath, expectedText);
 
             // Fail, а не return — та же причина, что в SaleReceiptGoldenTest:
-            // утёкшая в CI или в чужую оболочку VVCASH_UPDATE_GOLDEN обязана дать
-            // красный прогон, а не тихо-зелёный тест без единой проверки внутри.
+            // утёкшая в CI или в чужую оболочку VVCASH_UPDATE_GOLDEN обязана
+            // дать красный прогон, а не тихо-зелёный тест без единой проверки.
             Assert.Fail(
                 $"Эталон перезаписан: {fixturePath}. Проверьте `git diff` и перезапустите " +
                 "без VVCASH_UPDATE_GOLDEN.");
@@ -130,21 +338,32 @@ public class ReceiptPreviewGoldenTest
         Assert.True(File.Exists(fixturePath),
             $"Эталона нет: {fixturePath}. Сгенерируйте его с VVCASH_UPDATE_GOLDEN=1.");
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(fixturePath));
-        Assert.Equal(RendererVersion, doc.RootElement.GetProperty("rendererVersion").GetInt32());
-        Assert.Equal(expected,
-            doc.RootElement.GetProperty("expectedLines").EnumerateArray().Select(e => e.GetString()).ToArray());
+        // Файл ЦЕЛИКОМ, а не rendererVersion и expectedLines по отдельности:
+        // сравнение той же строки, которую построил бы режим обновления, с
+        // тем, что реально лежит на диске, ловит любое ручное расхождение —
+        // подправленную вручную ширину ленты, подпись реквизита, состав
+        // блоков шаблона — а не только итоговые строки чека.
+        var actualText = NormalizeJsonText(File.ReadAllText(fixturePath));
+        Assert.Equal(expectedText, actualText);
     }
 
+    /// <summary>LF и ровно один завершающий перевод строки — не то, что
+    /// решит система сборки. System.Text.Json c WriteIndented=true переносит
+    /// строки через Environment.NewLine (CRLF на Windows, LF на Linux/mac);
+    /// перегенерация на другой ОС дала бы другой файл во всех полутора сотнях
+    /// строк, а .gitattributes для этого файла (см. файл — ему явно возвращён
+    /// текстовый диф) больше не нормализует построчные окончания при
+    /// коммите, раз он больше не подпадает под общее правило "binary" для
+    /// каталога Fixtures\. Явная нормализация здесь — единственная гарантия
+    /// того, что байты не зависят от того, где выполнялась генерация.</summary>
+    private static string NormalizeJsonText(string json) =>
+        json.Replace("\r\n", "\n").TrimEnd('\n') + "\n";
+
     /// <summary>Путь в ИСХОДНИКАХ, не в каталоге сборки. VvCash.Tests.csproj не
-    /// копирует Fixtures\ в bin\ (там нет ни одного ItemGroup с
-    /// CopyToOutputDirectory), поэтому Path.Combine(AppContext.BaseDirectory,
-    /// "Fixtures", ...) — как было в черновике этой задачи — никогда не находит
-    /// файл, который FindRepoRoot() только что записал в исходники: FAIL
-    /// "Эталона нет" стоял бы даже сразу после VVCASH_UPDATE_GOLDEN=1, при
-    /// каждом запуске. Путь по FindRepoRoot() — тот же приём, что уже
-    /// использует SaleReceiptGoldenTest.FixturePath рядом, и работает по той же
-    /// причине.</summary>
+    /// копирует Fixtures\ в bin\, поэтому путь по AppContext.BaseDirectory
+    /// никогда не находит файл, который FindRepoRoot() только что записал в
+    /// исходники. Тот же приём, что уже использует
+    /// SaleReceiptGoldenTest.FixturePath рядом.</summary>
     private static string FixturePath() =>
         Path.Combine(FindRepoRoot(), "tests", "VvCash.Tests", "Fixtures", "receipt-golden.json");
 

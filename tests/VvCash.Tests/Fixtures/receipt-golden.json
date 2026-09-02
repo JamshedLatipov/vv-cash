@@ -1,155 +1,636 @@
 {
   "rendererVersion": 1,
-  "template": {
-    "version": 1,
-    "width": 32,
-    "blocks": [
-      {
-        "type": "text",
-        "content": "VV CASH POS",
-        "bold": false,
-        "doubleSize": true,
-        "enabled": true,
-        "align": "center"
-      },
-      {
-        "type": "text",
-        "content": "# {queue}",
-        "bold": true,
-        "doubleSize": true,
-        "enabled": true,
-        "align": "center"
-      },
-      {
-        "type": "fields",
-        "fields": [
+  "cases": [
+    {
+      "name": "default",
+      "template": {
+        "version": 1,
+        "width": 32,
+        "blocks": [
           {
-            "key": "doc",
-            "label": "Doc #"
+            "type": "text",
+            "content": "VV CASH POS",
+            "bold": false,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
           },
           {
-            "key": "date",
-            "label": ""
+            "type": "text",
+            "content": "# {queue}",
+            "bold": true,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
           },
           {
-            "key": "warehouse",
-            "label": "Whse: "
+            "type": "fields",
+            "fields": [
+              {
+                "key": "doc",
+                "label": "Doc #"
+              },
+              {
+                "key": "date",
+                "label": ""
+              },
+              {
+                "key": "warehouse",
+                "label": "Whse: "
+              },
+              {
+                "key": "seller",
+                "label": "Seller: "
+              }
+            ],
+            "enabled": true,
+            "align": "center"
           },
           {
-            "key": "seller",
-            "label": "Seller: "
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "items",
+            "showUnitPrice": false,
+            "showSku": false,
+            "showBarcode": false,
+            "showSecondaryUnit": true,
+            "showLineDiscount": false,
+            "lineDiscountLabel": "Discount:",
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "totals",
+            "showSubtotal": true,
+            "subtotalLabel": "Subtotal:",
+            "showDiscount": true,
+            "discountLabel": "Discount:",
+            "showDiscountName": true,
+            "totalLabel": "TOTAL:",
+            "boldTotal": true,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "text",
+            "content": "Thank you for shopping!",
+            "bold": false,
+            "doubleSize": false,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "feed",
+            "lines": 2,
+            "enabled": true,
+            "align": "center"
           }
-        ],
-        "enabled": true,
-        "align": "center"
+        ]
       },
-      {
-        "type": "line",
-        "char": "-",
-        "count": 28,
-        "enabled": true,
-        "align": "center"
+      "sale": {
+        "documentNumber": "A-42",
+        "warehouseName": "Склад №1",
+        "sellerName": "Иванов",
+        "saleDate": "01.09.2026 12:30",
+        "queueNumber": "",
+        "discountName": "Скидка на весь ассортимент этой недели-2",
+        "subtotal": 7670.5250,
+        "discount": 435,
+        "total": 7235.5250,
+        "items": [
+          {
+            "name": "Плитка",
+            "quantity": 53,
+            "lineTotal": 5300,
+            "unitPrice": 100,
+            "sku": null,
+            "barcode": null,
+            "lineDiscount": 0,
+            "quantityInUnit": 12.7255,
+            "secondaryUnitName": "м²"
+          },
+          {
+            "name": "Клей",
+            "quantity": 3,
+            "lineTotal": 135,
+            "unitPrice": 45,
+            "sku": null,
+            "barcode": null,
+            "lineDiscount": 0,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          },
+          {
+            "name": "Смесь",
+            "quantity": 0.15,
+            "lineTotal": 2.0250,
+            "unitPrice": 13.50,
+            "sku": null,
+            "barcode": null,
+            "lineDiscount": 0.00,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          },
+          {
+            "name": "Дюбель-гвоздь 6х40 мм",
+            "quantity": 50,
+            "lineTotal": 1234.50,
+            "unitPrice": 24.69,
+            "sku": null,
+            "barcode": null,
+            "lineDiscount": 0,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          },
+          {
+            "name": "Керамогранит матовый тёмно-серый 60х60см",
+            "quantity": 1,
+            "lineTotal": 999,
+            "unitPrice": 999,
+            "sku": null,
+            "barcode": null,
+            "lineDiscount": 0,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          }
+        ]
       },
-      {
-        "type": "items",
-        "showUnitPrice": false,
-        "showSku": false,
-        "showBarcode": false,
-        "showSecondaryUnit": true,
-        "showLineDiscount": false,
-        "lineDiscountLabel": "Discount:",
-        "enabled": true,
-        "align": "left"
+      "expectedLines": [
+        "VV CASH POS",
+        "Doc #A-42",
+        "01.09.2026 12:30",
+        "Whse: Склад №1",
+        "Seller: Иванов",
+        "----------------------------",
+        "Плитка x53               5300.00",
+        "    12.7255 м²",
+        "Клей x3                   135.00",
+        "Смесь x0.15                 2.03",
+        "Дюбель-гвоздь 6х40 мм x50 1234.50",
+        "Керамогранит матовый тёмно-серый 60х60см x1 999.00",
+        "----------------------------",
+        "Subtotal:                7670.53",
+        "Discount:                -435.00",
+        "Скидка на весь ассортимент этой ",
+        "TOTAL:                   7235.53",
+        "----------------------------",
+        "Thank you for shopping!"
+      ]
+    },
+    {
+      "name": "offline",
+      "template": {
+        "version": 1,
+        "width": 32,
+        "blocks": [
+          {
+            "type": "text",
+            "content": "VV CASH POS",
+            "bold": false,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "text",
+            "content": "# {queue}",
+            "bold": true,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "fields",
+            "fields": [
+              {
+                "key": "doc",
+                "label": "Doc #"
+              },
+              {
+                "key": "date",
+                "label": ""
+              },
+              {
+                "key": "warehouse",
+                "label": "Whse: "
+              },
+              {
+                "key": "seller",
+                "label": "Seller: "
+              }
+            ],
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "items",
+            "showUnitPrice": false,
+            "showSku": false,
+            "showBarcode": false,
+            "showSecondaryUnit": true,
+            "showLineDiscount": false,
+            "lineDiscountLabel": "Discount:",
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "totals",
+            "showSubtotal": true,
+            "subtotalLabel": "Subtotal:",
+            "showDiscount": true,
+            "discountLabel": "Discount:",
+            "showDiscountName": true,
+            "totalLabel": "TOTAL:",
+            "boldTotal": true,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "text",
+            "content": "Thank you for shopping!",
+            "bold": false,
+            "doubleSize": false,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "feed",
+            "lines": 2,
+            "enabled": true,
+            "align": "center"
+          }
+        ]
       },
-      {
-        "type": "line",
-        "char": "-",
-        "count": 28,
-        "enabled": true,
-        "align": "left"
+      "sale": {
+        "documentNumber": "",
+        "warehouseName": "",
+        "sellerName": "",
+        "saleDate": "",
+        "queueNumber": "",
+        "discountName": null,
+        "subtotal": 100,
+        "discount": 0,
+        "total": 100,
+        "items": [
+          {
+            "name": "Батарейки",
+            "quantity": 4,
+            "lineTotal": 100,
+            "unitPrice": 25,
+            "sku": null,
+            "barcode": null,
+            "lineDiscount": 0,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          }
+        ]
       },
-      {
-        "type": "totals",
-        "showSubtotal": true,
-        "subtotalLabel": "Subtotal:",
-        "showDiscount": true,
-        "discountLabel": "Discount:",
-        "showDiscountName": true,
-        "totalLabel": "TOTAL:",
-        "boldTotal": true,
-        "enabled": true,
-        "align": "left"
+      "expectedLines": [
+        "VV CASH POS",
+        "----------------------------",
+        "Батарейки x4              100.00",
+        "----------------------------",
+        "Subtotal:                 100.00",
+        "TOTAL:                    100.00",
+        "----------------------------",
+        "Thank you for shopping!"
+      ]
+    },
+    {
+      "name": "constructor-template",
+      "template": {
+        "version": 1,
+        "width": 32,
+        "blocks": [
+          {
+            "type": "text",
+            "content": "VV CASH POS",
+            "bold": false,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "text",
+            "content": "Bonus: {unknown}",
+            "bold": false,
+            "doubleSize": false,
+            "enabled": false,
+            "align": "center"
+          },
+          {
+            "type": "text",
+            "content": "Промо: {unknown}",
+            "bold": false,
+            "doubleSize": false,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "fields",
+            "fields": [
+              {
+                "key": "doc",
+                "label": "Doc #"
+              },
+              {
+                "key": "phone",
+                "label": "Tel: "
+              },
+              {
+                "key": "",
+                "label": "ignored"
+              }
+            ],
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 0,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "items",
+            "showUnitPrice": true,
+            "showSku": true,
+            "showBarcode": true,
+            "showSecondaryUnit": true,
+            "showLineDiscount": true,
+            "lineDiscountLabel": "Discount:",
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "totals",
+            "showSubtotal": true,
+            "subtotalLabel": "Subtotal:",
+            "showDiscount": true,
+            "discountLabel": "Discount:",
+            "showDiscountName": true,
+            "totalLabel": "TOTAL:",
+            "boldTotal": true,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "text",
+            "content": "Thank you for shopping!",
+            "bold": false,
+            "doubleSize": false,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "feed",
+            "lines": 2,
+            "enabled": true,
+            "align": "center"
+          }
+        ]
       },
-      {
-        "type": "line",
-        "char": "-",
-        "count": 28,
-        "enabled": true,
-        "align": "left"
+      "sale": {
+        "documentNumber": "A-90",
+        "warehouseName": "Склад №2",
+        "sellerName": "Петров",
+        "saleDate": "01.09.2026 13:15",
+        "queueNumber": "",
+        "discountName": null,
+        "subtotal": 3325,
+        "discount": 0,
+        "total": 3325,
+        "items": [
+          {
+            "name": "Дрель ударная",
+            "quantity": 1,
+            "lineTotal": 3325,
+            "unitPrice": 3325,
+            "sku": "SKU-4471",
+            "barcode": "4870000012345",
+            "lineDiscount": 175,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          }
+        ]
       },
-      {
-        "type": "text",
-        "content": "Thank you for shopping!",
-        "bold": false,
-        "doubleSize": false,
-        "enabled": true,
-        "align": "center"
+      "expectedLines": [
+        "VV CASH POS",
+        "Промо: {unknown}",
+        "Doc #A-90",
+        "Tel: {phone}",
+        "--------------------------------",
+        "Дрель ударная x1         3325.00",
+        "    1 x 3325.00",
+        "    SKU-4471",
+        "    4870000012345",
+        "    Discount:            -175.00",
+        "----------------------------",
+        "Subtotal:                3325.00",
+        "TOTAL:                   3325.00",
+        "----------------------------",
+        "Thank you for shopping!"
+      ]
+    },
+    {
+      "name": "discount-no-name",
+      "template": {
+        "version": 1,
+        "width": 32,
+        "blocks": [
+          {
+            "type": "text",
+            "content": "VV CASH POS",
+            "bold": false,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "text",
+            "content": "# {queue}",
+            "bold": true,
+            "doubleSize": true,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "fields",
+            "fields": [
+              {
+                "key": "doc",
+                "label": "Doc #"
+              },
+              {
+                "key": "date",
+                "label": ""
+              },
+              {
+                "key": "warehouse",
+                "label": "Whse: "
+              },
+              {
+                "key": "seller",
+                "label": "Seller: "
+              }
+            ],
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "items",
+            "showUnitPrice": false,
+            "showSku": false,
+            "showBarcode": false,
+            "showSecondaryUnit": true,
+            "showLineDiscount": false,
+            "lineDiscountLabel": "Discount:",
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "totals",
+            "showSubtotal": true,
+            "subtotalLabel": "Subtotal:",
+            "showDiscount": true,
+            "discountLabel": "Discount:",
+            "showDiscountName": true,
+            "totalLabel": "TOTAL:",
+            "boldTotal": true,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "line",
+            "char": "-",
+            "count": 28,
+            "enabled": true,
+            "align": "left"
+          },
+          {
+            "type": "text",
+            "content": "Thank you for shopping!",
+            "bold": false,
+            "doubleSize": false,
+            "enabled": true,
+            "align": "center"
+          },
+          {
+            "type": "feed",
+            "lines": 2,
+            "enabled": true,
+            "align": "center"
+          }
+        ]
       },
-      {
-        "type": "feed",
-        "lines": 2,
-        "enabled": true,
-        "align": "center"
-      }
-    ]
-  },
-  "sale": {
-    "subtotal": 5437.03,
-    "discount": 435,
-    "total": 5002.03,
-    "discountName": "Акция «Ремонт»",
-    "documentNumber": "A-42",
-    "warehouseName": "Склад №1",
-    "sellerName": "Иванов",
-    "saleDate": "01.09.2026 12:30",
-    "items": [
-      {
-        "name": "Плитка",
-        "quantity": "53",
-        "lineTotal": "5300.00",
-        "secondaryUnit": "12.72 м²"
+      "sale": {
+        "documentNumber": "A-15",
+        "warehouseName": "Склад №1",
+        "sellerName": "Сидоров",
+        "saleDate": "01.09.2026 14:00",
+        "queueNumber": "",
+        "discountName": "",
+        "subtotal": 100,
+        "discount": 15,
+        "total": 85,
+        "items": [
+          {
+            "name": "Скотч малярный жёлтый",
+            "quantity": 4,
+            "lineTotal": 100,
+            "unitPrice": 25,
+            "sku": "SKU-1002",
+            "barcode": "4870000054321",
+            "lineDiscount": 0,
+            "quantityInUnit": null,
+            "secondaryUnitName": null
+          }
+        ]
       },
-      {
-        "name": "Клей",
-        "quantity": "3",
-        "lineTotal": "135.00",
-        "secondaryUnit": null
-      },
-      {
-        "name": "Смесь",
-        "quantity": "0.15",
-        "lineTotal": "2.03",
-        "secondaryUnit": null
-      }
-    ]
-  },
-  "expectedLines": [
-    "VV CASH POS",
-    "Doc #A-42",
-    "01.09.2026 12:30",
-    "Whse: Склад №1",
-    "Seller: Иванов",
-    "----------------------------",
-    "Плитка x53               5300.00",
-    "    12.72 м²",
-    "Клей x3                   135.00",
-    "Смесь x0.15                 2.03",
-    "----------------------------",
-    "Subtotal:                5437.03",
-    "Discount:                -435.00",
-    "Акция «Ремонт»",
-    "TOTAL:                   5002.03",
-    "----------------------------",
-    "Thank you for shopping!"
+      "expectedLines": [
+        "VV CASH POS",
+        "Doc #A-15",
+        "01.09.2026 14:00",
+        "Whse: Склад №1",
+        "Seller: Сидоров",
+        "----------------------------",
+        "Скотч малярный жёлтый x4  100.00",
+        "----------------------------",
+        "Subtotal:                 100.00",
+        "Discount:                 -15.00",
+        "TOTAL:                     85.00",
+        "----------------------------",
+        "Thank you for shopping!"
+      ]
+    }
   ]
 }
