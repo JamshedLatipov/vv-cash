@@ -130,22 +130,34 @@ public class ReceiptTemplateServiceTest : IDisposable
     }
 
     [Fact]
-    public async Task RefreshAsync_NeverPublishesATemplateAndLogoFromTwoDifferentGenerations()
+    public async Task RefreshAsync_NeverExposesATornPairToAReaderMidUpdate()
     {
-        // CompositePrinterService._printers is volatile precisely because it is
-        // written by the background sync loop and read on the print path; the
-        // review found ReceiptTemplateService.Current/Logo were plain fields, and
-        // -- separately from visibility -- assigned as two independent statements.
-        // Two overlapping RefreshAsync calls (the background loop racing "Full
-        // reinitialization" from the POS screen) could each finish one of their
-        // two assignments before the other call's assignments landed, publishing
-        // a template from one generation paired with a logo from another -- a
-        // combination that never existed on the server. A single immutable
-        // snapshot behind one volatile field, published atomically, plus a
-        // semaphore serializing whole RefreshAsync calls, rules this out: the
-        // second call's storage reads cannot even start until the first call has
-        // fully published its own matched pair and released the gate.
-        var storage = new GatedStorage
+        // Round 3 of review: the previous version of this test (see git history)
+        // only asserted state AFTER both overlapping RefreshAsync calls had fully
+        // completed -- by then the semaphore had already serialized them, so a
+        // mutation that publishes the snapshot in two separate steps (first
+        // Current with the new template and the STALE old logo, then a second
+        // assignment with the new logo) still left every one of 1148 tests green:
+        // both steps finish well before the test's next check.
+        //
+        // That mutation matters because the semaphore protects WRITERS from each
+        // other; it says nothing about READERS. The print path -- the only real
+        // consumer of Current/Logo -- never touches _refreshGate at all. So the
+        // property worth pinning is not "the writers don't interleave" (already
+        // covered elsewhere) but "a reader can NEVER observe a half-published
+        // pair, at any point during an update" -- which is exactly what a single
+        // volatile Snapshot assigned once is for.
+        //
+        // This test IS that reader: it inspects Current/Logo from outside
+        // RefreshAsync entirely, at a moment deliberately frozen mid-update by
+        // gating the SECOND generation's logo read (its template read completes
+        // immediately). A correct implementation reads both raw values into
+        // locals and only then publishes one Snapshot, so nothing has changed
+        // yet -- the reader still sees generation A's matched pair in full. The
+        // two-step mutation described above would have already overwritten
+        // _snapshot with (generation B template, generation A logo) by this
+        // point -- a pair that never existed on the server.
+        var storage = new LogoGatedStorage(blockAtLogoCallIndex: 1)
         {
             Templates = new[]
             {
@@ -156,32 +168,27 @@ public class ReceiptTemplateServiceTest : IDisposable
         };
         var svc = new ReceiptTemplateService(storage);
 
-        // Call #1 (generation A) enters first and blocks inside its own template
-        // read, holding the refresh gate for as long as it is blocked.
-        var first = svc.RefreshAsync();
+        // Generation A settles fully and synchronously -- its own logo read
+        // (call index 0) is not gated.
+        await svc.RefreshAsync();
+        Assert.Equal(48, svc.Current.Width);
+        Assert.Equal("LOGO-A", svc.Logo);
 
-        // Call #2 (generation B) must queue behind the gate rather than start
-        // reading storage -- with the fix, storage.Templates[1]/Logos[1] are not
-        // touched until call #1 finishes and releases the semaphore.
+        // Generation B's template read (idx 1) returns immediately; its logo
+        // read (also idx 1, the second-ever call) blocks. Everything up to and
+        // including the template read has already run by the time control
+        // returns here -- a two-step publisher would have written the new
+        // template already.
         var second = svc.RefreshAsync();
 
-        storage.ReleaseFirstTemplateRead();
+        Assert.Equal(48, svc.Current.Width);
+        Assert.Equal("LOGO-A", svc.Logo);
 
-        // Not "await first; assert A; await second; assert B": SemaphoreSlim runs a
-        // released waiter's continuation synchronously inside Release() on some
-        // runtimes, so by the time "await first" observes completion, "second"
-        // may already have run to completion too, nested inside first's own
-        // finally block -- there is no reliable observation point between the
-        // two. What actually matters, and what the fix promises, is that
-        // whichever generation ends up published is a COHERENT pair, never a
-        // template from one generation mixed with a logo from the other.
-        await Task.WhenAll(first, second);
+        storage.ReleaseLogoRead();
+        await second;
 
-        var width = svc.Current.Width;
-        var logo = svc.Logo;
-        var isGenerationA = width == 48 && logo == "LOGO-A";
-        var isGenerationB = width == 80 && logo == "LOGO-B";
-        Assert.True(isGenerationA || isGenerationB, $"got a torn pair: Width={width} Logo='{logo}'");
+        Assert.Equal(80, svc.Current.Width);
+        Assert.Equal("LOGO-B", svc.Logo);
     }
 
     private static void AssertIsDefault(ReceiptTemplateService svc)
@@ -266,34 +273,39 @@ public class ReceiptTemplateServiceTest : IDisposable
             : Task.FromResult(Logo);
     }
 
-    /// <summary>Blocks the FIRST call to enter GetReceiptTemplateAsync until
-    /// ReleaseFirstTemplateRead is called, so a test can deterministically start a
-    /// second RefreshAsync while the first is still in flight, without any
-    /// Task.Delay-based timing.</summary>
-    private sealed class GatedStorage : NotSupportedStorage
+    /// <summary>Template reads never block. The logo read whose zero-based call
+    /// index equals <paramref name="blockAtLogoCallIndex"/> blocks until
+    /// ReleaseLogoRead is called -- letting a test freeze RefreshAsync AFTER it
+    /// has read (and, under a buggy two-step publisher, already applied) the new
+    /// template, but BEFORE its matching new logo lands, so a reader outside the
+    /// refresh gate can be asked what it sees at that exact moment.</summary>
+    private sealed class LogoGatedStorage : NotSupportedStorage
     {
+        private readonly int _blockAtLogoCallIndex;
         private int _templateCallIndex = -1;
         private int _logoCallIndex = -1;
-        private readonly TaskCompletionSource _releaseFirstTemplate =
+        private readonly TaskCompletionSource _releaseLogoRead =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public LogoGatedStorage(int blockAtLogoCallIndex) => _blockAtLogoCallIndex = blockAtLogoCallIndex;
 
         public string[] Templates = Array.Empty<string>();
         public string[] Logos = Array.Empty<string>();
 
-        public override async Task<string> GetReceiptTemplateAsync()
+        public override Task<string> GetReceiptTemplateAsync()
         {
             var idx = Interlocked.Increment(ref _templateCallIndex);
-            if (idx == 0) await _releaseFirstTemplate.Task;
-            return Templates[idx];
+            return Task.FromResult(Templates[idx]);
         }
 
-        public override Task<string> GetReceiptLogoAsync()
+        public override async Task<string> GetReceiptLogoAsync()
         {
             var idx = Interlocked.Increment(ref _logoCallIndex);
-            return Task.FromResult(Logos[idx]);
+            if (idx == _blockAtLogoCallIndex) await _releaseLogoRead.Task;
+            return Logos[idx];
         }
 
-        public void ReleaseFirstTemplateRead() => _releaseFirstTemplate.TrySetResult();
+        public void ReleaseLogoRead() => _releaseLogoRead.TrySetResult();
     }
 
     public void Dispose()

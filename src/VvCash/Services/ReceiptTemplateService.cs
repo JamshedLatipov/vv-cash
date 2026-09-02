@@ -16,13 +16,17 @@ public class ReceiptTemplateService : IReceiptTemplateService
     /// поля. CompositePrinterService читает поставщик шаблона на пути печати, а
     /// пишет сюда фоновый цикл синхронизации — тот же довод, что у
     /// CompositePrinterService._printers про volatile: без него читающий поток
-    /// может вовсе не увидеть новую ссылку. Но одного volatile на КАЖДОЕ поле по
-    /// отдельности мало: две наложившихся RefreshAsync (фоновый цикл плюс кнопка
-    /// "Полная переинициализация" на экране кассы) писали бы Current и Logo
-    /// раздельно, и более медленная могла дозаписать Logo от своего прогона
-    /// поверх Current от чужого — комбинация, которой на сервере никогда не
-    /// существовало. Один volatile на неизменяемую пару чинит и видимость, и
-    /// этот рассинхрон разом.</summary>
+    /// может вовсе не увидеть новую ссылку (это конкретное свойство — видимость
+    /// между потоками — воспроизвести юнит-тестом внутри одного процесса нечем;
+    /// довод остаётся зафиксирован здесь как документация, не как утверждение,
+    /// подкреплённое тестом). Но одного volatile на КАЖДОЕ поле по отдельности
+    /// мало: две наложившихся RefreshAsync (фоновый цикл плюс кнопка "Полная
+    /// переинициализация" на экране кассы) писали бы Current и Logo раздельно, и
+    /// путь печати — единственный настоящий читатель — в _refreshGate ниже не
+    /// заходит вовсе, так что семафор его от половинчатого снимка не защищает.
+    /// Один volatile на неизменяемую пару, публикуемую одним присваиванием, —
+    /// вот что защищает читателя: он либо видит старый снимок целиком, либо
+    /// новый целиком, никогда смесь.</summary>
     private sealed record Snapshot(ReceiptTemplate Template, string Logo);
 
     private static readonly Snapshot DefaultSnapshot = new(ReceiptTemplate.Default, string.Empty);
@@ -30,11 +34,23 @@ public class ReceiptTemplateService : IReceiptTemplateService
     private volatile Snapshot _snapshot = DefaultSnapshot;
 
     /// <summary>Сериализует сами обновления — тем же приёмом, что
-    /// CompositePrinterService._rebuildGate. Смешанную пару выше это не лечит
-    /// второй раз (снимок один и неизменяемый, значит она и так невозможна) —
-    /// без семафора два наложившихся RefreshAsync просто читали бы SQLite
+    /// CompositePrinterService._rebuildGate. Смешанную пару выше это не лечит:
+    /// её чинит атомарность самой публикации (см. Snapshot). Семафор нужен
+    /// отдельно — без него два наложившихся RefreshAsync просто читали бы SQLite
     /// вперемешку без всякой пользы, и результат определяло бы, какой из них
-    /// дописал последним, а не какой реально свежее.</summary>
+    /// дописал последним, а не какой реально свежее.
+    ///
+    /// RefreshGateTimeout, а не безусловный WaitAsync(): застрявшее обновление
+    /// (медленный диск, упавший SQLite-драйвер) иначе ставило бы в очередь все
+    /// следующие без права уйти — включая вызов из фонового цикла синхронизации,
+    /// который в бою и обнаружил бы затор первым, — и единственным потолком было
+    /// бы тридцатисекундное умолчание таймаута команды SQLite. Пять секунд —
+    /// щедрый запас над замеренными ~435 мс миграции на холодном старте, но
+    /// далеко от получаса. Пропуск, а не ожидание в очереди: следующая
+    /// синхронизация по расписанию всё равно перечитает кэш, а вторая копия
+    /// того же чтения, стоящая в очереди за первой, смысла не имеет.</summary>
+    private static readonly TimeSpan RefreshGateTimeout = TimeSpan.FromSeconds(5);
+
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     /// <summary>Once true, единственный удавшийся когда-либо RefreshAsync уже
@@ -48,8 +64,7 @@ public class ReceiptTemplateService : IReceiptTemplateService
 
     public string Logo => _snapshot.Logo;
 
-    /// <summary>Читает шаблон и логотип из кэша как одну операцию. Три отдельных
-    /// дефекта из ревью Task 10 закрыты здесь разом:
+    /// <summary>Читает шаблон и логотип из кэша как одну операцию.
     ///
     /// 1. InitializeAsync() вызывается здесь, внутри общего перехвата, а не
     /// отдельной голой строкой в App.axaml.cs. Раньше она стояла без перехвата, и
@@ -63,26 +78,49 @@ public class ReceiptTemplateService : IReceiptTemplateService
     /// удались. Раньше Current обновлялся сразу после разбора шаблона, а Logo —
     /// отдельной следующей строкой; сбой чтения логотипа откатывал перехватом уже
     /// обновлённый (годный!) шаблон обратно на дефолт, хотя причина отказа к
-    /// шаблону отношения не имела.
+    /// шаблону отношения не имела. Публикация в два шага (сначала Current с новым
+    /// шаблоном и старым логотипом, потом с новым логотипом) была бы такой же
+    /// дырой для читателя, даже без исключений: путь печати мог бы застать
+    /// смешанную пару прямо между двумя присваиваниями.
     ///
     /// 3. Сбой оставляет прежний снимок как есть, а не дефолт, — тот же принцип
     /// "любая беда оставляет закэшированное", что у SyncService и у состава
     /// принтеров, — и откатывается на дефолт только если вообще ничего ни разу не
     /// загрузилось (см. _hasLoaded, тот же приём, что HasLoaded у
     /// CashFeatureService). Иначе работающая касса деградировала бы до
-    /// дефолтного чека на первом же временном сбое — том самом, который весь
-    /// остальной код этой задачи специально учит переживать.</summary>
+    /// дефолтного чека на первом же временном сбое.
+    ///
+    /// ConfigureAwait(false) на каждом ожидании: этот метод зовётся блокирующе
+    /// (GetAwaiter().GetResult()) с потока интерфейса на старте App.axaml.cs. Пока
+    /// семафор свободен, всё заканчивается синхронно и это не имеет значения; но
+    /// если он занят (второй RefreshAsync уже отрабатывает — теоретически
+    /// возможно, если фоновый цикл синхронизации успел поднять ProductsSynced
+    /// одновременно со стартом), продолжение без ConfigureAwait(false) ушло бы
+    /// обратно в захваченный контекст, а поток интерфейса к этому моменту уже
+    /// заблокирован тем же вызовом — под настоящим SynchronizationContext
+    /// Avalonia это дедлок. Сегодня недостижимо (второй претендент на семафор
+    /// появляется только после логина, когда стартовый вызов уже отработал), но
+    /// запас прочности стоит одной строки. Полная страховка потребовала бы того
+    /// же и внутри OfflineStorageService (там свой SqliteConnection/await на
+    /// каждый вызов) — это осталось не сделано, вне границ этой правки.</summary>
     public async Task RefreshAsync()
     {
-        await _refreshGate.WaitAsync();
+        if (!await _refreshGate.WaitAsync(RefreshGateTimeout).ConfigureAwait(false))
+        {
+            Console.WriteLine(
+                "[ReceiptTemplateService] refresh skipped: a previous refresh is still in flight " +
+                $"after {RefreshGateTimeout.TotalSeconds}s, the next scheduled sync will retry");
+            return;
+        }
+
         try
         {
             try
             {
-                await _storage.InitializeAsync();
+                await _storage.InitializeAsync().ConfigureAwait(false);
 
-                var rawTemplate = await _storage.GetReceiptTemplateAsync();
-                var rawLogo = await _storage.GetReceiptLogoAsync();
+                var rawTemplate = await _storage.GetReceiptTemplateAsync().ConfigureAwait(false);
+                var rawLogo = await _storage.GetReceiptLogoAsync().ConfigureAwait(false);
 
                 _snapshot = new Snapshot(ReceiptTemplate.Parse(rawTemplate), rawLogo);
                 _hasLoaded = true;
