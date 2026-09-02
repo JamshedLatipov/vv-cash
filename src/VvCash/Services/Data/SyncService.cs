@@ -489,7 +489,8 @@ public class SyncService : ISyncService
     /// <summary>Забирает шаблон чека и логотип из конфига кассы. Любой отказ
     /// оставляет закэшированное: потеря эндпоинта не должна откатывать магазин
     /// на дефолтный чек, а отсутствие опции — нормальное состояние тенанта, где
-    /// миграция ещё не прогнана.
+    /// миграция ещё не прогнана. Пустое значение опции — тоже: см. развёрнутый
+    /// довод у нормализации внутри.
     ///
     /// internal, а не private: SyncServiceTest вызывает её напрямую —
     /// прогонять ради неё весь SyncAsync с товарами и остатками значит проверять
@@ -521,10 +522,33 @@ public class SyncService : ISyncService
                 return;
             }
 
-            var template = FindOptionValue(body, "receipt_template");
+            var rawTemplate = FindOptionValue(body, "receipt_template");
+            var rawLogo = FindOptionValue(body, "receipt_logo");
+
+            // Пустое значение — это НЕ настроенный шаблон, и кэш им затирать
+            // нельзя. Бэкенд отдаёт опцию через LEFT JOIN с COALESCE(c.val, '')
+            // (cashes/config_serializers.go), то есть после миграции опция
+            // приезжает КАЖДОЙ кассе, а касса, которой шаблон в бэкофисе не
+            // сохраняли, получает "" — неотличимо от «сервер прислал пустоту» на
+            // ровном месте. Сохранять её означает уничтожить рабочий шаблон,
+            // который уже лежит в SQLite, из-за конфига, который про эту кассу
+            // ничего не знает; ReceiptTemplate.Parse("") даёт Default, и касса
+            // печатает раскладку по умолчанию.
+            //
+            // Цена решения: администратор, стерший значение в бэкофисе НАМЕРЕННО,
+            // больше не вернёт кассу на встроенную раскладку — касса продолжит
+            // печатать последний непустой шаблон. Пустая строка на проводе не
+            // отличается от «значения нет вовсе» (COALESCE их схлопывает), так что
+            // одно из двух поведений выбрать всё равно придётся, и «не терять
+            // настроенный чек» дороже: молча испорченный чек в бою — это отказ на
+            // кассе, а откат к дефолту делается сохранением обычного шаблона.
+            // Отличать их можно только на бэкенде, отдавая null там, где строки в
+            // configs нет вовсе.
+            var template = string.IsNullOrWhiteSpace(rawTemplate) ? null : rawTemplate;
+            var logo = string.IsNullOrWhiteSpace(rawLogo) ? null : rawLogo;
+
             if (template != null) await _storageService.SaveReceiptTemplateAsync(template);
 
-            var logo = FindOptionValue(body, "receipt_logo");
             if (logo != null) await _storageService.SaveReceiptLogoAsync(logo);
 
             // Перечитать снимок в памяти здесь же, а не только через
@@ -541,13 +565,33 @@ public class SyncService : ISyncService
                 if (_receiptTemplates != null) await _receiptTemplates.RefreshAsync();
             }
 
-            Console.WriteLine($"[SyncService] receipt template: {(template == null ? "absent" : "cached")}");
+            Console.WriteLine(
+                $"[SyncService] receipt template: {DescribeOptionValue(rawTemplate)}, " +
+                $"logo: {DescribeOptionValue(rawLogo)}");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[SyncService] receipt template sync error: {ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    /// <summary>Три РАЗНЫХ состояния одной строки лога, которые до этого
+    /// сливались в одно слово "cached". Разбор реального обращения: лог кассы
+    /// говорил "receipt template: cached" на каждой синхронизации, а печатался
+    /// дефолтный чек — потому что "cached" писалось и для пустого значения, и
+    /// единственным способом отличить одно от другого было лезть в SQLite
+    /// магазина. Слово "empty" стоило бы того часа само по себе.
+    ///
+    /// Длина, а не первые символы значения: шаблон — это конфиг магазина, ему не
+    /// место в логе целиком, а длины хватает, чтобы отличить приехавший шаблон от
+    /// обрезанного и увидеть, что после сохранения в бэкофисе он реально
+    /// изменился.</summary>
+    private static string DescribeOptionValue(string? raw) => raw switch
+    {
+        null => "absent",
+        _ when string.IsNullOrWhiteSpace(raw) => "empty, keeping cache",
+        _ => $"cached, {raw.Length} chars",
+    };
 
     /// <summary>Ищет значение опции по коду. Опция, засеянная до 20260728000800,
     /// приезжает с code = "" — сегодня таких два десятка, — но отдельной проверки

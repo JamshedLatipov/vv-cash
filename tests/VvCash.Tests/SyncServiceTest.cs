@@ -656,19 +656,22 @@ public class SyncServiceTest
     }
 
     [Fact]
-    public async Task SyncReceiptTemplateAsync_OverwritesTheCache_WhenTheOptionIsPresentButEmpty()
+    public async Task SyncReceiptTemplateAsync_KeepsTheCache_WhenTheOptionIsPresentButEmpty()
     {
         // Постоянное состояние ПОСЛЕ миграции 20260728000800, а не временное "опции
         // нет вовсе" выше (до миграции): бэкенд отдаёт опцию через LEFT JOIN c
-        // COALESCE(val, ''), так что после миграции она есть у КАЖДОЙ кассы, а до
-        // первой настройки в бэкофисе её значение — пустая строка, не null и не
-        // отсутствие поля/группы. Это не отказ: status=0, тело валидно, опция
-        // найдена по коду — и по документированному контракту
-        // IOfflineStorageService.SaveReceiptTemplateAsync пустая строка неотличима
-        // от "шаблон никогда не приезжал" (ReceiptTemplate.Parse даёт Default на
-        // обоих), так что затирание кэша здесь — осознанный выбор, а не дыра:
-        // обычный успешный ответ обязан затереть кэш тем, что реально прислал
-        // сервер, точно так же, как затирает его непустое значение выше.
+        // COALESCE(val, ''), так что после миграции она есть у КАЖДОЙ кассы, а
+        // касса, которой шаблон в бэкофисе не сохраняли, получает пустую строку —
+        // не null и не отсутствие поля/группы.
+        //
+        // Раньше этот тест утверждал обратное — что успешный ответ обязан затереть
+        // кэш тем, что прислал сервер. Довод был в том, что пустая строка и
+        // "шаблон никогда не приезжал" для ReceiptTemplate.Parse одинаковы, и это
+        // так — но только пока кэш пуст. У магазина с настроенным шаблоном тот же
+        // ответ уничтожал рабочий чек: одна касса, которой значение не сохранили
+        // (или сохранили другой кассе — значение лежит в configs на пару
+        // config_option_id + cash_id), тянула за собой Parse("") → Default, и чек
+        // становился дефолтным без единой строки в логе.
         var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
         var body = """
         {"status":0,"body":[{"id":"g1","name":"Чек","options":[
@@ -679,7 +682,47 @@ public class SyncServiceTest
 
         await sync.SyncReceiptTemplateAsync("http://x/");
 
-        Assert.Equal(string.Empty, storage.ReceiptTemplate);
+        Assert.Contains("\"width\":48", storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_KeepsTheCachedLogo_WhenTheOptionIsPresentButEmpty()
+    {
+        // Логотип живёт отдельной опцией и приезжает тем же LEFT JOIN, значит
+        // страдает ровно так же — а без этого теста мутация, снимающая
+        // нормализацию с логотипа и оставляющая её на шаблоне, красит ноль тестов.
+        var storage = new FakeStorage { ReceiptLogo = "AAECAw==" };
+        var body = """
+        {"status":0,"body":[{"id":"g1","name":"Чек","options":[
+          {"id":"o2","name":"receiptLogo","description":"","value":"",
+           "code":"receipt_logo","value_type":"json"}]}]}
+        """;
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Equal("AAECAw==", storage.ReceiptLogo);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_KeepsTheCache_WhenTheValueIsOnlyWhitespace()
+    {
+        // Пробелы, а не пустая строка: значение шесть лет правилось руками через
+        // текстовое поле в бэкофисе, так что " " — не гипотеза, а Parse всё равно
+        // отдаёт на нём Default (он делает TrimStart и проверяет IsNullOrWhiteSpace).
+        // Проверка на string.Empty вместо IsNullOrWhiteSpace прошла бы такое значение
+        // дальше и затёрла кэш.
+        var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
+        var body = """
+        {"status":0,"body":[{"id":"g1","name":"Чек","options":[
+          {"id":"o1","name":"receiptTemplate","description":"","value":"   ",
+           "code":"receipt_template","value_type":"json"}]}]}
+        """;
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Contains("\"width\":48", storage.ReceiptTemplate);
     }
 
     [Fact]
@@ -772,6 +815,29 @@ public class SyncServiceTest
     {
         var templates = new CountingTemplates();
         var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.OK, ConfigWithoutOptions));
+        var sync = new SyncService(new HttpClient(handler), new FakeSettings(), new FakeStorage(),
+            new FakeExpenseDocuments(), templates);
+
+        await sync.SyncReceiptTemplateAsync("https://example.test/");
+
+        Assert.Equal(0, templates.Refreshes);
+    }
+
+    /// <summary>Опция есть, но пустая — сохранять снова нечего, и снимок в памяти
+    /// трогать не за чем. Отдельно от теста кэша выше: тот держит SQLite, а этот —
+    /// вторую половину пути, снимок, который читает печать. Без него нормализация
+    /// могла бы не писать в кэш, но всё равно гонять RefreshAsync на каждой
+    /// синхронизации.</summary>
+    [Fact]
+    public async Task SyncReceiptTemplate_EmptyValue_DoesNotRefresh()
+    {
+        var templates = new CountingTemplates();
+        var body = """
+        {"status":0,"body":[{"id":"g","name":"Чек","options":[
+          {"id":"o","name":"Шаблон чека","description":"","value":"",
+           "code":"receipt_template","value_type":"json"}]}]}
+        """;
+        var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body));
         var sync = new SyncService(new HttpClient(handler), new FakeSettings(), new FakeStorage(),
             new FakeExpenseDocuments(), templates);
 
