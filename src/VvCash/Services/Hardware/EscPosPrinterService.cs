@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.IO.Ports;
 using System.Net.Sockets;
@@ -8,6 +7,9 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Models.Receipt;
+using VvCash.Services.Logging;
+using VvCash.Services.Rendering;
 
 namespace VvCash.Services.Hardware;
 
@@ -17,6 +19,7 @@ public class EscPosPrinterService : IPrinterService
     private readonly string _connectionString;
     private readonly EscPosCodePage _codePage;
     private readonly PrintRole _roles;
+    private readonly Func<(ReceiptTemplate Template, string Logo)> _template;
     private PrinterStatus _status = PrinterStatus.Ready;
 
     public PrinterStatus Status => _status;
@@ -83,87 +86,163 @@ public class EscPosPrinterService : IPrinterService
     private static readonly byte[] CmdLineFeed = { 0x0A };
     public static readonly byte[] CmdDrawerKick = { 0x1B, 0x70, 0x00, 0x19, 0xFA };
 
+    /// <param name="template">Поставщик, а не значение: шаблон приезжает
+    /// синхронизацией в произвольный момент, и читать его надо в момент печати.
+    /// Иначе новый шаблон ждал бы перезапуска кассы. Null — печатать дефолтом
+    /// без логотипа; служба, собранная на экране настроек ради пробной печати,
+    /// шаблон не использует вовсе.
+    ///
+    /// Пара (Template, Logo), а не один Template: логотип живёт в отдельной
+    /// опции конфига (receipt_logo) и обязан ехать до рендерера вместе с
+    /// шаблоном, но одним поколением — см. ReceiptTemplateService.Snapshot и
+    /// её CurrentTemplateAndLogo. Поставщик здесь обязан отдавать оба значения
+    /// ЗА ОДНО обращение к своему источнику: `() => (t.Current, t.Logo)` читал
+    /// бы источник дважды и мог бы вернуть шаблон одного поколения с
+    /// логотипом другого — ровно ту рассинхронизацию, которую снимок
+    /// ReceiptTemplateService чинит внутри себя.
+    ///
+    /// Контракт вызова — три требования, и все жёсткие:
+    /// - дешёвый и неблокирующий, без ввода-вывода и без разбора JSON на каждый
+    ///   вызов: зовётся синхронно, на том же потоке, что печатает, и до первого
+    ///   await внутри печати. Замер: поставщик на 400 мс при двух принтерах в
+    ///   составе даёт 831 мс замороженного интерфейса, и не разово, а
+    ///   последовательно на каждый принтер — цена умножается на их число;
+    /// - потокобезопасный: сегодня печать зовёт его с одного потока, но это
+    ///   свойство состава принтеров конкретно сейчас, а не контракта самого
+    ///   поставщика;
+    /// - возвращает шаблон, который после возврата никто не мутирует.
+    ///   ReceiptTemplate.Blocks — обычный List, не потокобезопасный (см.
+    ///   комментарий у ReceiptTemplate.Default); правка списка в одном потоке
+    ///   одновременно с печатью в другом даёт исключение посреди чека, а
+    ///   поставщик — ровно тот шов, через который синхронизация может
+    ///   подсунуть на печать общий изменяемый экземпляр.</param>
     public EscPosPrinterService(PrinterConnectionType connectionType, string connectionString,
-        EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt)
+        EscPosCodePage codePage, PrintRole roles = PrintRole.Receipt,
+        Func<(ReceiptTemplate Template, string Logo)>? template = null)
     {
         _connectionType = connectionType;
         _connectionString = connectionString;
         _codePage = codePage;
         _roles = roles;
+        _template = template ?? (() => (ReceiptTemplate.Default, string.Empty));
     }
 
-    /// <summary>Builds the sale receipt bytes. Static and separate from sending
-    /// so the layout can be asserted on, exactly as BuildReturnReceipt is.</summary>
+    /// <summary>Чек этого принтера, собранный по действующему шаблону. Экземплярный
+    /// в отличие от статического BuildSaleReceipt: шаблон — свойство принтера, а
+    /// не аргумента вызова.
+    ///
+    /// Складывает аргументы в SaleReceiptData и зовёт перегрузку ниже, а не
+    /// сам поставщик шаблона: _template() читается там ровно один раз, и
+    /// звать его ещё раз здесь означало бы два отдельных обращения к
+    /// поставщику на одну печать — тот же довод, по которому его контракт
+    /// требует "потокобезопасный и дешёвый", а не "бесплатный и вызываемый
+    /// сколько угодно раз". Порядок полей на этом стыке держит
+    /// ReceiptTemplateWiringTest.BuildConfiguredSaleReceipt_PlacesWarehouseAndSellerInTheirOwnFields —
+    /// перестановка warehouseName/sellerName красит его в красный.</summary>
+    public byte[] BuildConfiguredSaleReceipt(IEnumerable<CartItem> items,
+        decimal subtotal, decimal discount, decimal total,
+        string? discountName = null, string? documentNumber = null, string? warehouseName = null,
+        string? sellerName = null, string? saleDate = null, string? queueNumber = null)
+        => BuildConfiguredSaleReceipt(new SaleReceiptData(new List<CartItem>(items), subtotal, discount, total,
+            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber));
+
+    /// <summary>Та же сборка, но из готовой записи — вход для PrintKitchenOrderAsync.
+    /// Не перегрузка выше плюс раскладка sale на десять аргументов: у
+    /// SaleReceiptData.QueueNumber уже есть отдельный документированный
+    /// комментарий о том, почему так раскладывать нельзя — раскладка читает
+    /// queueNumber, переданный отдельным параметром, и никогда не заглядывает
+    /// в само поле записи, так что значение, уже лежащее в sale.QueueNumber,
+    /// молча перебивалось бы. Эта перегрузка передаёт запись как есть, без
+    /// промежуточной пересборки.</summary>
+    public byte[] BuildConfiguredSaleReceipt(SaleReceiptData sale)
+    {
+        var (template, logo) = _template();
+        return BuildSaleReceipt(_codePage, sale, template, logo);
+    }
+
+    /// <summary>Собирает байты чека продажи из десяти позиционных аргументов.
+    /// Раскладка живёт в ReceiptRenderer, байты — в EscPosEmitter; эта
+    /// перегрузка только складывает аргументы в SaleReceiptData и передаёт
+    /// его перегрузке ниже.
+    ///
+    /// Ни один боевой вызывающий её больше не зовёт. BuildConfiguredSaleReceipt
+    /// (items, ...) — тот экземплярный метод, что раньше звал её напрямую с
+    /// _template() последним аргументом, — теперь сам собирает SaleReceiptData
+    /// и делегирует BuildConfiguredSaleReceipt(SaleReceiptData) (см. его
+    /// комментарий: _template() обязан читаться ровно один раз на печать, а
+    /// не по разу на каждую перегрузку на пути). Эта статическая перегрузка
+    /// остаётся ради тестов, которые строят чек по десяти отдельным
+    /// переменным напрямую, в обход печатающего экземпляра принтера —
+    /// EscPosUnitTest, QueueDocumentsTest, SaleReceiptGoldenTest,
+    /// ReceiptTemplateWiringTest.
+    ///
+    /// logo — параметр для симметрии с перегрузкой ниже, а не потому что у
+    /// него сегодня есть боевой вызывающий: без него любой будущий код,
+    /// решивший собрать чек по десяти переменным напрямую (а не через
+    /// принтер), молча остался бы без логотипа, даже если он у него есть.
+    ///
+    /// template = null означает «шаблон с сервера не доехал» и берёт
+    /// ReceiptTemplate.Default, который печатает ровно то, что печаталось до
+    /// перевода на блоки. Это свойство закреплено SaleReceiptGoldenTest.</summary>
     public static byte[] BuildSaleReceipt(
         EscPosCodePage codePage,
         IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total,
         string? discountName = null,
         string? documentNumber = null, string? warehouseName = null,
         string? sellerName = null, string? saleDate = null,
-        string? queueNumber = null)
+        string? queueNumber = null,
+        ReceiptTemplate? template = null,
+        string? logo = null)
     {
-        using var ms = new MemoryStream();
-        WriteInit(ms, codePage);
-        Write(ms, CmdAlignCenter);
-        Write(ms, CmdDoubleSizeOn);
-        WriteLine(ms, "VV CASH POS", codePage);
-        Write(ms, CmdDoubleSizeOff);
-        // Бегунок — это тот же чек с номером в шапке, а не отдельный документ:
-        // расходиться с чеком при первой правке раскладки ему незачем. Пусто —
-        // печатается клиентский чек, и номера на нём нет по решению спеки.
-        if (!string.IsNullOrWhiteSpace(queueNumber))
-        {
-            Write(ms, CmdDoubleSizeOn);
-            Write(ms, CmdBoldOn);
-            WriteLine(ms, $"# {queueNumber}", codePage);
-            Write(ms, CmdBoldOff);
-            Write(ms, CmdDoubleSizeOff);
-        }
-        // The same four facts the return and exchange receipts carry, and for the same
-        // reason: without them a sale receipt brought back to the till cannot be matched
-        // to its document. Each is omitted when absent rather than printed empty — an
-        // offline sale has no document number yet, and a register with seller switching
-        // off has no seller to name.
-        if (!string.IsNullOrWhiteSpace(documentNumber)) WriteLine(ms, $"Doc #{documentNumber}", codePage);
-        if (!string.IsNullOrWhiteSpace(saleDate)) WriteLine(ms, saleDate!, codePage);
-        if (!string.IsNullOrWhiteSpace(warehouseName)) WriteLine(ms, $"Whse: {warehouseName}", codePage);
-        if (!string.IsNullOrWhiteSpace(sellerName)) WriteLine(ms, $"Seller: {sellerName}", codePage);
-        WriteLine(ms, "----------------------------", codePage);
-        Write(ms, CmdAlignLeft);
-        foreach (var item in items)
-        {
-            var line = $"{item.Product.Name} x{item.QuantityDisplay}";
-            // No currency symbol. It was hardcoded to "$" on every line and total of
-            // every sale, in stores that do not take dollars — and the return and
-            // exchange receipts next to it have always printed the bare amount.
-            var price = Money(item.LineTotal);
-            WriteLine(ms, PadLine(line, price, 32), codePage);
+        var sale = new SaleReceiptData(
+            new List<CartItem>(items), subtotal, discount, total,
+            discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber);
 
-            // A unit line prints both figures: the customer asked for square
-            // metres and is billed for whole tiles, and showing only one of the
-            // two makes the round-up look like an error.
-            if (item.Product.HasSecondaryUnit)
-                WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
-        }
-        WriteLine(ms, "----------------------------", codePage);
-        WriteLine(ms, PadLine("Subtotal:", Money(subtotal), 32), codePage);
-        if (discount > 0)
-        {
-            WriteLine(ms, PadLine("Discount:", $"-{Money(discount)}", 32), codePage);
-            if (!string.IsNullOrWhiteSpace(discountName))
-                WriteLine(ms, Truncate(discountName!, 32), codePage);
-        }
+        return BuildSaleReceipt(codePage, sale, template, logo);
+    }
 
-        Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
-        Write(ms, CmdBoldOff);
-        WriteLine(ms, "----------------------------", codePage);
-        Write(ms, CmdAlignCenter);
-        WriteLine(ms, "Thank you for shopping!", codePage);
-        Write(ms, CmdLineFeed);
-        Write(ms, CmdLineFeed);
-        Write(ms, CmdCut);
-        return ms.ToArray();
+    /// <summary>Тот же чек, но из готовой записи — вход для вызывающего кода,
+    /// у которого SaleReceiptData уже есть целиком, а не из десяти отдельных
+    /// переменных. Заведена ради PrintKitchenOrderAsync: раньше он раскладывал
+    /// свой sale на те же десять аргументов и звал перегрузку выше, которая
+    /// тут же собирала из них новую такую же запись — круг, а не пропуск
+    /// значения, и на этом круге терялось QueueNumber самой записи, потому
+    /// что старый путь читал одноимённый позиционный параметр, а не поле
+    /// sale.QueueNumber. Через эту перегрузку запись едет до Render один раз,
+    /// без промежуточной пересборки.
+    ///
+    /// Чек продажи — единственный документ в этом файле, собранный так. Пять
+    /// остальных (пречек, талон, чек возврата, чек обмена, пробный чек) всё
+    /// ещё пишут байты сами, теми же WriteInit/Write/WriteLine и своими
+    /// строковыми литералами, что и этот метод писал до перевода на шаблон.
+    /// Это не недосмотр: план, который завёл ReceiptTemplate и рендерер, их
+    /// нарочно не трогает (см. Task 13 в плане), и EscPosEmitter держит
+    /// собственную копию CmdCancelKanji с комментарием об этом же дублировании.
+    /// Так что асимметрия — текущая граница объёма этой работы, а не
+    /// промежуточное состояние с известной датой закрытия; перевод остальных
+    /// пяти — отдельная, пока не заведённая задача.
+    ///
+    /// Снимка списка здесь нет, в отличие от перегрузки выше (та оборачивает
+    /// items в new List&lt;CartItem&gt;): sale.Items уже типизирован как
+    /// IReadOnlyList — контракт, что список принадлежит вызывающему и не
+    /// изменится под рукой, а не сигнал скопировать его ещё раз. Снимок,
+    /// если он вообще нужен, — забота того, кто строит SaleReceiptData;
+    /// сегодня единственный вызывающий (PrintKitchenOrderAsync) уже получает
+    /// свой sale с items, снятыми через .ToList() выше по стеку, но по
+    /// другой причине — ClearCart() очищает корзину раньше, чем письмо
+    /// успевает уйти в очередь.
+    ///
+    /// logo — новый последний параметр со значением по умолчанию null:
+    /// каждый существующий вызывающий этой перегрузки (тесты в первую очередь)
+    /// продолжает собирать чек без логотипа, ничего не меняя в своём коде;
+    /// его передаёт только BuildConfiguredSaleReceipt(SaleReceiptData), уже
+    /// распаковавший пару (Template, Logo) из поставщика.</summary>
+    public static byte[] BuildSaleReceipt(EscPosCodePage codePage, SaleReceiptData sale,
+        ReceiptTemplate? template = null, string? logo = null)
+    {
+        return EscPosEmitter.Emit(
+            ReceiptRenderer.Render(template ?? ReceiptTemplate.Default, sale, logo),
+            codePage);
     }
 
     /// <summary>Образец, по которому на точке решают, угадана ли таблица.
@@ -215,14 +294,15 @@ public class EscPosPrinterService : IPrinterService
     {
         try
         {
-            await SendAsync(BuildSaleReceipt(_codePage, items, subtotal, discount, total, discountName,
+            await SendAsync(BuildConfiguredSaleReceipt(items, subtotal, discount, total, discountName,
                 documentNumber, warehouseName, sellerName, saleDate));
             SetStatus(PrinterStatus.Ready);
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -246,7 +326,7 @@ public class EscPosPrinterService : IPrinterService
             if (item.Product.HasSecondaryUnit)
                 WriteLine(ms, $"    {item.QuantityInUnitDisplay} {item.Product.UnitShortName}", codePage);
         }
-        WriteLine(ms, PadLine("TOTAL:", Money(total), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine("TOTAL:", ReceiptText.Money(total), 32), codePage);
         Write(ms, CmdLineFeed);
         Write(ms, CmdCut);
         return ms.ToArray();
@@ -287,7 +367,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Pre-receipt print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Pre-receipt print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -303,7 +384,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ticket print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Ticket print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -313,15 +395,20 @@ public class EscPosPrinterService : IPrinterService
     {
         try
         {
-            await SendAsync(BuildSaleReceipt(_codePage, sale.Items, sale.Subtotal, sale.Discount, sale.Total,
-                sale.DiscountName, sale.DocumentNumber, sale.WarehouseName, sale.SellerName, sale.SaleDate,
-                queueNumber));
+            // sale with { QueueNumber = queueNumber }, а не sale.Items/.Subtotal/…
+            // разложенные по позиционным аргументам BuildSaleReceipt: тот путь
+            // собирал внутри себя новую SaleReceiptData и никогда не читал
+            // sale.QueueNumber, так что любое значение этого поля молча
+            // пропадало. With-выражение несёт запись целиком дальше одним
+            // объектом, с бегунком в ней.
+            await SendAsync(BuildConfiguredSaleReceipt(sale with { QueueNumber = queueNumber }));
             SetStatus(PrinterStatus.Ready);
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Kitchen order print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Kitchen order print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -350,24 +437,6 @@ public class EscPosPrinterService : IPrinterService
         var bytes = codePage.Encoding.GetBytes(text + "\n");
         ms.Write(bytes, 0, bytes.Length);
     }
-    /// <summary>Amounts on a receipt, formatted the same way on every register.
-    /// Interpolating with ":F2" took the decimal separator from the operating
-    /// system's locale, so the same sale printed 20.00 on one till and 20,00 on the
-    /// next — and CartItem.QuantityDisplay, right beside it on the line, has always
-    /// used the invariant form.</summary>
-    private static string Money(decimal value) => value.ToString("F2", CultureInfo.InvariantCulture);
-
-    private static string PadLine(string left, string right, int width)
-    {
-        var spaces = width - left.Length - right.Length;
-        return left + new string(' ', Math.Max(1, spaces)) + right;
-    }
-
-    /// <summary>Clips a label to the paper width. A promotion name is free text and
-    /// a long one would wrap into a ragged second line on a 32-column roll.</summary>
-    private static string Truncate(string s, int width)
-        => s.Length <= width ? s : s.Substring(0, width);
-
     /// <summary>protected virtual, а не private: иначе маршрутизацию документов по
     /// ролям нельзя проверить, не открыв сокет. Боевой код это не меняет — ветки
     /// транспорта остаются здесь же, ниже.</summary>
@@ -522,7 +591,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Printer status subscriber failed: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Printer status subscriber failed: {chain}");
         }
     }
 
@@ -545,10 +615,10 @@ public class EscPosPrinterService : IPrinterService
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdAlignLeft);
         foreach (var l in lines)
-            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", ReceiptText.Money(l.LineRefund), 32), codePage);
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
-        WriteLine(ms, PadLine("REFUND:", Money(totalRefund), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine("REFUND:", ReceiptText.Money(totalRefund), 32), codePage);
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
@@ -569,7 +639,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Return receipt print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Return receipt print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -585,7 +656,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Cash drawer error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Cash drawer error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }
@@ -618,18 +690,18 @@ public class EscPosPrinterService : IPrinterService
 
         WriteLine(ms, "RETURNED:", codePage);
         foreach (var l in returned)
-            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", ReceiptText.Money(l.LineRefund), 32), codePage);
 
         WriteLine(ms, "ISSUED:", codePage);
         foreach (var l in issued)
-            WriteLine(ms, PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", Money(l.LineRefund), 32), codePage);
+            WriteLine(ms, ReceiptText.PadLine($"{l.Name} x{QuantityFormat.Display(l.Quantity, "0.###")}", ReceiptText.Money(l.LineRefund), 32), codePage);
 
         WriteLine(ms, "----------------------------", codePage);
         Write(ms, CmdBoldOn);
         // An even swap owes nothing in either direction; without its own label it
         // printed "REFUND: 0.00" and invited the customer to ask for the money.
         var label = difference > 0 ? "AMOUNT DUE:" : difference < 0 ? "REFUND:" : "NO DIFFERENCE:";
-        WriteLine(ms, PadLine(label, Money(Math.Abs(difference)), 32), codePage);
+        WriteLine(ms, ReceiptText.PadLine(label, ReceiptText.Money(Math.Abs(difference)), 32), codePage);
         Write(ms, CmdBoldOff);
         Write(ms, CmdLineFeed);
         Write(ms, CmdLineFeed);
@@ -651,7 +723,8 @@ public class EscPosPrinterService : IPrinterService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Exchange receipt print error: {ex.Message}");
+            var chain = AppLogging.DescribeChain(ex);
+            Console.WriteLine($"Exchange receipt print error: {chain}");
             SetStatus(PrinterStatus.Error);
             return false;
         }

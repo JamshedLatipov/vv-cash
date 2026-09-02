@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Models.Receipt;
 using VvCash.Services;
 using VvCash.Services.Hardware;
 using Xunit;
@@ -143,5 +144,48 @@ public class CompositePrinterServiceTest
         var composite = new CompositePrinterService(settings);
 
         Assert.Equal(PrintRole.Ticket | PrintRole.KitchenOrder, composite.Printers[0].Roles);
+    }
+
+    /// <summary>Тот же пробел, что и с кодовой страницей и ролями выше, только для
+    /// шаблона: фабрика по умолчанию — единственный код, который реально отдаёт
+    /// поставщика шаблона каждому принтеру, и никакой другой тест до неё не
+    /// доходит — PrinterRoutingTest всегда подставляет свою фабрику. Убери
+    /// проброс template из фабрики по умолчанию в CompositePrinterService — и
+    /// это единственное, что заметит пропажу: остальные 1089 тестов останутся
+    /// зелёными, потому что ни один принтер, собранный где-либо ещё в наборе,
+    /// не получает шаблон отдельно от этой строки.
+    ///
+    /// template: именованным параметром и без printerFactory — иначе подмена
+    /// фабрики (как везде в этом файле и в PrinterRoutingTest) обошла бы именно
+    /// ту строку, которую тест обязан проверить.</summary>
+    [Fact]
+    public void EachPrinterReadsTheSameLiveTemplate_FromTheSharedProviderOfTheDefaultFactory()
+    {
+        var settings = new FakeSettings
+        {
+            Printers =
+            {
+                new() { Name = "a", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.1:9100", IsEnabled = true },
+                new() { Name = "b", ConnectionType = PrinterConnectionType.LAN,
+                        ConnectionString = "10.0.0.2:9100", IsEnabled = true },
+            }
+        };
+
+        var current = ReceiptTemplate.Default;
+        var composite = new CompositePrinterService(settings, template: () => (current, ""));
+
+        // Меняем шаблон ПОСЛЕ сборки состава — свойство, ради которого поставщик
+        // вообще заведён: состав принтеров не пересобирается на смену шаблона, а
+        // каждый принтер обязан увидеть новое значение на следующей же печати.
+        current = new ReceiptTemplate
+        {
+            Width = 32,
+            Blocks = new List<ReceiptBlock> { new TextBlock { Content = "ЖИВОЙ ШАБЛОН" } },
+        };
+
+        Assert.Equal(2, composite.Printers.Count);
+        Assert.All(composite.Printers, p => Assert.Contains("ЖИВОЙ ШАБЛОН",
+            p.CodePage.Encoding.GetString(p.BuildConfiguredSaleReceipt(new List<CartItem>(), 0m, 0m, 0m))));
     }
 }

@@ -90,6 +90,8 @@
   "TestPrint": "Пробная печать",
   "TestPrintSent": "Пробный чек отправлен",
   "TestPrintFailed": "Пробная печать не удалась:",
+  "PaymentProcessed": "Оплата прошла. Спасибо за покупку!",
+  "PaymentProcessedReceiptNotPrinted": "Оплата прошла, но чек не напечатан.",
   "CustomerDisplay": "Дисплей покупателя",
   "DisplayPort": "Порт",
   "DisplayBaudRate": "Скорость",

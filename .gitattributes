@@ -5,3 +5,20 @@
 # machine. build/installer/build_mac.sh is run on a Mac by definition, so it would hit
 # this on its first use.
 *.sh text eol=lf
+
+# Golden receipt fixtures are compared byte-for-byte in SaleReceiptGoldenTest.
+# Today they happen to survive autocrlf because git sees a NUL byte inside and
+# guesses "binary" on its own; a future fixture with no NUL byte would not be
+# so lucky and would get silently rewritten on checkout. Force it instead of
+# relying on the guess.
+tests/VvCash.Tests/Fixtures/** binary
+
+# ...except the back-office preview fixture: it is meant to be read and
+# diffed by a human (see ReceiptPreviewGoldenTest and its own explicit LF +
+# trailing-newline normalization). The blanket "binary" rule above turns
+# `git diff`/GitHub review into "Binary files differ" for it, hiding the one
+# thing a reviewer needs to see when the golden text changes. A later,
+# path-specific line wins over the earlier glob for the same attribute, so
+# this restores normal text diffing for this one file only -- the five .bin
+# byte-lock fixtures above are untouched.
+tests/VvCash.Tests/Fixtures/receipt-golden.json text eol=lf diff

@@ -325,6 +325,7 @@ public class SyncService : ISyncService
             await SyncPromotionsAsync(baseUrl);
             await SyncMoneyPolicyAsync(baseUrl);
             await SyncFeaturesAsync(baseUrl);
+            await SyncReceiptTemplateAsync(baseUrl);
 
             SyncStatusChanged?.Invoke(this, true);
             ProductsSynced?.Invoke(this, EventArgs.Empty);
@@ -474,6 +475,82 @@ public class SyncService : ISyncService
         {
             Console.WriteLine($"[SyncService] features sync error: {ex.Message}");
         }
+    }
+
+    /// <summary>Забирает шаблон чека и логотип из конфига кассы. Любой отказ
+    /// оставляет закэшированное: потеря эндпоинта не должна откатывать магазин
+    /// на дефолтный чек, а отсутствие опции — нормальное состояние тенанта, где
+    /// миграция ещё не прогнана.
+    ///
+    /// internal, а не private: SyncServiceTest вызывает её напрямую —
+    /// прогонять ради неё весь SyncAsync с товарами и остатками значит проверять
+    /// не то.</summary>
+    internal async Task SyncReceiptTemplateAsync(string baseUrl)
+    {
+        try
+        {
+            var url = $"{baseUrl}cashes/config/get/";
+            Console.WriteLine($"[SyncService] GET {url}");
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[SyncService] receipt template: HTTP {(int)response.StatusCode}, keeping cache");
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("status", out var status) || status.GetInt32() != 0)
+            {
+                Console.WriteLine("[SyncService] receipt template: backend status != 0, keeping cache");
+                return;
+            }
+            if (!root.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.Array)
+            {
+                Console.WriteLine("[SyncService] receipt template: no body, keeping cache");
+                return;
+            }
+
+            var template = FindOptionValue(body, "receipt_template");
+            if (template != null) await _storageService.SaveReceiptTemplateAsync(template);
+
+            var logo = FindOptionValue(body, "receipt_logo");
+            if (logo != null) await _storageService.SaveReceiptLogoAsync(logo);
+
+            Console.WriteLine($"[SyncService] receipt template: {(template == null ? "absent" : "cached")}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SyncService] receipt template sync error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Ищет значение опции по коду. Опция, засеянная до 20260728000800,
+    /// приезжает с code = "" — сегодня таких два десятка, — но отдельной проверки
+    /// на пустую строку здесь нет: сравнение по строгому равенству само отсекает
+    /// её, потому что обе вызывающие стороны просят только непустой код
+    /// ("receipt_template", "receipt_logo"), и "" с ним никогда не совпадёт.
+    /// Раньше явная проверка string.IsNullOrEmpty(value) стояла "на всякий
+    /// случай"; ревью Task 10 нашло её мёртвой мутационным тестированием —
+    /// отключение проверки не красило ни один тест ни на одном достижимом
+    /// входе — и она была убрана вместе с тестом, который её не проверял, а
+    /// лишь дублировал сценарий "опция отсутствует".</summary>
+    private static string? FindOptionValue(JsonElement groups, string code)
+    {
+        foreach (var group in groups.EnumerateArray())
+        {
+            if (!group.TryGetProperty("options", out var options) || options.ValueKind != JsonValueKind.Array)
+                continue;
+
+            foreach (var option in options.EnumerateArray())
+            {
+                if (!option.TryGetProperty("code", out var c) || c.GetString() != code) continue;
+
+                return option.TryGetProperty("value", out var v) ? v.GetString() : null;
+            }
+        }
+        return null;
     }
 
     // Internal rather than private only so

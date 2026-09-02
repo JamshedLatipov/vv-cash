@@ -79,6 +79,33 @@ public partial class App : Application
             // one at startup.
             _queueServerHost = Services.GetRequiredService<QueueServerHost>();
 
+            // Шаблон читается из кэша один раз на старте — заново после каждой
+            // успешной синхронизации его перечитывает PosViewModel.OnProductsSyncedAsync,
+            // рядом с обновлением поставщика акций, который решает ту же задачу тем же
+            // способом. Не здесь: ISyncService зарегистрирован через AddHttpClient, а
+            // типизированный клиент в этом механизме — transient, так что
+            // GetRequiredService<ISyncService>() здесь строил бы ещё один экземпляр,
+            // не тот, что реально крутит фоновую синхронизацию и поднимает событие —
+            // подписка на нём была бы подпиской на выброшенный объект (ревью Task 10).
+            //
+            // InitializeAsync() базы данных — не отдельной строкой здесь, а внутри
+            // ReceiptTemplateService.RefreshAsync, под его собственным перехватом:
+            // именно InitializeAsync создаёт таблицу Settings, из которой
+            // RefreshAsync читает, и голая (без перехвата) строка отдельно здесь уже
+            // однажды роняла кассу на битой базе — обрыв питания, канонический
+            // сценарий порчи SQLite, раньше давал работающую кассу с пустым
+            // каталогом (см. комментарий OfflineStorageService), а голый вызов здесь
+            // давал необработанное исключение до создания MainWindow.
+            //
+            // GetAwaiter().GetResult() вместо await: OnFrameworkInitializationCompleted
+            // не async. Не бесплатно — миграции на холодном старте измерялись вплоть до
+            // ~435 мс на быстром диске, — но окно так и должно ждать: печатать нечем,
+            // пока раскладка не прочитана, а раскладка не прочитана, пока не
+            // отработали миграции; блокировать поток интерфейса на это время —
+            // осознанный выбор, а не то, что нужно чинить.
+            var receiptTemplates = Services.GetRequiredService<IReceiptTemplateService>();
+            receiptTemplates.RefreshAsync().GetAwaiter().GetResult();
+
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();
 
@@ -326,6 +353,7 @@ public partial class App : Application
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IOfflineStorageService, OfflineStorageService>();
         services.AddSingleton<ICashFeatureService, CashFeatureService>();
+        services.AddSingleton<IReceiptTemplateService, ReceiptTemplateService>();
         services.AddSingleton<ISessionContext, SessionContext>();
 
         // SellerSession's parameterless constructor is a test/manual-usage
@@ -422,7 +450,14 @@ public partial class App : Application
         services.AddHttpClient<IQuoteService, QuoteService>().AddHttpMessageHandler<AuthHeaderHandler>();
 
         // Hardware Services
-        services.AddSingleton<IPrinterService, CompositePrinterService>();
+        // Фабрика, а не регистрация по типу: составу принтеров нужен поставщик
+        // шаблона. Поставщик, а не значение — шаблон приезжает синхронизацией в
+        // произвольный момент и читается в момент печати, поэтому его смена
+        // состав принтеров не пересобирает.
+        services.AddSingleton<IPrinterService>(sp => new CompositePrinterService(
+            sp.GetRequiredService<ISettingsService>(),
+            printerFactory: null,
+            template: () => sp.GetRequiredService<IReceiptTemplateService>().CurrentTemplateAndLogo));
         services.AddSingleton<ICustomerDisplayService, ConfiguredCustomerDisplayService>();
 
         // Queue Services (Task 22/23). QueueStorage gets a factory rather than a type

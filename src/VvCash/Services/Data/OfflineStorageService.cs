@@ -819,6 +819,82 @@ public class OfflineStorageService : IOfflineStorageService
         return CashFeatures.Default;
     }
 
+    public Task SaveReceiptTemplateAsync(string raw) => SaveSettingAsync("ReceiptTemplate", raw);
+
+    public Task<string> GetReceiptTemplateAsync() => GetSettingAsync("ReceiptTemplate");
+
+    /// <summary>A real ceiling with plenty of headroom: a legitimate 80mm-tape logo in
+    /// base64 is tens of KB, so a couple of megabytes covers any real one while stopping
+    /// a runaway value from growing offline_data.db forever — SQLite does not shrink the
+    /// file back down on its own once a large row has been written and replaced.</summary>
+    private const int MaxReceiptLogoBase64Length = 2 * 1024 * 1024;
+
+    public Task SaveReceiptLogoAsync(string base64)
+    {
+        var value = base64 ?? string.Empty;
+        if (value.Length > MaxReceiptLogoBase64Length)
+        {
+            throw new ArgumentException(
+                $"Receipt logo is {value.Length} base64 characters, over the {MaxReceiptLogoBase64Length} limit.",
+                nameof(base64));
+        }
+
+        return SaveSettingAsync("ReceiptLogo", value);
+    }
+
+    public Task<string> GetReceiptLogoAsync() => GetSettingAsync("ReceiptLogo");
+
+    /// <summary>Shared by SaveReceiptTemplateAsync/SaveReceiptLogoAsync. This is now the
+    /// fourth shape writing a Settings row (MoneyPolicy and CashFeatures above each have
+    /// their own inline INSERT, and LastSyncVersion below has a fifth) — a candidate for
+    /// one shared path across the class, not attempted here since that is a class-wide
+    /// change and these helpers are private, so nothing outside this file depends on the
+    /// duplication.
+    ///
+    /// Like every method in this class, this blocks the calling thread for the duration
+    /// of the SQLite round trip rather than truly yielding — do not call it from a path
+    /// (e.g. receipt printing) that needs the calling thread free while it awaits.
+    ///
+    /// value ?? string.Empty: raw arrives here straight from a JSON payload upstream
+    /// (Task 10 onward), where a null property is legitimate. Without this, a null value
+    /// fails inside SqliteParameter binding with "Value must be set" — a confusing error
+    /// for what is really just an absent value that should be cached as empty.</summary>
+    private async Task SaveSettingAsync(string key, string value)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = @"
+            INSERT INTO Settings (Key, Value) VALUES ($Key, $Value)
+            ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value;
+        ";
+        command.Parameters.AddWithValue("$Key", key);
+        command.Parameters.AddWithValue("$Value", value ?? string.Empty);
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Fourth shape reading a Settings row, alongside MoneyPolicy, CashFeatures
+    /// and LastSyncVersion above — same consolidation candidate as SaveSettingAsync,
+    /// left alone for the same reason. Blocks the calling thread like every method in
+    /// this class; see SaveSettingAsync.
+    ///
+    /// `as string ?? string.Empty`, not a null-forgiving cast: the interface promises
+    /// Task&lt;string&gt; under nullable, and ExecuteScalarAsync returns null with no rows —
+    /// the missing-key case every one of these settings has on a fresh database.</summary>
+    private async Task<string> GetSettingAsync(string key)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Value FROM Settings WHERE Key = $Key";
+        command.Parameters.AddWithValue("$Key", key);
+
+        return await command.ExecuteScalarAsync() as string ?? string.Empty;
+    }
+
     public async Task SetLastSyncVersionAsync(int version)
     {
         using var connection = new SqliteConnection(_connectionString);

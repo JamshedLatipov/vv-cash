@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using VvCash.Models;
+using VvCash.Models.Receipt;
 
 namespace VvCash.Services.Hardware;
 
@@ -40,14 +41,35 @@ public class CompositePrinterService : IPrinterService
 
     /// <summary>Фабрика существует ради проверки маршрутизации: без неё состав
     /// принтеров создаётся внутри и подменить его нечем. По умолчанию — обычное
-    /// создание, боевой путь тот же, что был.</summary>
+    /// создание, боевой путь тот же, что был.
+    ///
+    /// printerFactory получает только PrinterConfig — переданный сюда template
+    /// до неё не доходит вовсе, делегат его не видит и не может передать
+    /// собранному принтеру. Своя фабрика целиком отвечает за то, какой
+    /// поставщик достанется собранному ею EscPosPrinterService, ровно как
+    /// сегодня отвечает за CodePage и Roles.</summary>
+    /// <param name="template">Поставщик шаблона и логотипа чека для принтеров
+    /// фабрики по умолчанию — пара (Template, Logo), а не один Template: см.
+    /// одноимённый параметр EscPosPrinterService(...) о том, почему это
+    /// именно пара за одно чтение источника, а не `() => (t.Current, t.Logo)`.
+    /// Отдаётся каждому принтеру как есть — читается он в момент печати,
+    /// поэтому смена шаблона состава не пересобирает.
+    ///
+    /// Контракт тот же, что у одноимённого параметра
+    /// EscPosPrinterService(...): дешёвый и неблокирующий, без ввода-вывода и
+    /// без разбора JSON на вызов — печать состава зовёт его на каждый принтер
+    /// последовательно на одном потоке, и медленный поставщик замораживает
+    /// интерфейс на сумму по всем принтерам сразу, а не один раз; потокобезопасный;
+    /// возвращает шаблон, который после возврата не мутируют (см. комментарий
+    /// того параметра — там же цифры замера и причина требования).</param>
     public CompositePrinterService(ISettingsService settingsService,
-        Func<PrinterConfig, EscPosPrinterService>? printerFactory = null)
+        Func<PrinterConfig, EscPosPrinterService>? printerFactory = null,
+        Func<(ReceiptTemplate Template, string Logo)>? template = null)
     {
         _settingsService = settingsService;
         _factory = printerFactory ?? (config => new EscPosPrinterService(
             config.ConnectionType, config.ConnectionString,
-            EscPosCodePages.Resolve(config.CodePageId), config.Roles));
+            EscPosCodePages.Resolve(config.CodePageId), config.Roles, template));
         _settingsService.SettingsChanged += OnSettingsChanged;
         InitializePrinters();
     }

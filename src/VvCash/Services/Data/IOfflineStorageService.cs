@@ -37,6 +37,37 @@ public interface IOfflineStorageService
     Task SaveCashFeaturesAsync(CashFeatures features);
     Task<CashFeatures> GetCashFeaturesAsync();
 
+    /// <summary>Сырое значение опции receipt_template, как его вернул сервер.
+    /// Именно сырое, а не разобранное: разбор — дело ReceiptTemplate.Parse, и
+    /// держать его в двух местах незачем.
+    ///
+    /// Пустая строка неотличима от «шаблон никогда не приезжал» — сохранённое
+    /// пустое и никогда не сохранённое читаются одинаково. Для шаблона это не
+    /// важно: ReceiptTemplate.Parse на обоих даёт один и тот же Default. Не
+    /// переноси это допущение на логотип ниже без проверки — там разница уже
+    /// существенна.
+    ///
+    /// Синхронно блокирует вызывающий поток на время обращения к SQLite (как и
+    /// весь этот класс) — не звать с пути печати чека.</summary>
+    Task SaveReceiptTemplateAsync(string raw);
+    Task<string> GetReceiptTemplateAsync();
+
+    /// <summary>Растровый логотип в base64, уже сведённый в один бит бэкофисом.
+    /// Отдельно от шаблона: 7–8 КБ не должны ездить внутри каждого шаблона.
+    ///
+    /// Пустая строка здесь — не только «логотип никогда не приезжал»: бэкофис
+    /// может стереть ранее заданный логотип, и сервер тогда законно присылает
+    /// пустое значение — тот же случай, что для акций в SyncService.SyncPromotionsAsync,
+    /// где пустое тело чистит кэш, а не оставляет прежнее значение висеть навсегда.
+    /// SaveReceiptLogoAsync обязана сохранить пустую строку как есть: молча
+    /// пропустить сохранение здесь значит оставить на чеке логотип, который в
+    /// бэкофисе уже удалили.
+    ///
+    /// Синхронно блокирует вызывающий поток на время обращения к SQLite (как и
+    /// весь этот класс) — не звать с пути печати чека.</summary>
+    Task SaveReceiptLogoAsync(string base64);
+    Task<string> GetReceiptLogoAsync();
+
     Task SetLastSyncVersionAsync(int version);
     Task SaveUnsyncedDocumentAsync(string hash, string payload);
     Task<IEnumerable<System.Collections.Generic.KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync();

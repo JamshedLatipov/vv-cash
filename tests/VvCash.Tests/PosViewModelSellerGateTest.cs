@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
+using VvCash.Models.Receipt;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
@@ -238,8 +239,13 @@ public class PosViewModelSellerGateTest
     {
         public PrinterStatus Status => PrinterStatus.Ready;
         public event EventHandler<PrinterStatus>? StatusChanged;
+        /// <summary>Settable so a test can simulate a sale receipt printer that is out of
+        /// paper or offline while the payment itself still goes through — the cashier must
+        /// be told the receipt did not print rather than see the ordinary success line.</summary>
+        public bool ReceiptFails { get; set; }
+
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
-            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
+            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(!ReceiptFails);
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
@@ -427,6 +433,10 @@ public class PosViewModelSellerGateTest
         public Task<MoneyPolicy> GetMoneyPolicyAsync() => Task.FromResult(MoneyPolicy.Default);
         public Task SaveCashFeaturesAsync(CashFeatures features) => Task.CompletedTask;
         public Task<CashFeatures> GetCashFeaturesAsync() => Task.FromResult(CashFeatures.Default);
+        public Task SaveReceiptTemplateAsync(string raw) => Task.CompletedTask;
+        public Task<string> GetReceiptTemplateAsync() => Task.FromResult(string.Empty);
+        public Task SaveReceiptLogoAsync(string base64) => Task.CompletedTask;
+        public Task<string> GetReceiptLogoAsync() => Task.FromResult(string.Empty);
         public Task SetLastSyncVersionAsync(int version) => Task.CompletedTask;
         public Task SaveUnsyncedDocumentAsync(string hash, string payload) => Task.CompletedTask;
         public Task<IEnumerable<KeyValuePair<string, string>>> GetUnsyncedDocumentsAsync() => Task.FromResult(Enumerable.Empty<KeyValuePair<string, string>>());
@@ -460,6 +470,11 @@ public class PosViewModelSellerGateTest
         // Lets a test flip PosViewModel's IsSystemOnline the same way the real
         // background ping does, without waiting on an actual timer.
         public void RaiseSyncStatusChanged(bool isOnline) => SyncStatusChanged?.Invoke(this, isOnline);
+
+        // Same idea for ProductsSynced: fires the event PosViewModel subscribes to in
+        // its own constructor (the real background sync loop's completion signal),
+        // without waiting on an actual sync round-trip.
+        public void RaiseProductsSynced() => ProductsSynced?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Stands in for the real AuthService: records whether/how many times
@@ -680,6 +695,23 @@ public class PosViewModelSellerGateTest
         public Task RefreshAsync() => Task.CompletedTask;
     }
 
+    /// <summary>RefreshCallCount, not just "was it called": ProductsSynced_RefreshesTheReceiptTemplate
+    /// below asserts it went up specifically after the event fired, the same shape
+    /// FakeSellerRosterService.RefreshCallCount already uses for the roster.</summary>
+    private class FakeReceiptTemplateService : IReceiptTemplateService
+    {
+        public ReceiptTemplate Current { get; set; } = ReceiptTemplate.Default;
+        public string Logo { get; set; } = string.Empty;
+        public (ReceiptTemplate Template, string Logo) CurrentTemplateAndLogo => (Current, Logo);
+        public int RefreshCallCount { get; private set; }
+
+        public Task RefreshAsync()
+        {
+            RefreshCallCount++;
+            return Task.CompletedTask;
+        }
+    }
+
     /// <summary>Stands in for the real SellerRosterService: RefreshAsync never throws
     /// (per its documented contract) and this fake just hands back whatever roster the
     /// test configured, defaulting to empty — an empty roster is a legitimate state,
@@ -718,6 +750,7 @@ public class PosViewModelSellerGateTest
         public FakePrinterService PrinterService { get; } = new();
         public FakeQueueClient QueueClient { get; } = new();
         public FakeQueueSettings QueueSettings { get; } = new();
+        public FakeReceiptTemplateService ReceiptTemplates { get; } = new();
 
         /// <summary>Вынесен сюда из CreateViewModel, где он строился на месте и был
         /// тесту недоступен: без этого ни один тест не мог увидеть, что именно уходит
@@ -752,6 +785,7 @@ public class PosViewModelSellerGateTest
             deps.RosterService,
             deps.AuthService,
             deps.Features,
+            deps.ReceiptTemplates,
             new UpdateViewModel(
                 new NoUpdateService(),
                 new NoInstallerLauncher(),
@@ -2947,6 +2981,26 @@ public class PosViewModelSellerGateTest
         Assert.Contains(nameof(vm.IsExchangeEnabled), raised);
     }
 
+    // ---------------------------------------------------------------------------------
+    // Receipt template refresh (Task 10 review). ISyncService is registered through
+    // AddHttpClient, whose typed client is transient -- App.axaml.cs used to resolve
+    // its own throwaway instance just to subscribe ProductsSynced, which is not the
+    // instance below that PosViewModel actually holds and that the real background
+    // sync loop raises the event on. Moving the refresh here, onto the constructor-
+    // injected _syncService this test's FakeSyncService IS, is what makes it reachable
+    // at all.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ProductsSynced_RefreshesTheReceiptTemplate()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        deps.SyncService.RaiseProductsSynced();
+
+        Assert.True(deps.ReceiptTemplates.RefreshCallCount > 0);
+    }
+
     [Fact]
     public void IsExchangeEnabled_FlagOnButOffline_False()
     {
@@ -3549,9 +3603,53 @@ public class PosViewModelSellerGateTest
 
         // The kitchen slip was attempted and failed...
         Assert.Single(deps.PrinterService.KitchenOrders);
-        // ...but the sale completed anyway.
+        // ...but the sale completed anyway, and the sale receipt itself printed fine —
+        // a failing kitchen printer must not leak into the status line that reports on
+        // the customer's own receipt. Compared against I18nService itself, not the
+        // English literal it used to be: both status lines go through the same lookup
+        // now (see the review note at their call site in PosViewModel), and the test
+        // host never initializes the real dictionary, so every key resolves to its
+        // "[key]" placeholder here (see
+        // SettingsViewModelTest.CheckDisplay_WithNoPortConfigured_SaysThePortIsMissing_NotThatTheDisplayFailed).
+        // A wrong key — e.g. the kitchen failure wrongly flipping this to
+        // PaymentProcessedReceiptNotPrinted — would still make this assertion fail.
         Assert.Empty(vm.CartItems);
-        Assert.Equal("Payment processed. Thank you!", vm.StatusMessage);
+        Assert.Equal(I18nService.Instance["PaymentProcessed"], vm.StatusMessage);
+    }
+
+    [Fact]
+    public void Pay_WithFailingReceiptPrinter_TellsTheCashierTheReceiptDidNotPrint()
+    {
+        // The payment has already posted (or queued) by the time PrintReceiptAsync runs,
+        // so a print failure here cannot roll the sale back — the only thing left to get
+        // right is not lying about it. Before this fix the returned bool was discarded and
+        // StatusMessage always read the plain "Payment processed. Thank you!" success
+        // line, even over a receipt that never came out of the printer.
+        using var vm = CreateViewModel(out var deps);
+        deps.PrinterService.ReceiptFails = true;
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        // The sale still completes...
+        Assert.Empty(vm.CartItems);
+        // ...but the status line tells the truth instead. Compared against I18nService
+        // itself, not a hardcoded literal, for the same reason as
+        // SettingsViewModelTest.CheckDisplay_WithNoPortConfigured_SaysThePortIsMissing_NotThatTheDisplayFailed:
+        // the test host never initializes the real dictionary, so every key resolves to
+        // its "[key]" placeholder here. That a real translation exists for this key in
+        // every locale is I18nLocaleTest's job, not this test's. NotEqual against the
+        // success key (PaymentProcessed), not the old English literal — both branches go
+        // through I18nService now, so the literal would never match either way and the
+        // assertion would stop meaning anything.
+        Assert.Equal(I18nService.Instance["PaymentProcessedReceiptNotPrinted"], vm.StatusMessage);
+        Assert.NotEqual(I18nService.Instance["PaymentProcessed"], vm.StatusMessage);
     }
 
     [Fact]
