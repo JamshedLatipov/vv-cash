@@ -726,4 +726,57 @@ public class SyncServiceTest
 
         Assert.Contains("\"width\":42", storage.ReceiptTemplate);
     }
+
+    /// <summary>Счётчик обновлений снимка шаблона в памяти.</summary>
+    private sealed class CountingTemplates : VvCash.Services.IReceiptTemplateService
+    {
+        public int Refreshes;
+        public VvCash.Models.Receipt.ReceiptTemplate Current => VvCash.Models.Receipt.ReceiptTemplate.Default;
+        public string Logo => string.Empty;
+        public (VvCash.Models.Receipt.ReceiptTemplate Template, string Logo) CurrentTemplateAndLogo
+            => (Current, Logo);
+        public Task RefreshAsync() { Refreshes++; return Task.CompletedTask; }
+    }
+
+    private const string ConfigWithTemplate =
+        "{\"status\":0,\"body\":[{\"id\":\"g\",\"name\":\"Чек\",\"options\":[" +
+        "{\"id\":\"o\",\"name\":\"Шаблон чека\",\"description\":\"\"," +
+        "\"value\":\"{\\\"version\\\":1,\\\"blocks\\\":[]}\"," +
+        "\"code\":\"receipt_template\",\"value_type\":\"json\"}]}]}";
+
+    private const string ConfigWithoutOptions =
+        "{\"status\":0,\"body\":[{\"id\":\"g\",\"name\":\"Прочее\",\"options\":[]}]}";
+
+    /// <summary>Синхронизация обязана обновить снимок шаблона В ПАМЯТИ, а не только
+    /// кэш в SQLite. Раньше снимок обновлял единственный подписчик ProductsSynced —
+    /// transient PosViewModel; когда синхронизация завершалась без живого экрана
+    /// продажи, касса печатала раскладку по умолчанию до перезапуска приложения,
+    /// имея нужный шаблон в кэше.</summary>
+    [Fact]
+    public async Task SyncReceiptTemplate_RefreshesTheInMemorySnapshot()
+    {
+        var templates = new CountingTemplates();
+        var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.OK, ConfigWithTemplate));
+        var sync = new SyncService(new HttpClient(handler), new FakeSettings(), new FakeStorage(),
+            new FakeExpenseDocuments(), templates);
+
+        await sync.SyncReceiptTemplateAsync("https://example.test/");
+
+        Assert.Equal(1, templates.Refreshes);
+    }
+
+    /// <summary>Опции в ответе нет — сохранять нечего, и лишний проход по SQLite
+    /// на каждой синхронизации не нужен.</summary>
+    [Fact]
+    public async Task SyncReceiptTemplate_NothingToSave_DoesNotRefresh()
+    {
+        var templates = new CountingTemplates();
+        var handler = new StubHttpMessageHandler(_ => (HttpStatusCode.OK, ConfigWithoutOptions));
+        var sync = new SyncService(new HttpClient(handler), new FakeSettings(), new FakeStorage(),
+            new FakeExpenseDocuments(), templates);
+
+        await sync.SyncReceiptTemplateAsync("https://example.test/");
+
+        Assert.Equal(0, templates.Refreshes);
+    }
 }
