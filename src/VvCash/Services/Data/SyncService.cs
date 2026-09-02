@@ -29,18 +29,27 @@ public class SyncService : ISyncService
     public event EventHandler<bool>? SyncStatusChanged;
     public event EventHandler? ProductsSynced;
 
+    /// <summary>Служба шаблона чека — синглтон, который держит разобранную
+    /// раскладку в памяти и отдаёт её принтеру на каждую печать.
+    ///
+    /// Необязательная: у теста, строящего SyncService напрямую, её нет, и кэш в
+    /// SQLite всё равно обновляется — не обновится только снимок в памяти, а в
+    /// тесте его никто не читает.</summary>
+    private readonly IReceiptTemplateService? _receiptTemplates;
+
     private readonly HttpClient _httpClient;
     private readonly ISettingsService _settingsService;
     private readonly IOfflineStorageService _storageService;
 
     private readonly IExpenseDocumentService _expenseDocumentService;
 
-    public SyncService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService storageService, IExpenseDocumentService expenseDocumentService)
+    public SyncService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService storageService, IExpenseDocumentService expenseDocumentService, IReceiptTemplateService? receiptTemplates = null)
     {
         _httpClient = httpClient;
         _settingsService = settingsService;
         _storageService = storageService;
         _expenseDocumentService = expenseDocumentService;
+        _receiptTemplates = receiptTemplates;
     }
 
     private string GetBaseUrl()
@@ -517,6 +526,20 @@ public class SyncService : ISyncService
 
             var logo = FindOptionValue(body, "receipt_logo");
             if (logo != null) await _storageService.SaveReceiptLogoAsync(logo);
+
+            // Перечитать снимок в памяти здесь же, а не только через
+            // ProductsSynced. Сохранение выше кладёт шаблон в SQLite, но печатает
+            // касса из снимка, который ReceiptTemplateService держит в памяти, и
+            // до этой строки его обновлял единственный подписчик события —
+            // PosViewModel. Он transient: если синхронизация завершилась, когда
+            // живого экрана продажи нет (логин, другой экран, пересозданная
+            // модель), снимок оставался тем, что прочитан на старте, и касса
+            // печатала раскладку по умолчанию до перезапуска приложения — с
+            // кэшем, где уже лежал нужный шаблон.
+            if (template != null || logo != null)
+            {
+                if (_receiptTemplates != null) await _receiptTemplates.RefreshAsync();
+            }
 
             Console.WriteLine($"[SyncService] receipt template: {(template == null ? "absent" : "cached")}");
         }
