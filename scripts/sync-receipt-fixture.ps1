@@ -40,9 +40,19 @@ if (-not (Test-Path $targetDir)) {
     throw "Каталога превью нет: $targetDir. Компонент переехал или путь устарел — поправьте скрипт."
 }
 
-$before = if (Test-Path $target) { Get-Content $target -Raw } else { $null }
+# -Encoding utf8 явно на обоих чтениях: файл пишет System.Text.Json как UTF-8
+# БЕЗ BOM, а без BOM Windows PowerShell 5.1 угадывает кодировку по системной
+# ANSI-кодовой странице, а не по содержимому. На этой машине это сегодня
+# работает случайно — все байты кириллицы совпадают с печатными символами
+# однобайтовой кодировки, поэтому ConvertFrom-Json не рвётся, а сравнение
+# $before/$after корректно, потому что обе стороны портятся ОДИНАКОВО. Ничего
+# из этого не гарантировано на другой машине или другой локали, а
+# $ErrorActionPreference='Stop' останавливает скрипт уже ПОСЛЕ Copy-Item —
+# сломавшийся разбор JSON будет означать, что файл в bozor уже переписан, а
+# скрипт упал, сообщив об этом самым непрямым образом.
+$before = if (Test-Path $target) { Get-Content $target -Raw -Encoding utf8 } else { $null }
 Copy-Item $source $target -Force
-$after = Get-Content $target -Raw
+$after = Get-Content $target -Raw -Encoding utf8
 $version = (ConvertFrom-Json $after).rendererVersion
 
 if ($before -eq $after) {

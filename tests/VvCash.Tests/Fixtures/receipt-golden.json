@@ -1,5 +1,5 @@
 {
-  "rendererVersion": 1,
+  "rendererVersion": 2,
   "cases": [
     {
       "name": "default",
@@ -313,7 +313,7 @@
         "total": 100,
         "items": [
           {
-            "name": "Батарейки",
+            "name": "Плёнка\tзащитная\r\nпрозрачная",
             "quantity": 4,
             "lineTotal": 100,
             "unitPrice": 25,
@@ -328,7 +328,7 @@
       "expectedLines": [
         "VV CASH POS",
         "----------------------------",
-        "Батарейки x4              100.00",
+        "Плёнка защитная прозрачная x4 100.00",
         "----------------------------",
         "Subtotal:                 100.00",
         "TOTAL:                    100.00",
@@ -599,18 +599,18 @@
         "saleDate": "01.09.2026 14:00",
         "queueNumber": "",
         "discountName": "",
-        "subtotal": 100,
+        "subtotal": 103.0850,
         "discount": 15,
-        "total": 85,
+        "total": 88.0850,
         "items": [
           {
             "name": "Скотч малярный жёлтый",
-            "quantity": 4,
-            "lineTotal": 100,
+            "quantity": 4.1234,
+            "lineTotal": 103.0850,
             "unitPrice": 25,
             "sku": "SKU-1002",
             "barcode": "4870000054321",
-            "lineDiscount": 0,
+            "lineDiscount": 0.0000,
             "quantityInUnit": null,
             "secondaryUnitName": null
           }
@@ -623,11 +623,11 @@
         "Whse: Склад №1",
         "Seller: Сидоров",
         "----------------------------",
-        "Скотч малярный жёлтый x4  100.00",
+        "Скотч малярный жёлтый x4.123 103.09",
         "----------------------------",
-        "Subtotal:                 100.00",
+        "Subtotal:                 103.09",
         "Discount:                 -15.00",
-        "TOTAL:                     85.00",
+        "TOTAL:                     88.09",
         "----------------------------",
         "Thank you for shopping!"
       ]
