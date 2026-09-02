@@ -79,33 +79,32 @@ public partial class App : Application
             // one at startup.
             _queueServerHost = Services.GetRequiredService<QueueServerHost>();
 
-            // Шаблон читается из кэша один раз на старте и заново после каждой
-            // успешной синхронизации. Подписка на ProductsSynced, а не инъекция
-            // службы в PosViewModel: у той вью-модели полтора десятка мест
-            // построения в тестах, и ещё один параметр конструктора обошёлся бы
-            // дороже, чем эта строка.
+            // Шаблон читается из кэша один раз на старте — заново после каждой
+            // успешной синхронизации его перечитывает PosViewModel.OnProductsSyncedAsync,
+            // рядом с обновлением поставщика акций, который решает ту же задачу тем же
+            // способом. Не здесь: ISyncService зарегистрирован через AddHttpClient, а
+            // типизированный клиент в этом механизме — transient, так что
+            // GetRequiredService<ISyncService>() здесь строил бы ещё один экземпляр,
+            // не тот, что реально крутит фоновую синхронизацию и поднимает событие —
+            // подписка на нём была бы подпиской на выброшенный объект (ревью Task 10).
             //
-            // InitializeAsync() перед RefreshAsync — обязательно, не для порядка:
-            // именно он создаёт таблицу Settings, из которой ReceiptTemplateService
-            // читает. Та же таблица, что PosViewModel.InitializeAsync создаёт перед
-            // ICashFeatureService.RefreshAsync (см. её собственный комментарий) — там
-            // нарушение этого порядка уже однажды роняло прод (см. SettingsViewModel,
-            // "expired-session-escape fix"). Здесь тот же риск наступает раньше, на
-            // свежем профиле без единого входа кассира: PosViewModel, чей конструктор
-            // обычно и создаёт эту таблицу, к этому моменту ещё не построен. Вызов
-            // идемпотентен (CREATE TABLE IF NOT EXISTS с проверкой _isInitialized),
-            // так что более поздний вызов из PosViewModel ничего не переделывает.
+            // InitializeAsync() базы данных — не отдельной строкой здесь, а внутри
+            // ReceiptTemplateService.RefreshAsync, под его собственным перехватом:
+            // именно InitializeAsync создаёт таблицу Settings, из которой
+            // RefreshAsync читает, и голая (без перехвата) строка отдельно здесь уже
+            // однажды роняла кассу на битой базе — обрыв питания, канонический
+            // сценарий порчи SQLite, раньше давал работающую кассу с пустым
+            // каталогом (см. комментарий OfflineStorageService), а голый вызов здесь
+            // давал необработанное исключение до создания MainWindow.
             //
             // GetAwaiter().GetResult() вместо await: OnFrameworkInitializationCompleted
-            // не async, а оба вызова читают/создают только локальный SQLite —
-            // миллисекунды, окно этим не задержит.
-            var offlineStorageForTemplate = Services.GetRequiredService<IOfflineStorageService>();
-            offlineStorageForTemplate.InitializeAsync().GetAwaiter().GetResult();
-
+            // не async. Не бесплатно — миграции на холодном старте измерялись вплоть до
+            // ~435 мс на быстром диске, — но окно так и должно ждать: печатать нечем,
+            // пока раскладка не прочитана, а раскладка не прочитана, пока не
+            // отработали миграции; блокировать поток интерфейса на это время —
+            // осознанный выбор, а не то, что нужно чинить.
             var receiptTemplates = Services.GetRequiredService<IReceiptTemplateService>();
             receiptTemplates.RefreshAsync().GetAwaiter().GetResult();
-            Services.GetRequiredService<ISyncService>().ProductsSynced +=
-                async (_, _) => await receiptTemplates.RefreshAsync();
 
             var loginVm = Services.GetRequiredService<LoginViewModel>();
             var mainVm = Services.GetRequiredService<MainViewModel>();

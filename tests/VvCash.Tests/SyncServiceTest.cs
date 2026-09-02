@@ -583,11 +583,36 @@ public class SyncServiceTest
     }
 
     [Fact]
+    public async Task SyncReceiptTemplateAsync_CachesTheLogo_OnSuccess()
+    {
+        // Ни один тест в этом файле раньше не проверял, что receipt_logo вообще
+        // доезжает до кэша: мутация, стирающая обе строки логотипа в
+        // SyncReceiptTemplateAsync, красила бы 0 тестов (ревью Task 10).
+        var body = """
+        {"status":0,"body":[{"id":"g1","name":"Чек","options":[
+          {"id":"o2","name":"receiptLogo","description":"","value":"AAECAw==",
+           "code":"receipt_logo","value_type":"string"}]}]}
+        """;
+        var storage = new FakeStorage();
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Equal("AAECAw==", storage.ReceiptLogo);
+    }
+
+    [Fact]
     public async Task SyncReceiptTemplateAsync_KeepsTheCache_OnAnHttpFailure()
     {
-        // Потеря эндпоинта не должна откатывать магазин на дефолтный чек.
+        // Потеря эндпоинта не должна откатывать магазин на дефолтный чек. Тело —
+        // валидный конфиг с ДРУГИМ шаблоном внутри, а не пустая строка: с пустым
+        // телом тест гасится разбором JSON ("" не парсится) раньше, чем успела бы
+        // сработать проверка IsSuccessStatusCode, и мутация "убрать проверку кода
+        // ответа" не красит тест (ревью Task 10, та же болезнь, что чинили у
+        // OnANegativeBackendStatus). Шлюзы 500 с валидным JSON-телом — обычное
+        // дело, так что это ещё и реалистичнее пустой строки.
         var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
-        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.InternalServerError, "")), storage);
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.InternalServerError, ConfigOk)), storage);
 
         await sync.SyncReceiptTemplateAsync("http://x/");
 
@@ -625,5 +650,77 @@ public class SyncServiceTest
         await sync.SyncReceiptTemplateAsync("http://x/");
 
         Assert.Contains("\"width\":48", storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_OverwritesTheCache_WhenTheOptionIsPresentButEmpty()
+    {
+        // Постоянное состояние ПОСЛЕ миграции 20260728000800, а не временное "опции
+        // нет вовсе" выше (до миграции): бэкенд отдаёт опцию через LEFT JOIN c
+        // COALESCE(val, ''), так что после миграции она есть у КАЖДОЙ кассы, а до
+        // первой настройки в бэкофисе её значение — пустая строка, не null и не
+        // отсутствие поля/группы. Это не отказ: status=0, тело валидно, опция
+        // найдена по коду — и по документированному контракту
+        // IOfflineStorageService.SaveReceiptTemplateAsync пустая строка неотличима
+        // от "шаблон никогда не приезжал" (ReceiptTemplate.Parse даёт Default на
+        // обоих), так что затирание кэша здесь — осознанный выбор, а не дыра:
+        // обычный успешный ответ обязан затереть кэш тем, что реально прислал
+        // сервер, точно так же, как затирает его непустое значение выше.
+        var storage = new FakeStorage { ReceiptTemplate = """{"version":1,"width":48,"blocks":[]}""" };
+        var body = """
+        {"status":0,"body":[{"id":"g1","name":"Чек","options":[
+          {"id":"o1","name":"receiptTemplate","description":"","value":"",
+           "code":"receipt_template","value_type":"json"}]}]}
+        """;
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Equal(string.Empty, storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncReceiptTemplateAsync_IgnoresAnOptionWithAnEmptyCode()
+    {
+        // Возвращён после ревью Task 10: мутация "убрать сравнение кода целиком,
+        // брать первую опцию первой группы" красит 0 тестов без него — этот тест
+        // единственный во всём файле, где FindOptionValue видит опцию, которая
+        // присутствует, но не совпадает по коду. Каждая опция, засеянная до
+        // 20260728000800, приезжает с code = "" — сегодня их два десятка, — и без
+        // сопоставления по коду они бы все схлопнулись в одну.
+        var body = """
+        {"status":0,"body":[{"id":"g1","name":"Прочее","options":[
+          {"id":"o9","name":"storeName","description":"","value":"Лавка","code":"","value_type":"string"}]}]}
+        """;
+        var storage = new FakeStorage();
+        var sync = Build(new StubHttpMessageHandler(_ => (HttpStatusCode.OK, body)), storage);
+
+        await sync.SyncReceiptTemplateAsync("http://x/");
+
+        Assert.Equal(string.Empty, storage.ReceiptTemplate);
+    }
+
+    [Fact]
+    public async Task SyncProductsAsync_CachesTheReceiptTemplate()
+    {
+        // Sibling to SyncProductsAsync_CachesPromotions/_CachesFeatures: the tests
+        // above all call SyncReceiptTemplateAsync directly, so none of them would
+        // notice if the call to it went missing from the end of the main cycle
+        // (ревью Task 10 -- that exact mutation left 1138 tests green). This one
+        // goes through the door the register actually uses.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            if (url.Contains("cashes/config/get/"))
+                return (HttpStatusCode.OK, ConfigOk);
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.Contains("\"width\":42", storage.ReceiptTemplate);
     }
 }

@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Models.Api;
+using VvCash.Models.Receipt;
 using VvCash.Services;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
@@ -469,6 +470,11 @@ public class PosViewModelSellerGateTest
         // Lets a test flip PosViewModel's IsSystemOnline the same way the real
         // background ping does, without waiting on an actual timer.
         public void RaiseSyncStatusChanged(bool isOnline) => SyncStatusChanged?.Invoke(this, isOnline);
+
+        // Same idea for ProductsSynced: fires the event PosViewModel subscribes to in
+        // its own constructor (the real background sync loop's completion signal),
+        // without waiting on an actual sync round-trip.
+        public void RaiseProductsSynced() => ProductsSynced?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Stands in for the real AuthService: records whether/how many times
@@ -686,6 +692,22 @@ public class PosViewModelSellerGateTest
         public Task RefreshAsync() => Task.CompletedTask;
     }
 
+    /// <summary>RefreshCallCount, not just "was it called": ProductsSynced_RefreshesTheReceiptTemplate
+    /// below asserts it went up specifically after the event fired, the same shape
+    /// FakeSellerRosterService.RefreshCallCount already uses for the roster.</summary>
+    private class FakeReceiptTemplateService : IReceiptTemplateService
+    {
+        public ReceiptTemplate Current { get; set; } = ReceiptTemplate.Default;
+        public string Logo { get; set; } = string.Empty;
+        public int RefreshCallCount { get; private set; }
+
+        public Task RefreshAsync()
+        {
+            RefreshCallCount++;
+            return Task.CompletedTask;
+        }
+    }
+
     /// <summary>Stands in for the real SellerRosterService: RefreshAsync never throws
     /// (per its documented contract) and this fake just hands back whatever roster the
     /// test configured, defaulting to empty — an empty roster is a legitimate state,
@@ -724,6 +746,7 @@ public class PosViewModelSellerGateTest
         public FakePrinterService PrinterService { get; } = new();
         public FakeQueueClient QueueClient { get; } = new();
         public FakeQueueSettings QueueSettings { get; } = new();
+        public FakeReceiptTemplateService ReceiptTemplates { get; } = new();
 
         /// <summary>Вынесен сюда из CreateViewModel, где он строился на месте и был
         /// тесту недоступен: без этого ни один тест не мог увидеть, что именно уходит
@@ -758,6 +781,7 @@ public class PosViewModelSellerGateTest
             deps.RosterService,
             deps.AuthService,
             deps.Features,
+            deps.ReceiptTemplates,
             new UpdateViewModel(
                 new NoUpdateService(),
                 new NoInstallerLauncher(),
@@ -2951,6 +2975,26 @@ public class PosViewModelSellerGateTest
         Assert.False(vm.IsExchangeEnabled);
         Assert.Contains(nameof(vm.IsExchangeVisible), raised);
         Assert.Contains(nameof(vm.IsExchangeEnabled), raised);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Receipt template refresh (Task 10 review). ISyncService is registered through
+    // AddHttpClient, whose typed client is transient -- App.axaml.cs used to resolve
+    // its own throwaway instance just to subscribe ProductsSynced, which is not the
+    // instance below that PosViewModel actually holds and that the real background
+    // sync loop raises the event on. Moving the refresh here, onto the constructor-
+    // injected _syncService this test's FakeSyncService IS, is what makes it reachable
+    // at all.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void ProductsSynced_RefreshesTheReceiptTemplate()
+    {
+        using var vm = CreateViewModel(out var deps);
+
+        deps.SyncService.RaiseProductsSynced();
+
+        Assert.True(deps.ReceiptTemplates.RefreshCallCount > 0);
     }
 
     [Fact]

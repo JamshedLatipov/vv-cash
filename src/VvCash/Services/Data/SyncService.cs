@@ -522,7 +522,7 @@ public class SyncService : ISyncService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[SyncService] receipt template sync error: {ex.Message}");
+            Console.WriteLine($"[SyncService] receipt template sync error: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

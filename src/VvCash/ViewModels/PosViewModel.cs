@@ -81,6 +81,16 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private readonly IAuthService _authService;
     private readonly ICashFeatureService _features;
 
+    /// <summary>Настоящий поставщик шаблона, а не служба, на которую подписался бы
+    /// App.axaml.cs напрямую: ISyncService зарегистрирован через AddHttpClient, типовой
+    /// клиент там transient, и GetRequiredService&lt;ISyncService&gt;() на старте строил бы
+    /// ещё один экземпляр — не тот, что реально крутит фоновую синхронизацию и поднимает
+    /// ProductsSynced (см. ревью Task 10). _syncService этого класса — тот самый живой
+    /// экземпляр, инжектированный конструктором один раз и хранящийся всё время жизни
+    /// вью-модели, так что обновление шаблона рядом с ним в OnProductsSyncedAsync
+    /// подписывается на события того же объекта, который их поднимает.</summary>
+    private readonly IReceiptTemplateService _receiptTemplates;
+
     /// <summary>Постановка заказа в очередь (Task 22). Nullable: кассу можно собрать вовсе
     /// без очереди (см. IQueueClient docstring — тот же принцип, что и у остальных
     /// hardware-заглушек этого класса). Не IDisposable и ничего не подписывает, так что
@@ -867,6 +877,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         ISellerRosterService rosterService,
         IAuthService authService,
         ICashFeatureService features,
+        IReceiptTemplateService receiptTemplates,
         UpdateViewModel update,
         IQueueClient? queueClient = null,
         IQueueSettings? queueSettings = null)
@@ -893,6 +904,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _rosterService = rosterService;
         _authService = authService;
         _features = features;
+        _receiptTemplates = receiptTemplates;
         Update = update;
         _queueClient = queueClient;
         _queueSettings = queueSettings;
@@ -1489,6 +1501,15 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             // The sync that just finished also refreshed the promotion cache in SQLite.
             await _promotionProvider.RefreshAsync();
+
+            // Same reasoning, same place: the sync that just finished also refreshed the
+            // receipt template/logo cache in SQLite (SyncService.SyncReceiptTemplateAsync).
+            // ReceiptTemplateService.RefreshAsync has its own internal try/catch (any
+            // failure there keeps the last good template rather than throwing), but this
+            // outer try/catch is still what makes it safe to call from an event raised on
+            // the background sync loop at all -- see this method's own comment on
+            // OnProductsSynced above.
+            await _receiptTemplates.RefreshAsync();
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(async () =>
             {
