@@ -237,6 +237,24 @@ public class ReceiptTemplateServiceTest : IDisposable
         var svc = new ReceiptTemplateService(storage);
         await svc.RefreshAsync(); // поколение 1 публикуется до старта гонки
 
+        // Проверка ДО гонки, а не внутри цикла: ReceiptTemplate.Parse на любой
+        // беде разбора отдаёт Default, а первый блок Default — тоже TextBlock
+        // (с содержимым "VV CASH POS", не числом) — то же приведение ниже в
+        // цикле прошло бы молча, сравнение расходилось бы на КАЖДОМ чтении, и
+        // тест сообщал бы "рваная пара" вместо настоящей причины "разбор
+        // шаблона подделки сломался". Тот же класс ложного красного с неверным
+        // диагнозом, что уже поймал потолок Width/MaxWidth чуть выше — там
+        // ошибка была в кодировке инварианта, здесь могла бы быть в разборе
+        // самого JSON. Недостижимо сегодня (JSON подделки — константной формы,
+        // Parse его гарантированно разбирает), но проверка стоит одной строки,
+        // а её отсутствие стоит недоверия ко всему тесту при следующей правке
+        // IncrementingGenerationStorage или ReceiptTemplate.Parse.
+        var sanity = svc.CurrentTemplateAndLogo;
+        Assert.Single(sanity.Template.Blocks);
+        Assert.True(int.TryParse(((TextBlock)sanity.Template.Blocks[0]).Content, out _),
+            "IncrementingGenerationStorage's template did not parse as expected -- " +
+            "fix the fake before trusting this test's torn-pair diagnosis");
+
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         string? tornPair = null;
 

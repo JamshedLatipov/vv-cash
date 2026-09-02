@@ -126,6 +126,23 @@ public class EscPosGraphicsTest
     }
 
     [Fact]
+    public void BitmapOp_ThrowsWhenEitherDimensionIsZero()
+    {
+        // Найдено ревью Task 11: нижняя граница жила только в
+        // ReceiptRenderer.ParseLogo (отдельная проверка ДО вызова этого
+        // конструктора), а сам BitmapOp принимал 0 как валидную нижнюю
+        // границу диапазона наравне с верхним потолком 65535 — герметично,
+        // пока единственный производитель этой записи один, но второй
+        // будущий производитель тихо отправил бы на бумагу GS v 0 с нулевой
+        // шириной или высотой. Обе границы теперь в одном месте —
+        // EnsureDimensionInRange (1..65535), — а не разнесены по двум файлам
+        // по одной и той же причине (undefined-поведение GS v 0 с нулевым
+        // размером).
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BitmapOp(Array.Empty<byte>(), WidthBytes: 0, Height: 5));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new BitmapOp(Array.Empty<byte>(), WidthBytes: 5, Height: 0));
+    }
+
+    [Fact]
     public void BitmapOp_ThrowsWhenAWithExpressionBreaksTheInvariant()
     {
         // Классическая ловушка записей: проверка только в конструкторе не
