@@ -60,8 +60,15 @@ public class ReceiptTemplateService : IReceiptTemplateService
 
     public ReceiptTemplateService(IOfflineStorageService storage) => _storage = storage;
 
+    /// <summary>Нет боевых потребителей после перехода EscPosPrinterService /
+    /// CompositePrinterService на CurrentTemplateAndLogo ниже — читают его
+    /// сегодня только тесты кэша этой службы. Не собирай из него и из Logo
+    /// пару сам (`(Current, Logo)`) — это два отдельных чтения _snapshot, и
+    /// именно так уже один раз выглядела регрессия, которую CurrentTemplateAndLogo
+    /// закрывает.</summary>
     public ReceiptTemplate Current => _snapshot.Template;
 
+    /// <summary>Та же оговорка, что у Current выше.</summary>
     public string Logo => _snapshot.Logo;
 
     /// <summary>Шаблон и логотип одной парой, за ОДНО чтение <see

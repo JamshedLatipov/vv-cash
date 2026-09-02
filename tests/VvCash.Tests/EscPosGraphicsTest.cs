@@ -332,9 +332,12 @@ public class EscPosGraphicsTest
     [Fact]
     public void Renderer_DropsALogoBlock_WhenSourceIsBitmap()
     {
-        // Растровый логотип подключается в Task 9 вместе с опцией
-        // receipt_logo: до тех пор блок с этим источником не печатает ничего
-        // вовсе — ни NvLogoOp, ни BitmapOp, ни повисшего AlignOp.
+        // Render зовётся здесь двухаргументной перегрузкой — logoJson не
+        // передан и по умолчанию null, то есть тот же случай, что и
+        // ReceiptLogoTest.ABitmapLogoBlock_PrintsNothing_WhenNoLogoWasSynced:
+        // касса ещё не получила receipt_logo синхронизацией. Источник Bitmap
+        // умеет печатать (см. ReceiptLogoTest), просто не в этом тесте — ни
+        // NvLogoOp, ни BitmapOp, ни повисшего AlignOp здесь быть не должно.
         var t = new ReceiptTemplate
         {
             Blocks = new List<ReceiptBlock> { new LogoBlock { Source = LogoSource.Bitmap } },

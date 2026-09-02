@@ -192,55 +192,74 @@ public class ReceiptTemplateServiceTest : IDisposable
     }
 
     [Fact]
-    public async Task RefreshAsync_CurrentTemplateAndLogo_NeverExposesATornPairToAReaderMidUpdate()
+    public async Task CurrentTemplateAndLogo_UnderConcurrentRefreshes_NeverTearsAcrossGenerations()
     {
-        // Тот же приём и та же подделка хранилища, что у
-        // RefreshAsync_NeverExposesATornPairToAReaderMidUpdate выше, но нацелен
-        // на CurrentTemplateAndLogo — единственный член, которым Task 11
-        // читает поставщик шаблона в EscPosPrinterService/CompositePrinterService.
+        // Заменяет предыдущую версию этого теста (см. историю файла), которая
+        // называла в комментарии ровно ту регрессию, что и эта, но не могла
+        // её поймать: подделка хранилища там замораживала RefreshAsync ДО
+        // публикации нового снимка, так что единственное, что читал внешний
+        // вызывающий за время заморозки, — старый, ещё не тронутый снимок.
+        // Реализация CurrentTemplateAndLogo как `(Current, Logo)` (то самое
+        // двойное чтение, которое этот метод обязан не делать) прошла бы ту
+        // версию теста с тем же результатом, что и правильная: ни один из
+        // двух реальных вызовов _snapshot внутри такой реализации не попадал
+        // в окно между записями, потому что запись в тот момент вообще не
+        // происходила. Ревью подтвердило это отдельным стресс-прогоном:
+        // двойное чтение — 4.5 миллиона рваных пар за секунды, у
+        // CurrentTemplateAndLogo — ноль.
         //
-        // Тот тест уже доказывает, что сам _snapshot публикуется атомарно.
-        // Этот проверяет вторую половину: что публичный accessor,
-        // который отдаёт пару наружу, читает _snapshot РОВНО ОДИН раз, а не
-        // собирает кортеж как `(Current, Logo)` -- два отдельных обращения к
-        // снимку, между которыми завершившийся RefreshAsync подсунул бы
-        // половинки разных поколений. Именно эту регрессию предупреждает
-        // задача: план предлагал ровно `(t.Current, t.Logo)` в качестве
-        // поставщика шаблона принтера, и это был бы тот же баг, который
-        // Task 10 только что закрыла внутри самого RefreshAsync, на новом
-        // месте.
-        var storage = new LogoGatedStorage(blockAtLogoCallIndex: 1)
-        {
-            Templates = new[]
-            {
-                """{"version":1,"width":48,"blocks":[]}""",
-                """{"version":1,"width":80,"blocks":[]}""",
-            },
-            Logos = new[] { "LOGO-A", "LOGO-B" },
-        };
+        // Здесь — настоящая гонка, а не заморозка: один поток непрерывно
+        // публикует новые поколения (RefreshAsync без единой паузы — подделка
+        // хранилища ниже ничего не ждёт), второй непрерывно читает
+        // CurrentTemplateAndLogo и сверяет текст единственного TextBlock в
+        // шаблоне с Logo. Подделка кодирует номер поколения в оба значения
+        // одинаково (Content блока = "N", Logo = "N"), так что рассинхрон
+        // ловится как несовпадение строк, а не как исключение или зависание.
+        //
+        // Текст блока, а не ReceiptTemplate.Width: первая версия этой
+        // подделки кодировала номер поколения в Width, и тест ложно краснел —
+        // ReceiptTemplate.Width клампится в сеттере потолком в 200
+        // (MaxWidth), так что после 200-го поколения Width замирал на 200,
+        // пока Logo продолжал расти дальше, и КАЖДОЕ следующее чтение
+        // показывало "рассинхрон", хотя _snapshot был опубликован полностью
+        // согласованным (число из diagnostic-лога T:/L: совпадало на каждом
+        // поколении). Причина была не в гонке, а в том, что ширина ленты —
+        // клампящееся поле, непригодное для переноски произвольно большого
+        // счётчика поколений; TextBlock.Content такого потолка не имеет.
+        //
+        // Ложноположительный результат здесь невозможен по конструкции: если
+        // CurrentTemplateAndLogo читает _snapshot РОВНО ОДИН раз в локальную
+        // переменную и берёт оба значения из неё, то сколько бы записывающий
+        // поток ни переставлял ссылку в _snapshot за это время, оба значения
+        // всегда приходят из ОДНОГО и того же уже прочитанного (неизменяемого)
+        // объекта Snapshot.
+        var storage = new IncrementingGenerationStorage();
         var svc = new ReceiptTemplateService(storage);
+        await svc.RefreshAsync(); // поколение 1 публикуется до старта гонки
 
-        // Поколение A устаканивается полностью и синхронно.
-        await svc.RefreshAsync();
-        var (templateA, logoA) = svc.CurrentTemplateAndLogo;
-        Assert.Equal(48, templateA.Width);
-        Assert.Equal("LOGO-A", logoA);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        string? tornPair = null;
 
-        // Чтение шаблона поколения B возвращается сразу; чтение его логотипа
-        // заблокировано. Читатель снаружи обязан всё ещё видеть полную пару
-        // поколения A -- ни в коем случае не (шаблон B, логотип A).
-        var second = svc.RefreshAsync();
+        var writer = Task.Run(async () =>
+        {
+            while (!cts.IsCancellationRequested)
+                await svc.RefreshAsync();
+        });
 
-        var (frozenTemplate, frozenLogo) = svc.CurrentTemplateAndLogo;
-        Assert.Equal(48, frozenTemplate.Width);
-        Assert.Equal("LOGO-A", frozenLogo);
+        var reader = Task.Run(() =>
+        {
+            while (!cts.IsCancellationRequested && tornPair == null)
+            {
+                var (template, logo) = svc.CurrentTemplateAndLogo;
+                var content = ((TextBlock)template.Blocks[0]).Content;
+                if (content != logo)
+                    tornPair = $"blockContent={content}, logo={logo}";
+            }
+        });
 
-        storage.ReleaseLogoRead();
-        await second;
+        await Task.WhenAll(writer, reader);
 
-        var (templateB, logoB) = svc.CurrentTemplateAndLogo;
-        Assert.Equal(80, templateB.Width);
-        Assert.Equal("LOGO-B", logoB);
+        Assert.Null(tornPair);
     }
 
     private static void AssertIsDefault(ReceiptTemplateService svc)
@@ -358,6 +377,45 @@ public class ReceiptTemplateServiceTest : IDisposable
         }
 
         public void ReleaseLogoRead() => _releaseLogoRead.TrySetResult();
+    }
+
+    /// <summary>Non-blocking storage for
+    /// CurrentTemplateAndLogo_UnderConcurrentRefreshes_NeverTearsAcrossGenerations:
+    /// every read resolves immediately (Task.FromResult, no await gap), so a
+    /// writer loop can publish as many generations per second as the CPU
+    /// allows -- the stress test needs volume, not a controlled pause point.
+    ///
+    /// One counter, incremented only by GetReceiptTemplateAsync. Within a
+    /// single RefreshAsync call, GetReceiptTemplateAsync runs first (bumping
+    /// _generation to N) and GetReceiptLogoAsync runs second, reading
+    /// _generation back as N -- so the template's block text and Logo always
+    /// encode the SAME generation number for a given RefreshAsync, as long as
+    /// calls stay sequential (this test drives exactly one writer, never two
+    /// concurrent RefreshAsync). A reader observing a mismatch has caught a
+    /// torn snapshot.
+    ///
+    /// The generation number goes into a TextBlock's Content, not into
+    /// Width: Width is clamped in its setter to ReceiptTemplate.MaxWidth
+    /// (200), so an unbounded counter written there freezes at 200 forever
+    /// once the stress loop runs past generation 200 -- while Logo keeps
+    /// climbing unclamped. That produced a "torn pair" on every single read
+    /// after generation 200 with a CORRECT CurrentTemplateAndLogo (confirmed
+    /// with a diagnostic log: every published Snapshot paired the same
+    /// generation number, single-threaded, no interleaving) -- a test-fixture
+    /// bug, not the regression this test exists to catch. TextBlock.Content
+    /// has no such ceiling.</summary>
+    private sealed class IncrementingGenerationStorage : NotSupportedStorage
+    {
+        private int _generation;
+
+        public override Task<string> GetReceiptTemplateAsync()
+        {
+            var gen = Interlocked.Increment(ref _generation);
+            return Task.FromResult(
+                $$"""{"version":1,"width":32,"blocks":[{"type":"text","content":"{{gen}}"}]}""");
+        }
+
+        public override Task<string> GetReceiptLogoAsync() => Task.FromResult(_generation.ToString());
     }
 
     public void Dispose()

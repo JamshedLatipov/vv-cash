@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using VvCash.Models;
 using VvCash.Models.Receipt;
@@ -116,18 +117,33 @@ public static class ReceiptRenderer
             }
         }
 
-        // Растровый логотип разбирается ДО пролога, тем же приёмом, что qr и
-        // barcode чуть выше: опция receipt_logo из бэкофиса могла ещё не
-        // доехать (наполовину настроенная касса) или прийти битой, и в обоих
-        // случаях блок не должен оставить за собой висячий AlignOp — как и
-        // qr/barcode с пустыми данными несколькими строками выше. Nv не
-        // проверяется здесь вовсе: его печать не зависит от logoJson и не
-        // может подвести.
-        BitmapOp? bitmapOp = null;
-        if (block is LogoBlock { Source: LogoSource.Bitmap })
+        // Логотип целиком — какую операцию он даст, если вообще какую-то —
+        // решается ДО пролога, тем же приёмом, что qr и barcode чуть выше:
+        // опция receipt_logo из бэкофиса могла ещё не доехать (наполовину
+        // настроенная касса) или прийти битой, и в обоих случаях блок не
+        // должен оставить за собой висячий AlignOp — как и qr/barcode с
+        // пустыми данными несколькими строками выше.
+        //
+        // Switch-ВЫРАЖЕНИЕ с явным arm на каждое известное значение LogoSource
+        // и явным `_ => null` на любое другое — а не проверка "если не Nv,
+        // значит Bitmap" (которая однажды уже была здесь и в switch на блок
+        // ниже, и превращала любое третье значение LogoSource в
+        // NullReferenceException: охранник, проверявший только Source ==
+        // Bitmap, не срабатывал, bitmapOp оставался null, но switch ниже всё
+        // равно клал его в ops как "не Nv, значит бери bitmapOp"). Разбор
+        // шаблона принимает число вне диапазона enum без проверки, а опция
+        // источника логотипа шесть лет правилась руками через текстовое поле
+        // — третье значение достижимо не только гипотетически.
+        ReceiptOp? logoOp = null;
+        if (block is LogoBlock logoPre)
         {
-            bitmapOp = ParseLogo(logoJson);
-            if (bitmapOp == null) return;
+            logoOp = logoPre.Source switch
+            {
+                LogoSource.Nv => new NvLogoOp(logoPre.NvSlot),
+                LogoSource.Bitmap => ParseLogo(logoJson),
+                _ => null,
+            };
+            if (logoOp == null) return;
         }
 
         ops.Add(new AlignOp(block.Align));
@@ -209,23 +225,14 @@ public static class ReceiptRenderer
                 ops.Add(new BarcodeOp(bcData!, bc.Symbology, bc.Height, bc.PrintHri));
                 break;
 
-            case LogoBlock logo:
-                // Условие ЯВНОЕ, а не "раз не Nv, значит Bitmap": молчаливый
-                // вывод из исключения — тот самый способ, которым третье
-                // значение LogoSource, если оно появится, напечаталось бы
-                // как логотип со случайным содержимым вместо того, чтобы
-                // просто не напечататься. Та же дисциплина, что у default в
-                // этом switch чуть ниже — там неизвестный тип блока бросает,
-                // а не молчит.
-                if (logo.Source == LogoSource.Nv)
-                {
-                    ops.Add(new NvLogoOp(logo.NvSlot));
-                    break;
-                }
-                // bitmapOp уже разобран и провалидирован выше, до AlignOp —
-                // сюда попадает, только когда он гарантированно не null
-                // (иначе метод вернулся раньше).
-                ops.Add(bitmapOp!);
+            case LogoBlock:
+                // logoOp уже вычислен целиком (NvLogoOp, BitmapOp — или null,
+                // и тогда метод вернулся раньше) в switch-выражении до
+                // AlignOp. Единственный источник истины о том, что печатает
+                // LogoBlock, — там; здесь его незачем пересчитывать заново
+                // отдельной проверкой Source, которая рискует разойтись с
+                // первой (см. историю этого файла).
+                ops.Add(logoOp!);
                 break;
 
             default:
@@ -406,22 +413,40 @@ public static class ReceiptRenderer
     ///   ловит оба. Без этого пункта испорченный (несходящийся по размеру)
     ///   receipt_logo ронял бы печать целиком вместо того, чтобы остаться без
     ///   логотипа, — то самое требование задачи: конструктор BitmapOp бросает
-    ///   на рассинхроне размера и длины, и разбор обязан это поймать.</summary>
+    ///   на рассинхроне размера и длины, и разбор обязан это поймать.
+    ///
+    /// widthBytes==0 или height==0 — валиден для GS v 0 порознь (BitmapOp
+    /// разрешает 0 как нижнюю границу диапазона), но означает буквально
+    /// "нарисуй логотип нулевого размера": поведение на реальном принтере не
+    /// определено спекой и зависит от модели, а "логотип очищен в бэкофисе" —
+    /// куда более вероятное прочтение нулевого размера, чем "напечатай пустую
+    /// картинку". Считаем его тем же "логотипа нет", каким считаем пустую
+    /// строку опции, — дешевле проверить здесь, чем узнать на ленте.
+    ///
+    /// Зовётся по разу на каждый LogoBlock{Source: Bitmap} в шаблоне, а не
+    /// один раз на чек: обычный шаблон несёт не больше одного такого блока, и
+    /// разницы нет, но шаблон с двумя разберёт один и тот же logoJson дважды.
+    /// Не кэшировано намеренно — измеренная стоимость разбора (порядка
+    /// микросекунд на реальном растре) на четыре порядка ниже бюджета печати
+    /// одного документа, и кэш добавил бы состояние ради экономии, которой
+    /// никто не заметит.</summary>
     private static BitmapOp? ParseLogo(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
 
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(json!);
+            using var doc = JsonDocument.Parse(json!);
             var root = doc.RootElement;
             var widthBytes = root.GetProperty("widthBytes").GetInt32();
             var height = root.GetProperty("height").GetInt32();
+            if (widthBytes == 0 || height == 0) return null;
+
             var raster = Convert.FromBase64String(root.GetProperty("raster").GetString() ?? "");
 
             return new BitmapOp(raster, widthBytes, height);
         }
-        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException
             or KeyNotFoundException or FormatException or ArgumentException)
         {
             Console.WriteLine($"[ReceiptRenderer] логотип не разобран, печатаю без него: {ex.Message}");

@@ -163,12 +163,23 @@ public class EscPosPrinterService : IPrinterService
     /// <summary>Собирает байты чека продажи из десяти позиционных аргументов.
     /// Раскладка живёт в ReceiptRenderer, байты — в EscPosEmitter; эта
     /// перегрузка только складывает аргументы в SaleReceiptData и передаёт
-    /// его перегрузке ниже. Она остаётся ради тестов и вызывающего кода,
-    /// который получает данные чека десятью отдельными переменными, а не
-    /// готовой SaleReceiptData: BuildConfiguredSaleReceipt выше зовёт её
-    /// напрямую с _template() последним аргументом, и через этот экземплярный
-    /// метод на неё по-прежнему опирается PrintReceiptAsync — его собственный
-    /// список параметров не менялся, как и у BuildReturnReceipt рядом.
+    /// его перегрузке ниже.
+    ///
+    /// Ни один боевой вызывающий её больше не зовёт. BuildConfiguredSaleReceipt
+    /// (items, ...) — тот экземплярный метод, что раньше звал её напрямую с
+    /// _template() последним аргументом, — теперь сам собирает SaleReceiptData
+    /// и делегирует BuildConfiguredSaleReceipt(SaleReceiptData) (см. его
+    /// комментарий: _template() обязан читаться ровно один раз на печать, а
+    /// не по разу на каждую перегрузку на пути). Эта статическая перегрузка
+    /// остаётся ради тестов, которые строят чек по десяти отдельным
+    /// переменным напрямую, в обход печатающего экземпляра принтера —
+    /// EscPosUnitTest, QueueDocumentsTest, SaleReceiptGoldenTest,
+    /// ReceiptTemplateWiringTest.
+    ///
+    /// logo — параметр для симметрии с перегрузкой ниже, а не потому что у
+    /// него сегодня есть боевой вызывающий: без него любой будущий код,
+    /// решивший собрать чек по десяти переменным напрямую (а не через
+    /// принтер), молча остался бы без логотипа, даже если он у него есть.
     ///
     /// template = null означает «шаблон с сервера не доехал» и берёт
     /// ReceiptTemplate.Default, который печатает ровно то, что печаталось до
@@ -180,13 +191,14 @@ public class EscPosPrinterService : IPrinterService
         string? documentNumber = null, string? warehouseName = null,
         string? sellerName = null, string? saleDate = null,
         string? queueNumber = null,
-        ReceiptTemplate? template = null)
+        ReceiptTemplate? template = null,
+        string? logo = null)
     {
         var sale = new SaleReceiptData(
             new List<CartItem>(items), subtotal, discount, total,
             discountName, documentNumber, warehouseName, sellerName, saleDate, queueNumber);
 
-        return BuildSaleReceipt(codePage, sale, template);
+        return BuildSaleReceipt(codePage, sale, template, logo);
     }
 
     /// <summary>Тот же чек, но из готовой записи — вход для вызывающего кода,

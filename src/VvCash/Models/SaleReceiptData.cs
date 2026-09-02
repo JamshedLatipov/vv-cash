@@ -13,7 +13,7 @@ namespace VvCash.Models;
 /// блок с подстановкой {queue} тогда не печатается, ровно как решено спекой.</param>
 /// <remarks>Заполняется PrintKitchenOrderAsync через
 /// <c>sale with { QueueNumber = queueNumber }</c> перед вызовом
-/// BuildSaleReceipt(EscPosCodePage, SaleReceiptData, ReceiptTemplate?) — не
+/// BuildSaleReceipt(EscPosCodePage, SaleReceiptData, ReceiptTemplate?, string?) — не
 /// раскладкой записи на десять позиционных аргументов и сборкой новой такой
 /// же внутри BuildSaleReceipt, как было раньше: тот путь читал явный параметр
 /// queueNumber и вообще не заглядывал в это поле записи, так что любое

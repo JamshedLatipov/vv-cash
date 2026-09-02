@@ -37,18 +37,28 @@ public class ReceiptLogoTest
         Assert.Equal(12, op.Raster.Length);
     }
 
+    // Четыре теста ниже проверяют Assert.Empty на ВЕСЬ список операций, а не
+    // только на отсутствие BitmapOp: WithLogo() несёт ровно один блок, и если
+    // бы разбор молча уходил в ветку "печатать нечего" ПОСЛЕ AlignOp, а не до
+    // него, ops остался бы с висячим AlignOp/BoldOp/DoubleSizeOp внутри —
+    // Assert.Empty(...OfType<BitmapOp>()) этого бы не заметил, потому что
+    // BitmapOp в списке и так нет ни в правильной, ни в сломанной версии.
+    // Ревью явно отметило пробел: прежняя версия этого файла проверяла
+    // отсутствие висячего выравнивания только для "логотипа нет", не для
+    // "логотип битый" — хотя оба идут через один и тот же ранний return.
+
     [Fact]
     public void ABitmapLogoBlock_PrintsNothing_WhenNoLogoWasSynced()
     {
         // Блок включён, а картинки нет — это состояние наполовину настроенной
         // кассы, а не повод уронить чек.
-        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, "").OfType<BitmapOp>());
+        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, ""));
     }
 
     [Fact]
     public void ABitmapLogoBlock_PrintsNothing_WhenTheLogoIsCorrupt()
     {
-        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, "не json").OfType<BitmapOp>());
+        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, "не json"));
     }
 
     [Fact]
@@ -57,7 +67,7 @@ public class ReceiptLogoTest
         // "не base64!!!" содержит символы вне алфавита base64 — Convert.FromBase64String
         // бросает FormatException, а не что-то, что ParseLogo не ловит.
         const string json = """{"widthBytes":6,"height":2,"raster":"не base64!!!"}""";
-        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json).OfType<BitmapOp>());
+        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json));
     }
 
     [Fact]
@@ -67,7 +77,7 @@ public class ReceiptLogoTest
         // значении бросает InvalidOperationException, а не FormatException —
         // отдельная ветка catch, которую легко забыть.
         const string json = """{"widthBytes":"six","height":2,"raster":"AAAAAAAAAAAAAAAA"}""";
-        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json).OfType<BitmapOp>());
+        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json));
     }
 
     [Fact]
@@ -77,7 +87,23 @@ public class ReceiptLogoTest
         // конструктор BitmapOp сам бросает ArgumentException на этом
         // рассогласовании, и разбор обязан его поймать, а не уронить печать.
         const string json = """{"widthBytes":6,"height":2,"raster":"AAAAAA=="}""";
-        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json).OfType<BitmapOp>());
+        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json));
+    }
+
+    [Fact]
+    public void ABitmapLogoBlock_PrintsNothing_WhenTheSizeIsZero()
+    {
+        // {"widthBytes":0,"height":0,"raster":""} проходит и диапазон
+        // (0..65535 включает 0 с обеих сторон) и проверку длины (0*0=0
+        // сходится с пустым растром) — BitmapOp его пропустит. "Логотип
+        // очищен в бэкофисе" — куда вероятнее прочтение нулевого размера, чем
+        // "напечатай растр нулевой ширины", а поведение GS v 0 с xL=xH=0 не
+        // определено спекой и зависит от модели принтера. ParseLogo обязан
+        // отказаться от него сам, до BitmapOp, а не понадеяться, что
+        // конструктор совпадёт с этим прочтением случайно (он не бросает —
+        // 0×0 валиден для него).
+        const string json = """{"widthBytes":0,"height":0,"raster":""}""";
+        Assert.Empty(ReceiptRenderer.Render(WithLogo(), Empty, json));
     }
 
     [Fact]
@@ -92,5 +118,30 @@ public class ReceiptLogoTest
 
         Assert.Empty(ops.OfType<BitmapOp>());
         Assert.Single(ops.OfType<NvLogoOp>());
+    }
+
+    [Fact]
+    public void AnUnknownLogoSource_PrintsNothing_InsteadOfCrashingTheReceipt()
+    {
+        // КРИТИЧНО (найдено ревью): LogoSource — обычный enum, и разбор
+        // шаблона из JSON принимает числовое значение вне диапазона без
+        // проверки (опция шесть лет правилась руками через текстовое поле).
+        // Раньше охранник до AlignOp срабатывал только на Source == Bitmap,
+        // а switch на блок ниже читал это как "не Nv, значит Bitmap" —
+        // третье значение проваливалось мимо охранника с bitmapOp == null,
+        // и switch клал null в ops. EscPosEmitter.Emit не находит для null
+        // подходящий case, попадает в default и зовёт op.GetType() —
+        // NullReferenceException на печати всего чека, а не только этого
+        // блока. Правильное поведение: как и с любой другой бедой вокруг
+        // логотипа, блок просто ничего не печатает.
+        var t = new ReceiptTemplate
+        {
+            Blocks = new List<ReceiptBlock> { new LogoBlock { Source = (LogoSource)99 } },
+        };
+
+        var ops = ReceiptRenderer.Render(t, Empty, Logo);
+
+        Assert.Empty(ops);
+        Assert.DoesNotContain(ops, o => o is null);
     }
 }

@@ -211,10 +211,14 @@ public class ReceiptRendererTest
     [Fact]
     public void NoPrintedContent_ProducesNoCut()
     {
-        // Логотип-картинка пока не печатает ничего (растр подключается в
-        // Task 9) — блок отбрасывается целиком, до AlignOp, и список операций
-        // пуст. Резать тут нечего: считать по длине списка было бы неверно в
-        // общем случае (AlignOp/BoldOp/DoubleSizeOp сами по себе ничего не
+        // One(...) зовёт двухаргументный Render — logoJson не передан, по
+        // умолчанию null, а значит receipt_logo с точки зрения этого блока
+        // ещё не доехал синхронизацией (тот же случай, что и
+        // ReceiptLogoTest.ABitmapLogoBlock_PrintsNothing_WhenNoLogoWasSynced,
+        // не "источник Bitmap ничего не умеет" — умеет, см. ReceiptLogoTest).
+        // Блок отбрасывается целиком, до AlignOp, и список операций пуст.
+        // Резать тут нечего: считать по длине списка было бы неверно в общем
+        // случае (AlignOp/BoldOp/DoubleSizeOp сами по себе ничего не
         // печатают), здесь же список пуст в буквальном смысле.
         //
         // qr/barcode/logo(Nv) сюда больше не годятся как пример: все три
@@ -248,9 +252,13 @@ public class ReceiptRendererTest
     [Fact]
     public void DroppedBitmapLogoBlock_LeavesNoDanglingAlignOp()
     {
-        // Зеркало DroppedTextBlock_LeavesNoDanglingAlignOp: логотип-картинка
-        // тоже отбрасывается целиком (см. ReceiptRenderer.RenderBlock), и это
-        // тоже обязано случиться ДО AlignOp, а не после.
+        // Зеркало DroppedTextBlock_LeavesNoDanglingAlignOp: Sale(Glue()) не
+        // несёт logoJson (двухаргументный Render), так что этот блок
+        // отбрасывается целиком по той же причине, что и в
+        // NoPrintedContent_ProducesNoCut выше, — receipt_logo ещё не доехал,
+        // а не "источник Bitmap не печатает" (см. ReceiptRenderer.RenderBlock
+        // и ReceiptLogoTest про то, когда он печатает). Отбрасывание обязано
+        // случиться ДО AlignOp, а не после.
         var t = new ReceiptTemplate
         {
             Width = 32,
