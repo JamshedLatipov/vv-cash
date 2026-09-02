@@ -26,6 +26,34 @@ public class QueueStorageTest
         Lines = new List<QueueOrderLine> { new() { Name = "Coffee", Quantity = "2 pcs" } }
     };
 
+    /// <summary>queue.db тоже в WAL — см. одноимённый тест в
+    /// OfflineStorageServiceTest и SqlitePragmas за причиной. Для этой базы она
+    /// та же и своя: QueueFlushLoop сливает буфер по своему таймеру в фоне, а
+    /// UI-поток на каждом тике читает из неё PendingCountAsync ради значка
+    /// недоставленных заказов, и оплата пишет в неё же.</summary>
+    [Fact]
+    public async Task InitializeLeavesTheDatabaseInWalMode()
+    {
+        var path = TempDb();
+        try
+        {
+            await new QueueStorage(path).InitializeAsync();
+
+            using var check = new SqliteConnection($"Data Source={path}");
+            await check.OpenAsync();
+            using var cmd = check.CreateCommand();
+            cmd.CommandText = "PRAGMA journal_mode;";
+
+            Assert.Equal("wal", ((string?)await cmd.ExecuteScalarAsync())?.ToLowerInvariant());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(path + suffix)) File.Delete(path + suffix);
+        }
+    }
+
     [Fact]
     public async Task InitializeIsIdempotent()
     {

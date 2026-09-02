@@ -323,7 +323,18 @@
                                 Command="{Binding ConfirmPaymentCommand}">
                             <Grid ColumnDefinitions="Auto, *, Auto" VerticalAlignment="Center">
                                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
-                                    <material:MaterialIcon Kind="CheckCircle" Width="24" Height="24" VerticalAlignment="Center"/>
+                                    <!-- Оформление продажи после подтверждения — создание
+                                         документа, печать чека, номер очереди — занимает
+                                         столько, сколько отвечает сервер и принтер. Обе
+                                         кнопки к этому моменту уже погашены через
+                                         CanExecute (IsSubmitting), а индикатор говорит,
+                                         что касса занята, а не мертва. -->
+                                    <Panel Width="24" Height="24" VerticalAlignment="Center">
+                                        <material:MaterialIcon Kind="CheckCircle" Width="24" Height="24"
+                                                               IsVisible="{Binding !IsSubmitting}"/>
+                                        <ProgressBar IsIndeterminate="True" Width="24" Height="24"
+                                                     IsVisible="{Binding IsSubmitting}"/>
+                                    </Panel>
                                     <TextBlock Text="{Binding [Подтвердитьоплату], Source={x:Static services:I18nService.Instance}}" FontSize="17" FontWeight="ExtraBold" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <Border Grid.Column="2" Classes="KeyHintDark" VerticalAlignment="Center">

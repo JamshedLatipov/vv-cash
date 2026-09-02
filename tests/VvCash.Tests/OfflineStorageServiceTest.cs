@@ -49,6 +49,29 @@ public class OfflineStorageServiceTest : IDisposable
         }
     }
 
+    /// <summary>WAL, а не журнал отката по умолчанию. Проверка идёт по реальному
+    /// файлу, а не по тому, что мы отправили: journal_mode пишется в заголовок базы
+    /// и, например, на сетевой шаре молча не применяется — вопрос ровно в том, в
+    /// каком режиме файл остался после инициализации.
+    ///
+    /// Держит фикс замерзания кассы во время синхронизации: в режиме отката коммит
+    /// фоновой заливки каталога блокирует читателей, а читает касса с UI-потока и
+    /// синхронно — у Microsoft.Data.Sqlite методы *Async синхронные. Подробности и
+    /// причины, по которым synchronous и таймаут остались нетронутыми, — в
+    /// SqlitePragmas.</summary>
+    [Fact]
+    public async Task InitializeAsync_LeavesTheDatabaseInWalMode()
+    {
+        await _service.InitializeAsync();
+
+        using var check = new SqliteConnection($"Data Source={_dbPath}");
+        await check.OpenAsync();
+        using var cmd = check.CreateCommand();
+        cmd.CommandText = "PRAGMA journal_mode;";
+
+        Assert.Equal("wal", ((string?)await cmd.ExecuteScalarAsync())?.ToLowerInvariant());
+    }
+
     private static SellerInfo MakeSeller(
         string id = "seller-1",
         string firstName = "Anna",

@@ -187,8 +187,19 @@
                     <Button Classes="IconButton" Width="44" Height="44" Command="{Binding OpenCustomerRegistrationCommand}" IsVisible="{Binding IsCustomerRegistrationEnabled}" ToolTip.Tip="{Binding [AddCustomer], Source={x:Static services:I18nService.Instance}}">
                         <material:MaterialIcon Kind="AccountPlusOutline" Width="22" Height="22"/>
                     </Button>
-                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding FullReinitializeCommand}" ToolTip.Tip="{Binding [SyncData], Source={x:Static services:I18nService.Instance}}">
-                        <material:MaterialIcon Kind="Sync" Width="22" Height="22"/>
+                    <!-- Гаснет и крутится на время самой синхронизации: полная
+                         переинициализация выкачивает весь каталог, это десятки секунд,
+                         и без отклика повторное нажатие выглядит разумным действием.
+                         См. PosViewModel.IsSyncing. -->
+                    <Button Classes="IconButton" Width="44" Height="44" Command="{Binding FullReinitializeCommand}"
+                            IsEnabled="{Binding !IsSyncing}"
+                            ToolTip.Tip="{Binding [SyncData], Source={x:Static services:I18nService.Instance}}">
+                        <Panel Width="22" Height="22">
+                            <material:MaterialIcon Kind="Sync" Width="22" Height="22" IsVisible="{Binding !IsSyncing}"/>
+                            <ProgressBar IsIndeterminate="True" Width="22" Height="22"
+                                         Foreground="{StaticResource Slate500Brush}"
+                                         IsVisible="{Binding IsSyncing}"/>
+                        </Panel>
                     </Button>
 
                     <Border Width="1" Height="24" Background="{StaticResource Slate200Brush}" Margin="6,0"/>
@@ -614,10 +625,26 @@
                             <!-- pay -->
                             <Button Classes="PrimaryButton" Height="64" CornerRadius="16" HorizontalAlignment="Stretch"
                                     HorizontalContentAlignment="Stretch" Padding="20,0"
-                                    Command="{Binding PayCommand}" IsEnabled="{Binding HasCartItems}">
+                                    Command="{Binding PayCommand}">
+                                <!-- MultiBinding, а не одиночный HasCartItems: явно
+                                     заданный IsEnabled перебивает CanExecute самой
+                                     команды, поэтому занятость надо учитывать здесь же,
+                                     иначе кнопка остаётся нажимаемой всю предоплатную
+                                     котировку. См. PosViewModel.IsPaymentBusy. -->
+                                <Button.IsEnabled>
+                                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                        <Binding Path="HasCartItems"/>
+                                        <Binding Path="!IsPaymentBusy"/>
+                                    </MultiBinding>
+                                </Button.IsEnabled>
                                 <Grid ColumnDefinitions="Auto, *, Auto, Auto" VerticalAlignment="Center">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                        <material:MaterialIcon Kind="CashMultiple" Width="24" Height="24"/>
+                                        <Panel Width="24" Height="24">
+                                            <material:MaterialIcon Kind="CashMultiple" Width="24" Height="24"
+                                                                   IsVisible="{Binding !IsPaymentBusy}"/>
+                                            <ProgressBar IsIndeterminate="True" Width="24" Height="24"
+                                                         IsVisible="{Binding IsPaymentBusy}"/>
+                                        </Panel>
                                         <TextBlock Text="{Binding [Pay], Source={x:Static services:I18nService.Instance}}" FontSize="18" FontWeight="ExtraBold" VerticalAlignment="Center"/>
                                         <TextBlock Text="{Binding CartItemsCount, StringFormat='· {0}'}" FontSize="18" FontWeight="ExtraBold" VerticalAlignment="Center" Opacity="0.85"/>
                                     </StackPanel>

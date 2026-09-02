@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using VvCash.ViewModels;
 using Xunit;
 using CreditTerms = VvCash.ViewModels.MixedPaymentViewModel.CreditTerms;
@@ -12,7 +13,7 @@ public class MixedPaymentViewModelTest
     {
         // Default behaviour (allowMixed defaults to true) must keep splitting a
         // receipt across several tenders — this guards against a regression.
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { });
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask);
 
         vm.CashAmount = 30m;
         vm.SelectMethodCommand.Execute("Card");
@@ -27,7 +28,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void MixedDisabled_SwitchingMethodMovesTheAmountInsteadOfAddingToIt()
     {
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { }, allowMixed: false);
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask, allowMixed: false);
 
         vm.CashAmount = 100m;
         vm.SelectMethodCommand.Execute("Card");
@@ -42,7 +43,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void MixedDisabled_SwitchingMethodClearsTheOtherTenderImmediately()
     {
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { }, allowMixed: false);
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask, allowMixed: false);
 
         vm.CashAmount = 40m;
         vm.SelectMethodCommand.Execute("Card");
@@ -55,7 +56,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void MixedDisabled_SingleTenderPaymentIsLeftUntouched()
     {
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { }, allowMixed: false);
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask, allowMixed: false);
 
         vm.CashAmount = 100m;
 
@@ -73,7 +74,7 @@ public class MixedPaymentViewModelTest
         // the quick-tender "exact" chip pays 621.88 against 621.884, and a
         // remainder nobody can see (or hand over) must not keep the confirm
         // button disabled with "remaining 0.00" on screen.
-        var vm = new MixedPaymentViewModel(621.884m, (_, __, ___) => { });
+        var vm = new MixedPaymentViewModel(621.884m, (_, __, ___) => Task.CompletedTask);
 
         vm.SetQuickAmountCommand.Execute(vm.ExactAmount);
 
@@ -85,12 +86,13 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void ConfirmPayment_CalledTwiceInARow_OnlyCompletesOnce()
     {
-        // Nothing on this screen disables the confirm button while the first
-        // tap's completion callback is still running (it books a document and
-        // prints a receipt) — a second tap before that finishes must not book
-        // a second document for the same receipt.
+        // Кнопка гасится на время первого нажатия (CanConfirmPayment смотрит на
+        // IsSubmitting, а MixedPaymentView крутит на ней индикатор), но гашение —
+        // свойство представления, и держать на нём защиту от двойного оформления
+        // нельзя: тест зовёт Execute напрямую, минуя CanExecute. Проверяется именно
+        // второй барьер — guard внутри Submit.
         var completions = 0;
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; });
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; return Task.CompletedTask; });
         vm.CashAmount = 100m;
 
         vm.ConfirmPaymentCommand.Execute(null);
@@ -102,7 +104,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void ConfirmPayment_AfterConfirming_CommandCanNoLongerExecute()
     {
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { });
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask);
         vm.CashAmount = 100m;
 
         vm.ConfirmPaymentCommand.Execute(null);
@@ -113,7 +115,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void NoCustomerSelected_SellOnCreditIsNotAllowed()
     {
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { }, hasCustomer: false);
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask, hasCustomer: false);
         vm.CashAmount = 40m;
 
         Assert.False(vm.SellOnCreditCommand.CanExecute(null));
@@ -127,7 +129,7 @@ public class MixedPaymentViewModelTest
         // normal ConfirmPayment. Credit limit is not what this test is about, so it
         // passes one with plenty of headroom for the 60 that goes on credit here.
         var completions = new List<(bool result, decimal cash, decimal card)>();
-        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => completions.Add((result, cash, card)), hasCustomer: true, creditTerms: new CreditTerms(1000m, 0m));
+        var vm = new MixedPaymentViewModel(100m, (result, cash, card) => { completions.Add((result, cash, card)); return Task.CompletedTask; }, hasCustomer: true, creditTerms: new CreditTerms(1000m, 0m));
         vm.CashAmount = 40m;
 
         Assert.False(vm.IsFullyPaid);
@@ -147,7 +149,7 @@ public class MixedPaymentViewModelTest
         // two. A third tender that this screen counted toward IsFullyPaid but had
         // nowhere to hand back booked the receipt as unpaid: the money was in the
         // drawer and the document said the customer still owed all of it.
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { });
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => Task.CompletedTask);
 
         vm.SelectMethodCommand.Execute("Gift");
         vm.SetQuickAmountCommand.Execute(100m);
@@ -162,7 +164,7 @@ public class MixedPaymentViewModelTest
         // The invariant the bug above broke: whatever PaidAmount counts toward
         // settling the receipt must be exactly what reaches the document.
         var completions = new List<(decimal cash, decimal card)>();
-        var vm = new MixedPaymentViewModel(100m, (_, cash, card) => completions.Add((cash, card)));
+        var vm = new MixedPaymentViewModel(100m, (_, cash, card) => { completions.Add((cash, card)); return Task.CompletedTask; });
 
         vm.CashAmount = 60m;
         vm.SelectMethodCommand.Execute("Card");
@@ -179,7 +181,7 @@ public class MixedPaymentViewModelTest
         // Credit limit is not what this test is about, so it passes one with plenty
         // of headroom for the 60 that goes on credit here.
         var completions = 0;
-        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; }, hasCustomer: true, creditTerms: new CreditTerms(1000m, 0m));
+        var vm = new MixedPaymentViewModel(100m, (_, __, ___) => { completions++; return Task.CompletedTask; }, hasCustomer: true, creditTerms: new CreditTerms(1000m, 0m));
         vm.CashAmount = 40m;
 
         vm.SellOnCreditCommand.Execute(null);
@@ -192,7 +194,7 @@ public class MixedPaymentViewModelTest
     // as omitting the constructor argument — distinct from a limit of 0, which is a
     // real CreditTerms that forbids any debt.
     private static MixedPaymentViewModel Credit(decimal total, decimal? limit, decimal? balance)
-        => new(total, (_, _, _) => { }, allowMixed: true, hasCustomer: true,
+        => new(total, (_, _, _) => Task.CompletedTask, allowMixed: true, hasCustomer: true,
                creditTerms: limit is null ? null : new CreditTerms(limit.Value, balance ?? 0m));
 
     [Fact]
@@ -270,7 +272,7 @@ public class MixedPaymentViewModelTest
     public void SellOnCredit_ExecutedDirectlyPastTheLimit_DoesNotComplete()
     {
         var completed = false;
-        var vm = new MixedPaymentViewModel(200m, (_, _, _) => completed = true,
+        var vm = new MixedPaymentViewModel(200m, (_, _, _) => { completed = true; return Task.CompletedTask; },
                                             allowMixed: true, hasCustomer: true,
                                             creditTerms: new CreditTerms(0m, 0m));
 
@@ -288,7 +290,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void SellOnCredit_SettledWithinTolerance_IsAllowedEvenAtZeroLimit()
     {
-        var vm = new MixedPaymentViewModel(621.884m, (_, _, _) => { },
+        var vm = new MixedPaymentViewModel(621.884m, (_, _, _) => Task.CompletedTask,
                                             allowMixed: true, hasCustomer: true,
                                             creditTerms: new CreditTerms(0m, 0m));
 
@@ -306,7 +308,7 @@ public class MixedPaymentViewModelTest
     [Fact]
     public void IsCreditBlocked_WithNoCustomer_IsFalseRegardlessOfNumbers()
     {
-        var vm = new MixedPaymentViewModel(1000m, (_, _, _) => { },
+        var vm = new MixedPaymentViewModel(1000m, (_, _, _) => Task.CompletedTask,
                                             allowMixed: true, hasCustomer: false,
                                             creditTerms: new CreditTerms(0m, -9999m));
 
