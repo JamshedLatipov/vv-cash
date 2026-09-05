@@ -886,20 +886,86 @@ public partial class PosViewModel : ViewModelBase, IDisposable
 
     /// <summary>Оба чтения — на пуле, по той же причине, что и в LoadProductsAsync.
     /// Одним Task.Run, а не двумя: это два последовательных чтения одной и той же базы,
-    /// разносить их по разным заходам на пул нечего.</summary>
+    /// разносить их по разным заходам на пул нечего.
+    ///
+    /// Синхронизация не двигает кассира по каталогу. Раньше этот метод сбрасывал ровно
+    /// половину состояния навигации — стек, CurrentParentCategory и IsViewingCategories
+    /// уезжали в корень, — а SelectedCategory и Products оставлял как есть. Оба
+    /// вызывающих сразу после этого зовут LoadProductsAsync(SelectedCategory?.Id), и он
+    /// заново набивал сетку товарами той папки, в которой кассир стоял. На экране
+    /// получался список корневых папок с товарами чужой папки под ним (сетка товаров в
+    /// PosView.axaml ничем не скрыта) — и, поскольку SelectedCategory так и оставался
+    /// залипшим, это повторялось на каждой следующей синхронизации. Все остальные пути в
+    /// корень (InitializeAsync, SelectCategory(null), NavigateCategoryUp) держат обратный
+    /// инвариант и чистят Products.
+    ///
+    /// Поэтому здесь ничего не сбрасывается: текущая папка ищется по id в только что
+    /// синхронизированном каталоге. Корень так и остаётся пустой сеткой; папка, которую
+    /// синхронизация удалила на бэкенде, роняет вид в чистый корень, а не в наполовину
+    /// сброшенный.</summary>
     private async Task LoadCategoriesAsync()
     {
         var (allCats, quickCats) = await Task.Run(async () => (
             (await _categoryService.GetCategoriesAsync()).ToList(),
             (await _categoryService.GetQuickAccessCategoriesAsync()).ToList()));
+
+        // Снимок берётся ПОСЛЕ захода на пул, а не до него: await выше отпускает
+        // UI-поток, и кассир успевает открыть папку ровно в этом окне. Читая свежее
+        // значение, мы сохраняем именно его выбор, а не тот, что был до синхронизации.
+        var standingOnId = CurrentParentCategory?.Id;
+
         AllCategories = new ObservableCollection<Category>(allCats);
         QuickCategories = new ObservableCollection<Category>(quickCats);
+
+        // По id, а не по ссылке: объекты Category пересоздаются на каждой
+        // синхронизации, так что прежний CurrentParentCategory и всё содержимое стека
+        // навигации — это экземпляры уже выброшенного каталога.
+        var byId = new Dictionary<string, Category>();
+        foreach (var c in allCats)
+            if (!string.IsNullOrEmpty(c.Id)) byId[c.Id] = c;
+
+        Category? standingOn = null;
+        if (!string.IsNullOrEmpty(standingOnId)) byId.TryGetValue(standingOnId, out standingOn);
+
+        // Путь наверх восстанавливается из цепочки Parent, а не из старого стека: у
+        // переехавшей к другому родителю категории кнопка «назад» тогда ведёт туда, где
+        // она лежит сейчас, а не туда, откуда кассир пришёл. HashSet — страховка от
+        // цикла в присланных данных, иначе этот while не кончится.
         _categoryNavStack.Clear();
-        CurrentParentCategory = null;
-        var rootCats = allCats.Where(c => c.Parent?.Id == null).ToList();
-        CurrentDisplayedCategories = new ObservableCollection<Category>(rootCats);
-        HasSubcategories = rootCats.Count > 0;
-        IsViewingCategories = true;
+        if (standingOn != null)
+        {
+            var ancestors = new List<Category?>();
+            var seen = new HashSet<string> { standingOn.Id };
+            var walk = standingOn;
+            while (walk?.Parent?.Id is { Length: > 0 } parentId
+                   && seen.Add(parentId)
+                   && byId.TryGetValue(parentId, out var parent))
+            {
+                ancestors.Add(parent);
+                walk = parent;
+            }
+
+            // Корень — дно стека, ровно как его кладёт SelectCategory первым push'ем.
+            ancestors.Add(null);
+            for (var i = ancestors.Count - 1; i >= 0; i--)
+                _categoryNavStack.Push(ancestors[i]);
+        }
+
+        CurrentParentCategory = standingOn;
+        SelectedCategory = standingOn;
+
+        var siblings = (standingOn == null
+            ? allCats.Where(c => c.Parent?.Id == null)
+            : allCats.Where(c => c.Parent?.Id == standingOn.Id)).ToList();
+        CurrentDisplayedCategories = new ObservableCollection<Category>(siblings);
+        HasSubcategories = siblings.Count > 0;
+        IsViewingCategories = standingOn == null;
+
+        // Тот самый инвариант: показаны папки — товаров под ними нет. Вызывающий тут же
+        // зовёт LoadProductsAsync(SelectedCategory?.Id), но пока тот ходит на пул, на
+        // экране ещё висит старая сетка, поэтому чистим здесь, а не ждём его.
+        if (standingOn == null) Products.Clear();
+
         OnPropertyChanged(nameof(CanNavigateUp));
         _ = Task.WhenAll(allCats.Concat(quickCats).Where(c => !string.IsNullOrEmpty(c.ImageUrl)).Select(LoadCategoryImageAsync));
     }
