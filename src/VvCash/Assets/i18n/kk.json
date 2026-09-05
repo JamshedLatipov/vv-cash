@@ -247,6 +247,7 @@
   "SellerVerificationFailed": "PIN-ді тексеру мүмкін болмады. Қайта көріңіз",
   "CreatePin": "PIN ойлап табыңыз",
   "RepeatPin": "PIN-ді қайталаңыз",
+  "SavingPin": "PIN сақталуда…",
   "PinMismatch": "PIN сәйкес келмеді",
   "SellerPinSetupOffline": "Байланыс жоқ — PIN-ді кейінірек орнатыңыз",
   "PinTooWeak": "PIN тым қарапайым — басқасын байқаңыз",

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
@@ -994,6 +994,39 @@ public class SellerSwitchViewModelTest
         Assert.False(vm.IsVisible); // closes ...
         Assert.Null(session.Current); // ... without changing the seller (falls back to the shift owner)
         Assert.Equal(I18nService.Instance["SellerPinSetupOffline"], vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task PinCreation_WhileSetPinAsyncIsPending_TheOverlaySaysItIsWorking()
+    {
+        // The one place in this overlay that genuinely waits on the network. Verifying a
+        // PIN is local and instant (see SellerSession), so a numpad that goes dead has to
+        // mean something is happening — with nothing on screen saying so, the guard that
+        // makes Back and the digits no-ops just reads as a frozen till.
+        var session = await SessionWithNoPinSeller();
+        var roster = new SlowRosterService
+        {
+            CachedRoster = new List<SellerInfo>
+            {
+                new() { Id = "u-5", FirstName = "Жасур", PinHash = Encode("1357"), CanSell = true }
+            }
+        };
+        var vm = new SellerSwitchViewModel(session, roster);
+        vm.Open();
+        vm.SelectSellerCommand.Execute(vm.Sellers[0]);
+        foreach (var d in "0000") await vm.AppendDigitCommand.ExecuteAsync(d.ToString()); // triggers BeginPinSetup
+        foreach (var d in "1357") await vm.AppendDigitCommand.ExecuteAsync(d.ToString()); // "create" entry
+        foreach (var d in "135") await vm.AppendDigitCommand.ExecuteAsync(d.ToString()); // confirm entry, 3 of 4
+
+        Assert.False(vm.IsBusy); // nothing has suspended yet
+
+        var submitting = vm.AppendDigitCommand.ExecuteAsync("7");
+        Assert.True(vm.IsBusy);
+
+        roster.CompleteSetPin(true);
+        await submitting;
+
+        Assert.False(vm.IsBusy);
     }
 
     [Fact]
