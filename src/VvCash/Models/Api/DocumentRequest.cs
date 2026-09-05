@@ -1,3 +1,4 @@
+﻿using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
@@ -141,6 +142,32 @@ public class ExpenseDocumentOutcome
 
     public static ExpenseDocumentOutcome Refused(string reason)
         => new() { Rejected = true, RejectionReason = reason };
+}
+
+/// <summary>A sale the register already booked — printed, handed over, cart cleared —
+/// that the server then refused on its merits when the queue was replayed.
+///
+/// This only exists because checkout no longer waits for the server. When the POST was
+/// on the interactive path a refusal could be shown as the answer to the press that
+/// caused it; now it arrives minutes later, against a receipt already in the customer's
+/// hand. <see cref="IExpenseDocumentService.DocumentRejected"/> is what keeps that from
+/// being silent — marking the row rejected in SQLite takes it out of the retry rotation
+/// (see OfflineStorageService.GetUnsyncedDocumentsAsync) and nothing else reads it, so
+/// without this event a paid-for sale would simply never be booked with nobody told.</summary>
+public sealed class DocumentRejection : EventArgs
+{
+    public DocumentRejection(string documentHash, string reason)
+    {
+        DocumentHash = documentHash;
+        Reason = reason;
+    }
+
+    /// <summary>The DocumentHash the register generated for the sale — the only handle
+    /// the back office has on a document the server never gave a number.</summary>
+    public string DocumentHash { get; }
+
+    /// <summary>Why the server refused it, in its own words.</summary>
+    public string Reason { get; }
 }
 
 public enum SoldSourcesEnum

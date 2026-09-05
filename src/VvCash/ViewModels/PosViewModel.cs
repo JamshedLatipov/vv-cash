@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
@@ -185,16 +185,6 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     private bool _isParkingEnabled = true;
 
     [ObservableProperty] private bool _isMixedPaymentEnabled = true;
-
-    /// <summary>Оплата принята к оформлению и ещё не отпустила экран: держится на
-    /// время предоплатной котировки в ProceedToPayAsync.
-    ///
-    /// Заведено не ради красоты. RequoteNowAsync — сетевой вызов с таймаутом
-    /// HttpClient в 30 секунд (см. App.axaml.cs), и до этого флага нажатие «Оплата»
-    /// не давало кассиру ровно никакого отклика всё это время. UI-поток при этом не
-    /// блокировался — await его отпускает, — но «ничего не происходит» и «касса
-    /// зависла» с той стороны прилавка неотличимы, и читали это именно так.</summary>
-    [ObservableProperty] private bool _isPaymentBusy;
 
     /// <summary>Идёт ручная синхронизация — кнопка Sync, FullReinitializeCommand.
     /// Гасит кнопку и крутит на ней индикатор: полная переинициализация выкачивает и
@@ -1178,6 +1168,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         }
 
         _expenseDocumentService.SessionRevoked += OnSessionRevoked;
+        _expenseDocumentService.DocumentRejected += OnDocumentRejected;
         _shiftService.SessionRevoked += OnShiftSessionRevoked;
         _shiftService.AccessDenied += OnShiftAccessDenied;
 
@@ -1436,20 +1427,33 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         await RequoteAsync(cts);
     }
 
-    /// <summary>Quotes the cart immediately, skipping the debounce, and awaits the answer.
-    /// Used right before payment: the debounced requote can still be pending when the
-    /// cashier hits Pay, and the sale must report the quote it was actually priced from.
-    /// Never lets a quote failure block a sale — the cart falls back to local pricing.</summary>
-    private async Task RequoteNowAsync()
+    /// <summary>Drops whatever requote is pending or in flight, without starting another.
+    /// Called when the payment screen opens: from that moment the amount being collected
+    /// is fixed, and a quote that lands afterwards would rewrite the total the cashier is
+    /// already taking money against. Cancelling is enough — RequoteAsync applies nothing
+    /// once its own token is cancelled (see IsCurrentQuote), so the cart keeps exactly the
+    /// pricing that was on screen.</summary>
+    private void CancelPendingRequote()
+    {
+        var previous = _quoteCts;
+        _quoteCts = null;
+        previous?.Cancel();
+        previous?.Dispose();
+    }
+
+    /// <summary>Pushes the offline queue once, for its side effect of turning the sale
+    /// just booked into a real document. Wrapped rather than awaited at the call site:
+    /// the receipt is already printed and the cashier has already moved on, so a failure
+    /// here changes nothing on screen — the ten-second background loop retries anyway.</summary>
+    private async Task SyncQueuedSalesAsync()
     {
         try
         {
-            ReplaceQuoteCts(out var cts);
-            await RequoteAsync(cts);
+            await _expenseDocumentService.SyncOfflineDocumentsAsync();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Pre-payment requote failed: {ex}");
+            System.Diagnostics.Debug.WriteLine($"[PosViewModel] Post-checkout sync failed: {ex}");
         }
     }
 
@@ -1577,6 +1581,34 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => IsSessionRevoked = true);
     }
 
+    /// <summary>A sale that was already printed and handed over came back refused when the
+    /// queue was replayed. This is the whole safety net behind checkout not waiting for the
+    /// server: the refusal cannot be shown as the answer to the press that caused it any
+    /// more, so it has to interrupt whenever it does arrive.
+    ///
+    /// A modal, not the status line: the register keeps working and the next customer is
+    /// already being rung up, so anything less than a dismissal would scroll past unread —
+    /// and this is money taken against a document that does not exist. The hash is in the
+    /// message because it is the only handle the back office has on a sale the server never
+    /// gave a number.
+    ///
+    /// Marshalled like every other handler here: SyncOfflineDocumentsAsync runs off the UI
+    /// thread. (ExpenseDocumentService already posts this event itself; posting again is
+    /// what every sibling handler does and costs nothing.)</summary>
+    private void OnDocumentRejected(object? sender, DocumentRejection e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            AlertMessage = string.IsNullOrWhiteSpace(e.Reason)
+                ? $"Продажа {e.DocumentHash} отклонена сервером. Чек уже напечатан — "
+                  + "обратитесь к администратору."
+                : $"Сервер отклонил уже проведённую продажу: {e.Reason}. "
+                  + $"Чек напечатан, документ {e.DocumentHash} не создан — "
+                  + "обратитесь к администратору.";
+            IsAlertModalVisible = true;
+        });
+    }
+
     /// <summary>Unlike <see cref="OnSessionRevoked"/> above — which only raises a banner
     /// because a queued receipt might be mid-flight — ShiftService.SessionRevoked fires from
     /// GetShiftStateAsync (startup) or OpenShiftAsync (the shift modal's own button), and both
@@ -1658,6 +1690,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         _printerService.StatusChanged -= OnPrinterStatusChanged;
         _expenseDocumentService.UnsyncedDocumentsCountChanged -= OnUnsyncedDocumentsCountChanged;
         _expenseDocumentService.SessionRevoked -= OnSessionRevoked;
+        _expenseDocumentService.DocumentRejected -= OnDocumentRejected;
         _shiftService.SessionRevoked -= OnShiftSessionRevoked;
         _shiftService.AccessDenied -= OnShiftAccessDenied;
         _parkedSaleService.CountChanged -= OnParkedSaleCountChanged;
@@ -2311,7 +2344,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Opens the exchange window itself, once the seller gate above is satisfied.
-    /// Split out for the same reason <see cref="ProceedToPayAsync"/> is: the gate needs
+    /// Split out for the same reason <see cref="ProceedToPay"/> is: the gate needs
     /// something to resume that cannot re-enter the gate.</summary>
     private async Task ShowExchangeDialogAsync()
     {
@@ -2424,8 +2457,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         StatusMessage = "Отложенный чек возвращён.";
     }
 
+    // Not async, and that is deliberate. [RelayCommand] on an async method generates an
+    // AsyncRelayCommand, and CommunityToolkit disallows concurrent executions by default —
+    // so for as long as the method was awaiting anything, CanExecute stayed false and the
+    // Pay button sat greyed out with no spinner next to it. Nothing on this path awaits
+    // the network any more (see ProceedToPay), so a plain command is both honest and
+    // instant.
     [RelayCommand]
-    private async Task Pay()
+    private void Pay()
     {
         if (!CartItems.Any()) return;
 
@@ -2450,7 +2489,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         //
         // OnSwitched is what stops the refusal being a dead press: once the PIN is in, the
         // payment resumes by itself rather than making the cashier press Pay a second time.
-        // It calls ProceedToPayAsync directly, never the command, so a switch that somehow
+        // It calls ProceedToPay directly, never the command, so a switch that somehow
         // left the session still stale cannot bounce back into this gate in a loop.
         //
         // canSignOut is a hard false: CartItems is non-empty by the guard at the top of
@@ -2464,41 +2503,49 @@ public partial class PosViewModel : ViewModelBase, IDisposable
         {
             SellerSwitchRequested?.Invoke(this, new SellerSwitchRequest(
                 canSignOut: false,
-                onSwitched: _ => ProceedToPayAsync()));
+                onSwitched: _ =>
+                {
+                    ProceedToPay();
+                    return Task.CompletedTask;
+                }));
             return;
         }
 
-        await ProceedToPayAsync();
+        ProceedToPay();
     }
 
-    /// <summary>Everything Pay does once it is allowed to: quote the cart, then hand the
-    /// payment screen to the host. Split out so the seller gate above has something to
-    /// resume that cannot re-enter the gate itself.
+    /// <summary>Everything Pay does once it is allowed to: hand the payment screen to the
+    /// host. Split out so the seller gate above has something to resume that cannot
+    /// re-enter the gate itself.
     ///
     /// Re-checks the cart rather than trusting Pay's own guard: when this runs as the
     /// gate's continuation, an overlay stood between the two, and a method that books a
     /// document should not assume what was true before it.</summary>
-    private async Task ProceedToPayAsync()
+    private void ProceedToPay()
     {
         if (!CartItems.Any()) return;
 
         if (NavigationRequest != null)
         {
-            // Before the amount to collect is shown, not after: the payment screen is
-            // built from TotalAmount, so quoting afterwards would take money against a
-            // price the server never agreed to.
+            // This used to await a fresh quote here, so that the amount on the payment
+            // screen was one the server had just agreed to. The insurance was against a
+            // narrow window — the debounced requote fires 300ms after the last cart change
+            // and has almost always landed by the time anyone looks up at the total and
+            // presses Pay — and it was paid for on every single sale, with an unbounded
+            // wait (HttpClient's cap is 30 seconds) behind the Pay button.
             //
-            // Под флагом занятости: это единственный участок между нажатием «Оплата» и
-            // появлением экрана оплаты, и он сетевой — см. IsPaymentBusy.
-            IsPaymentBusy = true;
-            try
-            {
-                await RequoteNowAsync();
-            }
-            finally
-            {
-                IsPaymentBusy = false;
-            }
+            // IsPaymentBusy was the previous answer to that: an indicator, so the wait at
+            // least looked like something. It is gone with the wait itself — the screen now
+            // opens from the totals the cart is already showing, which is also the number
+            // the cashier and the customer have both just read. What remains is making sure
+            // that number cannot move underneath them: a requote still in flight would apply
+            // its answer mid-payment and change the amount being collected, so it is
+            // cancelled here rather than left running.
+            //
+            // The cost is a promotion that had not come back within that window not being
+            // applied — the same outcome an offline register has always had, and the same
+            // fallback (local pricing) it has always used.
+            CancelPendingRequote();
 
             var mixedPaymentVm = new MixedPaymentViewModel(TotalAmount, async (result, cashAmount, cardAmount) =>
             {
@@ -2548,32 +2595,55 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                         }).ToList()
                     };
 
-                    StatusMessage = "Creating expense document...";
-                    // Detailed, not the bool overload: a document the server refused on
-                    // its merits will be refused identically on every retry, so "please
-                    // try again" is the one instruction that cannot help. The server's
-                    // own reason is what tells the cashier whether to fix the receipt or
-                    // fetch a manager.
-                    var outcome = await _expenseDocumentService.CreateExpenseDocumentDetailedAsync(request);
-
-                    if (outcome.Posted || outcome.Queued)
+                    // Booked locally and only locally: this writes the sale to the same
+                    // offline queue an outage would have put it in, and returns. The POST
+                    // used to sit right here, which meant the receipt did not print until
+                    // the server had answered — and on a slow connection that was the
+                    // full HttpClient timeout of watching nothing happen, before the very
+                    // same document got queued anyway.
+                    //
+                    // What is given up is the server's verdict at the till: a document
+                    // refused on its merits is now reported after the fact, through
+                    // IExpenseDocumentService.DocumentRejected (see OnDocumentRejected).
+                    //
+                    // Wrapped, because moving the booking off the network moved the one
+                    // way checkout can still fail at the till: this writes to SQLite, and
+                    // a disk that is full or a database that is locked throws. That used
+                    // to be the server's job to report; unhandled here it would escape an
+                    // async void callback and take the register down mid-receipt.
+                    var booked = false;
+                    var bookingFailure = string.Empty;
+                    try
                     {
-                        // The document number is empty for a sale that was queued rather
-                        // than posted — it has no number until it syncs — and the seller
-                        // is absent on a register with switching off. The receipt prints
-                        // neither line in those cases rather than an empty label.
+                        var outcome = await _expenseDocumentService.QueueExpenseDocumentAsync(request);
+                        booked = outcome.Posted || outcome.Queued;
+                        bookingFailure = outcome.RejectionReason;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[PosViewModel] Could not book the sale locally: {ex}");
+                        bookingFailure = ex.Message;
+                    }
+
+                    if (booked)
+                    {
+                        // No document number, ever: the sale is booked into the queue and
+                        // has no number until it syncs, which is now every sale rather than
+                        // only the offline ones. The receipt prints no number line at all
+                        // rather than an empty label — same as it already did for a queued
+                        // sale — and no seller line on a register with switching off.
                         //
-                        // The result is kept, not discarded: the payment already went
-                        // through by this point (outcome.Posted/Queued above), so a print
-                        // failure here cannot roll it back — only StatusMessage below can
-                        // still tell the cashier the paper did not come out, instead of the
-                        // success line that used to print regardless.
+                        // The result is kept, not discarded: the sale is booked by this
+                        // point, so a print failure here cannot roll it back — only
+                        // StatusMessage below can still tell the cashier the paper did not
+                        // come out, instead of the success line that used to print
+                        // regardless.
                         var receiptPrinted = await _printerService.PrintReceiptAsync(
                             _cartService.Items,
                             Subtotal, TotalDiscount, TotalAmount,
                             _cartService.AppliedCoupons,
                             _cartService.AppliedDiscountName,
-                            documentNumber: outcome.DocumentNumber,
+                            documentNumber: null,
                             warehouseName: null,
                             sellerName: _sellerSession.Current?.FullName,
                             saleDate: DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
@@ -2618,7 +2688,11 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 _cartService.Items.ToList(),
                                 Subtotal, TotalDiscount, TotalAmount,
                                 _cartService.AppliedDiscountName,
-                                outcome.DocumentNumber,
+                                // No document number: the sale is queued, and a queued sale
+                                // has none until it syncs. Was already empty for every
+                                // offline sale before checkout stopped waiting for the
+                                // server; now it is empty for all of them.
+                                string.Empty,
                                 null,
                                 _sellerSession.Current?.FullName,
                                 DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
@@ -2697,15 +2771,27 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             CustomerDisplayViewModel.WelcomeMessage = "Thank you! Come again!";
                         }
                         _ = _customerDisplayService.ShowLineAsync("Thank you!", "Come again!");
+
+                        // Push it now rather than leaving it to the ten-second background
+                        // loop: the sale is already queued and the receipt already out, so
+                        // the only thing waiting buys is a document that has no number for
+                        // longer than it needs to. Fire-and-forget on purpose — nothing on
+                        // screen depends on the answer, and SyncOfflineDocumentsAsync
+                        // swallows its own failures.
+                        _ = SyncQueuedSalesAsync();
                     }
                     else
                     {
+                        // Nothing was printed and nothing was cleared: the cart, the
+                        // customer and the confirmed seller all survive so the cashier can
+                        // simply press Pay again. Unlike the old server-refusal branch, a
+                        // retry here is exactly the right advice — the failure is local.
                         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                         {
-                            AlertMessage = string.IsNullOrWhiteSpace(outcome.RejectionReason)
-                                ? "Не удалось создать документ продажи. Повторите попытку."
-                                : $"Сервер отклонил продажу: {outcome.RejectionReason}. "
-                                  + "Повтор не поможет — исправьте чек или обратитесь к администратору.";
+                            AlertMessage = string.IsNullOrWhiteSpace(bookingFailure)
+                                ? "Не удалось сохранить продажу. Повторите попытку."
+                                : $"Не удалось сохранить продажу: {bookingFailure}. "
+                                  + "Чек не напечатан — повторите оплату.";
                             IsAlertModalVisible = true;
                             StatusMessage = "Payment failed.";
                         });

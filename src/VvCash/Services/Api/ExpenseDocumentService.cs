@@ -19,6 +19,7 @@ public class ExpenseDocumentService : IExpenseDocumentService
 
     public event EventHandler<int>? UnsyncedDocumentsCountChanged;
     public event EventHandler? SessionRevoked;
+    public event EventHandler<DocumentRejection>? DocumentRejected;
 
     public ExpenseDocumentService(HttpClient httpClient, ISettingsService settingsService, IOfflineStorageService offlineStorageService)
     {
@@ -64,6 +65,28 @@ public class ExpenseDocumentService : IExpenseDocumentService
         {
             SessionRevoked?.Invoke(this, EventArgs.Empty);
         });
+    }
+
+    /// <summary>Same UI-thread marshal as the two notifiers above, for the same reason:
+    /// SyncOfflineDocumentsAsync runs off the UI SynchronizationContext and the subscriber
+    /// (PosViewModel) raises a modal from this.</summary>
+    private void NotifyDocumentRejected(string hash, string reason)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            DocumentRejected?.Invoke(this, new DocumentRejection(hash, reason));
+        });
+    }
+
+    /// <summary>The optimistic checkout path — see the interface for why it exists.
+    /// Deliberately has no HTTP call at all, not even an attempted one: a call that could
+    /// hang is exactly what this is here to keep off the cashier's path. Pushing it to
+    /// the server is <see cref="SyncOfflineDocumentsAsync"/>'s job, kicked by the caller
+    /// once the receipt is out.</summary>
+    public async Task<ExpenseDocumentOutcome> QueueExpenseDocumentAsync(DocumentRequest request)
+    {
+        await SaveOfflineAsync(request);
+        return ExpenseDocumentOutcome.Enqueued();
     }
 
     private async Task SaveOfflineAsync(DocumentRequest request)
@@ -303,6 +326,11 @@ public class ExpenseDocumentService : IExpenseDocumentService
                             Console.WriteLine(
                                 $"[ExpenseDocumentService] Server rejected queued document {doc.Key} ({(int)response.StatusCode}): {reason}. Taking it out of the retry rotation.");
                             await _offlineStorageService.MarkDocumentRejectedAsync(doc.Key, reason);
+                            // Marking it is what stops the retrying; telling somebody is
+                            // what stops it being lost. With checkout no longer waiting
+                            // for the server, this event is the only moment a refused
+                            // sale is ever mentioned to the person who took the money.
+                            NotifyDocumentRejected(doc.Key, reason);
                             anySuccess = true; // the queue did shrink; the badge must follow
                         }
                     }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
@@ -63,11 +63,17 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     // so without this guard a stray tap on "Back" or a fresh Open() while that
     // request is in flight could hide/reset the overlay — or start a second,
     // overlapping setup attempt — out from under the still-pending call.
-    private bool _isBusy;
+    //
+    // Observable, and bound in SellerSwitchView: the guard makes the numpad and Back
+    // stop responding, and a pad that goes dead with nothing on screen explaining it is
+    // indistinguishable from a frozen till. Verifying a PIN is local and instant (see
+    // SellerSession), so this is only ever true for the PIN-setup round-trip — the one
+    // moment the overlay genuinely has something to wait for.
+    [ObservableProperty] private bool _isBusy;
 
     /// <summary>The caller's permission for whether the manual sign-out control may be
     /// offered at all — see <see cref="Open"/>'s canSignOut parameter and
-    /// <see cref="CanSignOut"/>. Assigned inside <see cref="Show"/>'s _isBusy guard for
+    /// <see cref="CanSignOut"/>. Assigned inside <see cref="Show"/>'s IsBusy guard for
     /// the same reason <see cref="_onCompleted"/> is (see Show's remarks): a call that
     /// arrives while a submit is genuinely in flight must not overwrite state for that
     /// still-pending submit.</summary>
@@ -251,7 +257,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         // pending continuation. Ignore it — the in-flight submit resolves the
         // overlay itself (hides on success, shows an error on failure) shortly;
         // the caller can open again afterwards if still needed.
-        if (_isBusy) return;
+        if (IsBusy) return;
 
         // Assigned here, inside the same busy guard as everything else Show() resets,
         // rather than by the public Open()/OpenForApproval() methods before calling
@@ -299,7 +305,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void SelectSeller(SellerInfo seller)
     {
-        if (_isBusy) return;
+        if (IsBusy) return;
 
         SelectedSeller = seller;
         Pin = string.Empty;
@@ -321,9 +327,9 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         // prevents a double submit today, while SellerSession's Task-returning
         // members still complete synchronously (see its class remarks): a second
         // call only ever arrives after the first one already ran to completion,
-        // by which point Pin is already full. The _isBusy check is the one that
+        // by which point Pin is already full. The IsBusy check is the one that
         // matters once that stops being true.
-        if (_isBusy || SelectedSeller == null || Pin.Length >= PinLength) return;
+        if (IsBusy || SelectedSeller == null || Pin.Length >= PinLength) return;
 
         HasError = false;
         Pin += digit;
@@ -343,7 +349,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void Back()
     {
-        if (_isBusy) return;
+        if (IsBusy) return;
 
         IsPinEntry = false;
         SelectedSeller = null;
@@ -367,13 +373,13 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     ///    was ever selected, the register keeps working and sales fall back to the shift
     ///    owner (see <see cref="ISellerSession"/>'s offline-degradation remarks) — that is
     ///    the designed behaviour, not an error this needs to prevent.
-    /// A no-op while <see cref="_isBusy"/>, same as every other entry point that mutates
+    /// A no-op while <see cref="IsBusy"/>, same as every other entry point that mutates
     /// overlay state: an in-flight PIN check or PIN-setup network call must resolve on its
     /// own rather than be yanked out from under by a cancel tap.</summary>
     [RelayCommand]
     private void Cancel()
     {
-        if (_isBusy) return;
+        if (IsBusy) return;
 
         _onCompleted = null;
         HideAndReset();
@@ -394,7 +400,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     /// not-this-class's-job-to-assume-that reason as <see cref="Cancel"/>) and the same
     /// <see cref="HideAndReset"/> — plus the one thing Cancel deliberately never does:
     /// actually clearing <see cref="ISellerSession.Current"/>. A no-op while
-    /// <see cref="_isBusy"/>, same as every other mutating entry point in this class.</summary>
+    /// <see cref="IsBusy"/>, same as every other mutating entry point in this class.</summary>
     // Named SignOutSeller, not SignOut: PosViewModel already has its own SignOutCommand
     // meaning "log out of the app entirely and navigate away". Same bare name on two
     // view models with materially different blast radius is exactly the kind of thing
@@ -403,7 +409,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void SignOutSeller()
     {
-        if (_isBusy) return;
+        if (IsBusy) return;
 
         _onCompleted = null;
         _session.Clear();
@@ -425,7 +431,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        _isBusy = true;
+        IsBusy = true;
         try
         {
             if (IsApprovalMode)
@@ -478,7 +484,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            _isBusy = false;
+            IsBusy = false;
         }
     }
 
@@ -555,11 +561,11 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         _pendingNewPin = null;
 
         // The actual network round-trip — the one genuine suspension point in this
-        // whole flow, and exactly what _isBusy exists to cover (see the class-level
+        // whole flow, and exactly what IsBusy exists to cover (see the class-level
         // remarks): without it, a tap on Back or a fresh Open() while this is
         // in-flight could hide/reset the overlay, or start a second, overlapping
         // setup attempt, out from under this still-pending call.
-        _isBusy = true;
+        IsBusy = true;
         try
         {
             var success = await _rosterService.SetPinAsync(sellerId, confirmedPin);
@@ -603,7 +609,7 @@ public partial class SellerSwitchViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            _isBusy = false;
+            IsBusy = false;
         }
     }
 

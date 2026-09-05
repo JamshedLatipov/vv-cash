@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using VvCash.Constants;
 using VvCash.Models;
 using VvCash.Services;
+using VvCash.Models.Api;
 using VvCash.Services.Api;
 using VvCash.Services.Data;
 using Xunit;
@@ -137,6 +138,10 @@ public class SyncServiceTest
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }
         public event EventHandler? SessionRevoked { add { } remove { } }
+        public event EventHandler<DocumentRejection>? DocumentRejected { add { } remove { } }
+
+        public Task<ExpenseDocumentOutcome> QueueExpenseDocumentAsync(DocumentRequest request)
+            => Task.FromResult(ExpenseDocumentOutcome.Enqueued());
     }
 
     private static SyncService Build(StubHttpMessageHandler handler, FakeStorage storage)

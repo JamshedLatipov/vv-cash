@@ -226,6 +226,7 @@
   "SellerVerificationFailed": "Не удалось проверить PIN. Попробуйте снова",
   "CreatePin": "Придумайте PIN",
   "RepeatPin": "Повторите PIN",
+  "SavingPin": "Сохраняем PIN…",
   "PinMismatch": "PIN не совпал",
   "SellerPinSetupOffline": "Нет связи — задайте PIN позже",
   "PinTooWeak": "Слишком простой PIN — попробуйте другой",

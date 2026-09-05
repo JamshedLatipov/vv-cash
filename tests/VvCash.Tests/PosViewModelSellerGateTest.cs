@@ -266,13 +266,27 @@ public class PosViewModelSellerGateTest
     {
         public PrinterStatus Status => PrinterStatus.Ready;
         public event EventHandler<PrinterStatus>? StatusChanged;
+
         /// <summary>Settable so a test can simulate a sale receipt printer that is out of
         /// paper or offline while the payment itself still goes through — the cashier must
         /// be told the receipt did not print rather than see the ordinary success line.</summary>
         public bool ReceiptFails { get; set; }
 
+        public int ReceiptsPrinted { get; private set; }
+
+        /// <summary>The lines the last receipt actually carried. Captured (rather than
+        /// held by reference) because checkout clears the cart right after printing, and
+        /// a live reference would read back empty.</summary>
+        public List<CartItem> LastReceiptItems { get; private set; } = new();
+
         public Task<bool> PrintReceiptAsync(IEnumerable<CartItem> items, decimal subtotal, decimal discount, decimal total, IEnumerable<Coupon> coupons, string? discountName = null,
-            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(!ReceiptFails);
+            string? documentNumber = null, string? warehouseName = null, string? sellerName = null, string? saleDate = null)
+        {
+            ReceiptsPrinted++;
+            LastReceiptItems = items.ToList();
+            return Task.FromResult(!ReceiptFails);
+        }
+
         public Task<bool> PrintPreReceiptAsync(IEnumerable<CartItem> items, decimal total) => Task.FromResult(true);
         public Task<bool> OpenCashDrawerAsync() => Task.FromResult(true);
         public Task<bool> PrintReturnReceiptAsync(IEnumerable<ReturnReceiptLine> lines, decimal totalRefund, string documentNumber, string? warehouseName = null, string? sellerName = null, string? saleDate = null) => Task.FromResult(true);
@@ -553,21 +567,60 @@ public class PosViewModelSellerGateTest
         /// the success branch.</summary>
         public bool CreateResult { get; set; } = true;
 
+        /// <summary>A server that accepts the request and then never answers. Only the
+        /// blocking calls honour it — the queueing path is local by definition, so a test
+        /// that sets this and still sees checkout finish has proved the difference.</summary>
+        public bool NeverAnswers { get; set; }
+
+        /// <summary>The sale handed to the optimistic path, which books it locally and
+        /// returns without touching the network. Also lands in
+        /// <see cref="LastRequest"/>, which means "the document that went out" regardless
+        /// of which path carried it.</summary>
+        public DocumentRequest? QueuedRequest { get; private set; }
+
+        public int SyncCallCount { get; private set; }
+
+        /// <summary>How many times one of the two blocking overloads was called. The
+        /// optimistic path does not touch it, which is what lets a test say "checkout
+        /// never waited on the server" without having to time anything.</summary>
+        public int BlockingCallCount { get; private set; }
+
         public Task<bool> CreateExpenseDocumentAsync(DocumentRequest request)
         {
             LastRequest = request;
+            BlockingCallCount++;
+            if (NeverAnswers) return new TaskCompletionSource<bool>().Task;
             return Task.FromResult(CreateResult);
         }
 
         public Task<ExpenseDocumentOutcome> CreateExpenseDocumentDetailedAsync(DocumentRequest request)
         {
             LastRequest = request;
+            BlockingCallCount++;
+            if (NeverAnswers) return new TaskCompletionSource<ExpenseDocumentOutcome>().Task;
             return Task.FromResult(CreateResult
                 ? ExpenseDocumentOutcome.Sent("1")
                 : ExpenseDocumentOutcome.Refused("товар не найден"));
         }
 
-        public Task SyncOfflineDocumentsAsync() => Task.CompletedTask;
+        /// <summary>Makes the local booking fail the way a full disk or a locked SQLite
+        /// database does. That is the only failure mode checkout has left now that the
+        /// server is off its path, so it is what the failed-payment tests exercise.</summary>
+        public bool QueueThrows { get; set; }
+
+        public Task<ExpenseDocumentOutcome> QueueExpenseDocumentAsync(DocumentRequest request)
+        {
+            if (QueueThrows) throw new InvalidOperationException("database is locked");
+            QueuedRequest = request;
+            LastRequest = request;
+            return Task.FromResult(ExpenseDocumentOutcome.Enqueued());
+        }
+
+        public Task SyncOfflineDocumentsAsync()
+        {
+            SyncCallCount++;
+            return Task.CompletedTask;
+        }
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged;
         public event EventHandler? SessionRevoked;
@@ -576,6 +629,12 @@ public class PosViewModelSellerGateTest
         /// raises the real event so PosViewModel's own OnSessionRevoked subscription is
         /// what's under test, not this fake's plumbing.</summary>
         public void RaiseSessionRevoked() => SessionRevoked?.Invoke(this, EventArgs.Empty);
+        public event EventHandler<DocumentRejection>? DocumentRejected;
+
+        /// <summary>Test hook standing in for SyncOfflineDocumentsAsync meeting a refusal
+        /// on the merits, long after the receipt was printed.</summary>
+        public void RaiseDocumentRejected(string hash, string reason)
+            => DocumentRejected?.Invoke(this, new DocumentRejection(hash, reason));
     }
 
     private class FakeCounterpartyService : ICounterpartyService
@@ -702,9 +761,15 @@ public class PosViewModelSellerGateTest
         /// service's offline/failure answer, which sends the cart down local pricing.</summary>
         public QuoteResult? Result { get; set; }
 
+        /// <summary>A quote endpoint that accepts the request and then never answers —
+        /// the shape of a slow or half-dead server, which is precisely what checkout must
+        /// not be made to wait on.</summary>
+        public bool NeverAnswers { get; set; }
+
         public Task<QuoteResult?> QuoteAsync(QuoteRequest request, CancellationToken ct)
         {
             Requests.Add(request);
+            if (NeverAnswers) return new TaskCompletionSource<QuoteResult?>().Task;
             return Task.FromResult(Result);
         }
     }
@@ -3264,8 +3329,15 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void Pay_QuotesTheCartBeforeOpeningThePaymentScreen()
+    public void Pay_DoesNotTakeAFreshQuoteBeforeOpeningThePaymentScreen()
     {
+        // This used to assert the opposite: Pay took a fresh quote and waited for it, so
+        // that the amount presented had just been agreed by the server. The window it
+        // covered is narrow — the debounced requote fires 300ms after the last cart change
+        // — and the price was an unbounded network wait on every sale, behind a button
+        // that showed nothing while it waited. The amount presented is now the one the
+        // cart was already showing, which is also the one the cashier and the customer
+        // have just read off the screen.
         using var vm = CreateViewModel(out var deps);
         deps.SellerSession.SetCurrent(MakeSeller("cashier")); // Pay() refuses with nobody confirmed
         deps.CartService.AddProduct(MakeProduct("p1", 100m));
@@ -3280,10 +3352,7 @@ public class PosViewModelSellerGateTest
         var before = deps.QuoteService.CallCount;
         vm.PayCommand.Execute(null);
 
-        // The debounced requote can still be pending when the cashier hits Pay, so the
-        // amount presented for payment must come from a quote taken right then.
-        Assert.True(quotesWhenPaymentOpened > before,
-            $"expected a fresh quote before the payment screen opened; before={before}, atOpen={quotesWhenPaymentOpened}");
+        Assert.Equal(before, quotesWhenPaymentOpened);
     }
 
     [Fact]
@@ -3343,12 +3412,16 @@ public class PosViewModelSellerGateTest
     }
 
     [Fact]
-    public void Pay_WhenDocumentCreationFails_KeepsCurrentSeller()
+    public void Pay_WhenTheSaleCannotBeBooked_KeepsCurrentSellerAndTheCart()
     {
         // A failed payment is not the end of a receipt: the cashier is expected to try
         // again, and demanding a fresh PIN for a retry would punish the wrong person.
+        //
+        // The failure being simulated changed with the checkout path. It used to be the
+        // server refusing the document; the server is no longer on this path at all, and
+        // what is left is the local write failing (a full disk, a locked database).
         using var vm = CreateViewModel(out var deps);
-        deps.ExpenseDocumentService.CreateResult = false;
+        deps.ExpenseDocumentService.QueueThrows = true;
         var seller = MakeSeller("s1");
         deps.SellerSession.SetCurrent(seller);
         vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
@@ -3372,6 +3445,10 @@ public class PosViewModelSellerGateTest
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
         Assert.Same(seller, deps.SellerSession.Current);
+        // Nothing may be thrown away on a failure the cashier is being asked to retry.
+        Assert.Single(deps.CartService.Items);
+        Assert.Equal(0, deps.PrinterService.ReceiptsPrinted);
+        Assert.True(vm.IsAlertModalVisible);
     }
 
     [Fact]
@@ -3531,7 +3608,7 @@ public class PosViewModelSellerGateTest
     // ---------------------------------------------------------------------------------
     // Deliberate non-reset points (final-review Finding 2): the design doc's "Точки, где
     // сброса намеренно нет" names park and auto-park-inside-resume alongside failed payment
-    // (already covered above by Pay_WhenDocumentCreationFails_KeepsCurrentSeller) as points
+    // (already covered above by Pay_WhenTheSaleCannotBeBooked_KeepsCurrentSellerAndTheCart) as points
     // that must NOT call EndReceipt. These two close that gap.
     // ---------------------------------------------------------------------------------
 
@@ -3938,5 +4015,132 @@ public class PosViewModelSellerGateTest
         // Последним уходит именно очистка: ClearCart шлёт ClearAsync после того, как
         // опустошение корзины уже подняло свои CartChanged.
         Assert.Equal("clear", deps.CustomerDisplay.Frames[^1]);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Instant checkout
+    //
+    // Paying used to sit on two blocking round-trips: a fresh quote before the payment
+    // screen would even appear, and the document POST before the receipt printed. On the
+    // shop's connection each of those could take the HttpClient's full 30-second cap, and
+    // neither showed any progress — the cashier just had a dead button. Both are off the
+    // interactive path now: the payment screen opens from the totals already on screen,
+    // and the sale is booked into the offline queue (which already existed for genuine
+    // outages) and pushed to the server afterwards.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public void Pay_OpensThePaymentScreenWithoutWaitingForAQuote()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        deps.QuoteService.NeverAnswers = true;
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        object? navigated = null;
+        vm.NavigationRequest = target => navigated = target;
+
+        vm.PayCommand.Execute(null);
+
+        // Synchronously, in the same turn as the press: no await on the quote endpoint
+        // stands between the cashier and the amount to collect.
+        Assert.IsType<MixedPaymentViewModel>(navigated);
+    }
+
+    [Fact]
+    public void Pay_ChargesTheTotalThatWasOnScreen()
+    {
+        // The other half of not waiting: whatever the payment screen asks for has to be
+        // the number the cart was already showing, or the cashier collects one amount
+        // while the customer was quoted another.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        deps.QuoteService.NeverAnswers = true;
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+        vm.AddToCartCommand.Execute(MakeProduct("p2", 5m));
+
+        object? navigated = null;
+        vm.NavigationRequest = target => navigated = target;
+
+        vm.PayCommand.Execute(null);
+
+        var payment = Assert.IsType<MixedPaymentViewModel>(navigated);
+        Assert.Equal(vm.TotalAmount, payment.TotalAmount);
+        Assert.Equal(15m, payment.TotalAmount);
+    }
+
+    [Fact]
+    public void Checkout_PrintsAndClearsWithoutWaitingForTheServer()
+    {
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        deps.ExpenseDocumentService.NeverAnswers = true; // the blocking calls would hang
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        object? navigated = null;
+        vm.NavigationRequest = target => navigated = target;
+        vm.PayCommand.Execute(null);
+
+        var payment = Assert.IsType<MixedPaymentViewModel>(navigated);
+        payment.CashAmount = 10m;
+        payment.ConfirmPaymentCommand.Execute(null);
+
+        // Booked locally, not posted: neither blocking overload was called at all, so
+        // the hang the fake was set up to perform never had anything to hang.
+        Assert.NotNull(deps.ExpenseDocumentService.QueuedRequest);
+        Assert.Equal(0, deps.ExpenseDocumentService.BlockingCallCount);
+        Assert.Equal(1, deps.PrinterService.ReceiptsPrinted);
+        Assert.Single(deps.PrinterService.LastReceiptItems);
+        Assert.Empty(deps.CartService.Items);
+        Assert.Same(vm, navigated);
+    }
+
+    [Fact]
+    public void Checkout_PushesTheQueuedSaleStraightAwayInsteadOfWaitingForTheSyncLoop()
+    {
+        // The background loop runs every ten seconds. That is fine as a safety net and
+        // wrong as the only route: a sale queued at 0.1s would have no document number
+        // for the rest of that interval, for no reason other than nobody asked.
+        using var vm = CreateViewModel(out var deps);
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 10m));
+
+        object? navigated = null;
+        vm.NavigationRequest = target => navigated = target;
+        vm.PayCommand.Execute(null);
+
+        var before = deps.ExpenseDocumentService.SyncCallCount;
+        var payment = Assert.IsType<MixedPaymentViewModel>(navigated);
+        payment.CashAmount = 10m;
+        payment.ConfirmPaymentCommand.Execute(null);
+
+        Assert.True(deps.ExpenseDocumentService.SyncCallCount > before);
+    }
+
+    [Fact]
+    public void QueuedSaleRefusedByTheServer_TellsTheCashier()
+    {
+        // The price of not waiting: a refusal on the merits now lands after the receipt
+        // is printed and the cashier has moved on. It must still reach them — silently
+        // marking the row rejected in SQLite means a paid-for sale nobody ever books.
+        using var vm = CreateViewModel(out var deps);
+
+        deps.ExpenseDocumentService.RaiseDocumentRejected("doc-1", "товар не найден");
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.True(vm.IsAlertModalVisible);
+        Assert.Contains("товар не найден", vm.AlertMessage);
+    }
+
+    [Fact]
+    public void Dispose_UnsubscribesFromDocumentRejected()
+    {
+        var vm = CreateViewModel(out var deps);
+        vm.Dispose();
+
+        deps.ExpenseDocumentService.RaiseDocumentRejected("doc-1", "товар не найден");
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.False(vm.IsAlertModalVisible);
     }
 }

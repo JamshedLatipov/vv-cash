@@ -626,25 +626,16 @@
                             <Button Classes="PrimaryButton" Height="64" CornerRadius="16" HorizontalAlignment="Stretch"
                                     HorizontalContentAlignment="Stretch" Padding="20,0"
                                     Command="{Binding PayCommand}">
-                                <!-- MultiBinding, а не одиночный HasCartItems: явно
-                                     заданный IsEnabled перебивает CanExecute самой
-                                     команды, поэтому занятость надо учитывать здесь же,
-                                     иначе кнопка остаётся нажимаемой всю предоплатную
-                                     котировку. См. PosViewModel.IsPaymentBusy. -->
+                                <!-- Плоский HasCartItems: занятости здесь больше нет.
+                                     Между нажатием и появлением экрана оплаты не осталось
+                                     ни одного сетевого вызова (см. ProceedToPay), так что
+                                     учитывать в IsEnabled нечего. -->
                                 <Button.IsEnabled>
-                                    <MultiBinding Converter="{x:Static BoolConverters.And}">
-                                        <Binding Path="HasCartItems"/>
-                                        <Binding Path="!IsPaymentBusy"/>
-                                    </MultiBinding>
+                                    <Binding Path="HasCartItems"/>
                                 </Button.IsEnabled>
                                 <Grid ColumnDefinitions="Auto, *, Auto, Auto" VerticalAlignment="Center">
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                                        <Panel Width="24" Height="24">
-                                            <material:MaterialIcon Kind="CashMultiple" Width="24" Height="24"
-                                                                   IsVisible="{Binding !IsPaymentBusy}"/>
-                                            <ProgressBar IsIndeterminate="True" Width="24" Height="24"
-                                                         IsVisible="{Binding IsPaymentBusy}"/>
-                                        </Panel>
+                                        <material:MaterialIcon Kind="CashMultiple" Width="24" Height="24"/>
                                         <TextBlock Text="{Binding [Pay], Source={x:Static services:I18nService.Instance}}" FontSize="18" FontWeight="ExtraBold" VerticalAlignment="Center"/>
                                         <TextBlock Text="{Binding CartItemsCount, StringFormat='· {0}'}" FontSize="18" FontWeight="ExtraBold" VerticalAlignment="Center" Opacity="0.85"/>
                                     </StackPanel>

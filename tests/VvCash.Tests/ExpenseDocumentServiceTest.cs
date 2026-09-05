@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -241,6 +241,96 @@ public class ExpenseDocumentServiceTest
         Assert.Empty(storage.RejectedKeys);
         Assert.Equal(1, sessionRevokedCount);
         Assert.Equal(2, (await storage.GetUnsyncedDocumentsAsync()).Count());
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Optimistic checkout. The till books the sale into the offline queue and hands the
+    // cashier their receipt straight away; the round-trip to the server happens after.
+    // ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Queue_SavesTheSaleLocallyAndNeverContactsTheServer()
+    {
+        // The whole point of the optimistic path: nothing on it may depend on the
+        // network. A server that answers instantly must be indistinguishable, from the
+        // cashier's side, from one that never answers at all — so this asserts no request
+        // went out even though the stub would have accepted one.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"message":"success","status":0}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var outcome = await svc.QueueExpenseDocumentAsync(Request("doc1"));
+
+        Assert.True(outcome.Queued);
+        Assert.False(outcome.Posted);
+        Assert.Equal(new[] { "doc1" }, storage.SavedKeys);
+        Assert.Null(handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task Queue_RaisesTheUnsyncedCountSoTheBadgeCountsTheNewSale()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"message":"success","status":0}"""));
+        var storage = new FakeStorage(Array.Empty<KeyValuePair<string, string>>());
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var counts = new List<int>();
+        svc.UnsyncedDocumentsCountChanged += (s, count) => counts.Add(count);
+
+        await svc.QueueExpenseDocumentAsync(Request("doc1"));
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(new[] { 1 }, counts);
+    }
+
+    [Fact]
+    public async Task Sync_ServerRefusesAQueuedSale_ReportsItWithTheServersOwnReason()
+    {
+        // With checkout no longer waiting for the server, a refusal on the merits arrives
+        // after the receipt is already printed and the cashier has moved on. Marking it
+        // rejected in the database is not enough: nothing reads that table, so a refused
+        // sale would vanish without anyone at the till ever being told.
+        var handler = new StubHttpMessageHandler(_ =>
+            (HttpStatusCode.OK, """{"message":"товар не найден","status":1}"""));
+        var storage = new FakeStorage(new[]
+        {
+            new KeyValuePair<string, string>("doc1", Payload("doc1")),
+        });
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var rejections = new List<DocumentRejection>();
+        svc.DocumentRejected += (s, e) => rejections.Add(e);
+
+        await svc.SyncOfflineDocumentsAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        var rejection = Assert.Single(rejections);
+        Assert.Equal("doc1", rejection.DocumentHash);
+        Assert.Equal("товар не найден", rejection.Reason);
+        Assert.Equal(new[] { "doc1" }, storage.RejectedKeys.Select(r => r.Hash));
+    }
+
+    [Fact]
+    public async Task Sync_RetryableFailure_ReportsNothing()
+    {
+        // A sale still waiting its turn is not news. Only a refusal on the merits — the
+        // one thing a retry can never fix — is worth interrupting the cashier over.
+        var handler = new StubHttpMessageHandler(_ => throw new HttpRequestException("no route to host"));
+        var storage = new FakeStorage(new[]
+        {
+            new KeyValuePair<string, string>("doc1", Payload("doc1")),
+        });
+        var svc = new ExpenseDocumentService(new HttpClient(handler), new FakeSettings(), storage);
+
+        var rejections = new List<DocumentRejection>();
+        svc.DocumentRejected += (s, e) => rejections.Add(e);
+
+        await svc.SyncOfflineDocumentsAsync();
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        Assert.Empty(rejections);
     }
 
     [Fact]

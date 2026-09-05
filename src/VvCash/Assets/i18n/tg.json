@@ -247,6 +247,7 @@
   "SellerVerificationFailed": "PIN-ро тафтиш кардан имконнопазир аст. Бори дигар кӯшиш кунед",
   "CreatePin": "PIN-и худро муайян кунед",
   "RepeatPin": "PIN-ро такрор кунед",
+  "SavingPin": "PIN нигоҳ дошта мешавад…",
   "PinMismatch": "PIN мувофиқат накард",
   "SellerPinSetupOffline": "Пайваст нест — PIN-ро баъдтар танзим кунед",
   "PinTooWeak": "PIN хеле содда аст — дигарашро санҷед",

@@ -98,6 +98,10 @@ public class ExchangeViewModelTest
         public Task<int> GetUnsyncedDocumentsCountAsync() => Task.FromResult(0);
         public event EventHandler<int>? UnsyncedDocumentsCountChanged { add { } remove { } }
         public event EventHandler? SessionRevoked { add { } remove { } }
+        public event EventHandler<DocumentRejection>? DocumentRejected { add { } remove { } }
+
+        public Task<ExpenseDocumentOutcome> QueueExpenseDocumentAsync(DocumentRequest request)
+            => Task.FromResult(ExpenseDocumentOutcome.Enqueued());
     }
 
     private sealed class FakeCounterpartyService : ICounterpartyService

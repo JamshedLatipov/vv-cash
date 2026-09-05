@@ -189,8 +189,15 @@
                     </Border>
 
                     <!-- 3x4 keypad; bottom-left is left empty on purpose (see header
-                         comment above) -->
-                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*,*">
+                         comment above).
+                         Swapped for a spinner while IsBusy: the view model makes every
+                         key a no-op during the PIN-setup round-trip (the only thing in
+                         this overlay that waits on the network — verifying a PIN is
+                         local), and a pad that silently stops responding reads as a
+                         frozen till. -->
+                    <Panel>
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="*,*,*"
+                          IsVisible="{Binding !IsBusy}">
                         <Button Grid.Row="0" Grid.Column="0" Classes="NumpadButton" Margin="4" Content="1" Command="{Binding AppendDigitCommand}" CommandParameter="1"/>
                         <Button Grid.Row="0" Grid.Column="1" Classes="NumpadButton" Margin="4" Content="2" Command="{Binding AppendDigitCommand}" CommandParameter="2"/>
                         <Button Grid.Row="0" Grid.Column="2" Classes="NumpadButton" Margin="4" Content="3" Command="{Binding AppendDigitCommand}" CommandParameter="3"/>
@@ -205,6 +212,16 @@
                             <material:MaterialIcon Kind="BackspaceOutline" Width="26" Height="26"/>
                         </Button>
                     </Grid>
+                    <StackPanel IsVisible="{Binding IsBusy}" Spacing="16" MinHeight="260"
+                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ProgressBar IsIndeterminate="True" Width="48" Height="48"
+                                     Foreground="{StaticResource Slate500Brush}"
+                                     HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding [SavingPin], Source={x:Static services:I18nService.Instance}}"
+                                   FontSize="14" Foreground="{StaticResource Slate500Brush}"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    </Panel>
                 </StackPanel>
             </Grid>
         </Border>
