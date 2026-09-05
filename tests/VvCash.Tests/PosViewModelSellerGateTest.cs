@@ -215,8 +215,25 @@ public class PosViewModelSellerGateTest
         public int SearchCallCount { get; private set; }
         public string? LastQuery { get; private set; }
 
-        public Task<IEnumerable<Product>> GetAllProductsAsync() => Task.FromResult(Enumerable.Empty<Product>());
-        public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category) => Task.FromResult(Enumerable.Empty<Product>());
+        /// <summary>Catalogue keyed by category id, so a test can assert *which* category's
+        /// products the view model put on screen. The real storage layer answers
+        /// "WHERE Category = $Category" and knows no "All" pseudo-category, so an id it was
+        /// never given — including PosViewModel's "All" placeholder for "nothing selected" —
+        /// correctly yields nothing here too.</summary>
+        public Dictionary<string, List<Product>> ProductsByCategory { get; } = new();
+
+        public string? LastCategoryQueried { get; private set; }
+
+        public Task<IEnumerable<Product>> GetAllProductsAsync()
+            => Task.FromResult(ProductsByCategory.Values.SelectMany(p => p));
+
+        public Task<IEnumerable<Product>> GetProductsByCategoryAsync(string category)
+        {
+            LastCategoryQueried = category;
+            return Task.FromResult(ProductsByCategory.TryGetValue(category, out var hits)
+                ? hits.AsEnumerable()
+                : Enumerable.Empty<Product>());
+        }
 
         public Task<IEnumerable<Product>> SearchProductsAsync(string query)
         {
@@ -231,8 +248,18 @@ public class PosViewModelSellerGateTest
 
     private class FakeCategoryService : ICategoryService
     {
-        public Task<IEnumerable<Category>> GetCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
-        public Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync() => Task.FromResult(Enumerable.Empty<Category>());
+        /// <summary>Mutable so a test can change what the *next* sync returns — that is
+        /// exactly what a real sync does when a category is renamed, added or deleted
+        /// upstream, and it is the only way to exercise the "the folder I was standing in
+        /// is gone" branch.</summary>
+        public List<Category> Categories { get; set; } = new();
+        public List<Category> QuickCategories { get; set; } = new();
+
+        public Task<IEnumerable<Category>> GetCategoriesAsync()
+            => Task.FromResult(Categories.AsEnumerable());
+
+        public Task<IEnumerable<Category>> GetQuickAccessCategoriesAsync()
+            => Task.FromResult(QuickCategories.AsEnumerable());
     }
 
     private class FakePrinterService : IPrinterService
@@ -746,6 +773,7 @@ public class PosViewModelSellerGateTest
         public FakeSyncService SyncService { get; } = new();
         public FakeQuoteService QuoteService { get; } = new();
         public FakeProductService ProductService { get; } = new();
+        public FakeCategoryService CategoryService { get; } = new();
         public HttpClient HttpClient { get; } = new();
         public FakePrinterService PrinterService { get; } = new();
         public FakeQueueClient QueueClient { get; } = new();
@@ -764,7 +792,7 @@ public class PosViewModelSellerGateTest
         configure?.Invoke(deps);
         return new PosViewModel(
             deps.ProductService,
-            new FakeCategoryService(),
+            deps.CategoryService,
             deps.CartService,
             deps.PrinterService,
             deps.CustomerDisplay,
@@ -2999,6 +3027,172 @@ public class PosViewModelSellerGateTest
         deps.SyncService.RaiseProductsSynced();
 
         Assert.True(deps.ReceiptTemplates.RefreshCallCount > 0);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // A sync must not move the cashier around the catalogue.
+    //
+    // LoadCategoriesAsync used to reset half the catalogue's navigation state and leave
+    // the other half alone: it cleared the nav stack, CurrentParentCategory and
+    // IsViewingCategories back to "root", but kept SelectedCategory and Products. Both of
+    // its callers then ran LoadProductsAsync(SelectedCategory?.Id), which refilled the
+    // grid from the folder the cashier had been standing in. The result on screen was the
+    // root folder list with a foreign folder's products laid out underneath it — and
+    // because SelectedCategory stayed stuck, every following sync reproduced it. That is
+    // the state every other route back to the root (InitializeAsync, SelectCategory(null),
+    // NavigateCategoryUp) explicitly avoids by clearing Products.
+    //
+    // The fix keeps the cashier where they were instead of resetting anything: the folder
+    // is re-resolved by id against the freshly synced catalogue. Standing at the root
+    // still means an empty product grid; standing in a folder that the sync deleted
+    // upstream drops back to a *clean* root, not a half-reset one.
+    //
+    // FullReinitializeCommand (the manual sync button) and the background loop's
+    // ProductsSynced event run the same two lines, so both paths are covered below.
+    // ---------------------------------------------------------------------------------
+
+    private static Category MakeCategory(string id, string? parentId = null) => new()
+    {
+        Id = id,
+        Name = $"Category {id}",
+        Parent = parentId == null ? null : new CategoryRef { Id = parentId }
+    };
+
+    /// <summary>Drains the dispatcher queue until <paramref name="done"/> holds. Needed for
+    /// the ProductsSynced path only: that handler marshals through
+    /// Dispatcher.UIThread.InvokeAsync and the work behind it hops to the thread pool and
+    /// back, so a single RunJobs() can land mid-refresh.</summary>
+    private static void PumpUntil(Func<bool> done, string what)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            if (done()) return;
+            Thread.Sleep(5);
+        }
+
+        Assert.Fail($"Timed out waiting for: {what}");
+    }
+
+    [Fact]
+    public async Task ManualSync_LeavesTheCashierInTheFolderTheyOpened()
+    {
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.CategoryService.Categories = new List<Category> { MakeCategory("drinks"), MakeCategory("food") };
+            d.ProductService.ProductsByCategory["drinks"] = new List<Product> { MakeProduct("cola", 5m) };
+            d.ProductService.ProductsByCategory["food"] = new List<Product> { MakeProduct("bread", 3m) };
+        });
+
+        await vm.SelectCategoryCommand.ExecuteAsync(vm.AllCategories.Single(c => c.Id == "drinks"));
+        Assert.False(vm.IsViewingCategories);
+        Assert.Equal(new[] { "cola" }, vm.Products.Select(p => p.Id));
+
+        await vm.FullReinitializeCommand.ExecuteAsync(null);
+
+        Assert.Equal("drinks", vm.SelectedCategory?.Id);
+        Assert.Equal("drinks", vm.CurrentParentCategory?.Id);
+        Assert.False(vm.IsViewingCategories);
+        Assert.Equal(new[] { "cola" }, vm.Products.Select(p => p.Id));
+    }
+
+    [Fact]
+    public async Task ManualSync_AtTheRoot_ShowsNoProductsUnderTheFolders()
+    {
+        // The reported symptom, stated as an invariant: folders on screen means no product
+        // grid under them. Nothing here ever opens a folder.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.CategoryService.Categories = new List<Category> { MakeCategory("drinks"), MakeCategory("food") };
+            d.ProductService.ProductsByCategory["drinks"] = new List<Product> { MakeProduct("cola", 5m) };
+        });
+
+        await vm.FullReinitializeCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsViewingCategories);
+        Assert.Null(vm.SelectedCategory);
+        Assert.Empty(vm.Products);
+    }
+
+    [Fact]
+    public async Task ManualSync_KeepsThePathBackOutOfASubfolder()
+    {
+        // CanNavigateUp is driven by the nav stack, which the reset used to clear — so the
+        // back arrow vanished mid-browse and the cashier was stranded in a subfolder whose
+        // header claimed they were at the root.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.CategoryService.Categories = new List<Category>
+            {
+                MakeCategory("drinks"),
+                MakeCategory("cold", parentId: "drinks"),
+            };
+            d.ProductService.ProductsByCategory["cold"] = new List<Product> { MakeProduct("cola", 5m) };
+        });
+
+        await vm.SelectCategoryCommand.ExecuteAsync(vm.AllCategories.Single(c => c.Id == "drinks"));
+        await vm.SelectCategoryCommand.ExecuteAsync(vm.AllCategories.Single(c => c.Id == "cold"));
+
+        await vm.FullReinitializeCommand.ExecuteAsync(null);
+
+        Assert.Equal("cold", vm.CurrentParentCategory?.Id);
+        Assert.True(vm.CanNavigateUp);
+
+        await vm.NavigateCategoryUpCommand.ExecuteAsync(null);
+        Assert.Equal("drinks", vm.CurrentParentCategory?.Id);
+        Assert.True(vm.CanNavigateUp);
+
+        await vm.NavigateCategoryUpCommand.ExecuteAsync(null);
+        Assert.Null(vm.CurrentParentCategory);
+        Assert.False(vm.CanNavigateUp);
+        Assert.Empty(vm.Products);
+    }
+
+    [Fact]
+    public async Task ManualSync_FolderDeletedUpstream_DropsToACleanRoot()
+    {
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.CategoryService.Categories = new List<Category> { MakeCategory("drinks"), MakeCategory("food") };
+            d.ProductService.ProductsByCategory["drinks"] = new List<Product> { MakeProduct("cola", 5m) };
+        });
+
+        await vm.SelectCategoryCommand.ExecuteAsync(vm.AllCategories.Single(c => c.Id == "drinks"));
+        Assert.Single(vm.Products);
+
+        // The sync that follows no longer carries "drinks".
+        deps.CategoryService.Categories = new List<Category> { MakeCategory("food") };
+
+        await vm.FullReinitializeCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsViewingCategories);
+        Assert.Null(vm.SelectedCategory);
+        Assert.Null(vm.CurrentParentCategory);
+        Assert.False(vm.CanNavigateUp);
+        Assert.Empty(vm.Products);
+    }
+
+    [Fact]
+    public async Task BackgroundSync_FolderDeletedUpstream_DropsToACleanRoot()
+    {
+        // Same defect reached the other way: the 10-minute background loop, not the button.
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.CategoryService.Categories = new List<Category> { MakeCategory("drinks"), MakeCategory("food") };
+            d.ProductService.ProductsByCategory["drinks"] = new List<Product> { MakeProduct("cola", 5m) };
+        });
+
+        await vm.SelectCategoryCommand.ExecuteAsync(vm.AllCategories.Single(c => c.Id == "drinks"));
+        Assert.Single(vm.Products);
+
+        deps.CategoryService.Categories = new List<Category> { MakeCategory("food") };
+
+        deps.SyncService.RaiseProductsSynced();
+        PumpUntil(() => vm.SelectedCategory == null, "the post-sync catalogue refresh to land");
+
+        Assert.True(vm.IsViewingCategories);
+        Assert.Empty(vm.Products);
     }
 
     [Fact]
