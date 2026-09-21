@@ -227,11 +227,14 @@ public partial class QuantityPadViewModel : ObservableObject
         }
     }
 
+    /// <summary>Through <see cref="QuantityFormat"/>, not a raw ToString: a
+    /// money-derived amount carries three decimals even when whole, and the
+    /// cart line the cashier is about to see trims them.</summary>
     public string PreviewText => _item.Product.HasSecondaryUnit
-        ? $"→ {PreviewQuantity.ToString(CultureInfo.InvariantCulture)} шт = " +
-          $"{PreviewQuantityInUnit.ToString(CultureInfo.InvariantCulture)} {_item.Product.UnitShortName} · " +
+        ? $"→ {QuantityFormat.Display(PreviewQuantity, "0.###")} шт = " +
+          $"{QuantityFormat.Display(PreviewQuantityInUnit, "0.######")} {_item.Product.UnitShortName} · " +
           $"{PreviewTotal.ToString("F2", CultureInfo.InvariantCulture)}"
-        : $"→ {PreviewQuantity.ToString(CultureInfo.InvariantCulture)} шт · " +
+        : $"→ {QuantityFormat.Display(PreviewQuantity, "0.###")} шт · " +
           $"{PreviewTotal.ToString("F2", CultureInfo.InvariantCulture)}";
 
     public void Append(string digit) => Input += digit;
@@ -244,10 +247,12 @@ public partial class QuantityPadViewModel : ObservableObject
     public void Clear() => Input = string.Empty;
 
     /// <summary>Writes the pad's result back through the cart, which is what
-    /// recomputes totals and re-prices the cart.</summary>
+    /// recomputes totals and re-prices the cart. In money mode the line is
+    /// set from the derived amount; the sum itself is not kept — the line
+    /// stores a quantity, and reopening the pad shows that quantity.</summary>
     public void Commit(ICartService cart)
     {
-        var amount = Parsed;
+        var amount = Amount;
         if (amount is null || !IsValid) return;
 
         _item.EnteredInUnit = DerivesInUnit;

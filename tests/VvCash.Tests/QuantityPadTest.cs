@@ -1,4 +1,5 @@
 using VvCash.Models;
+using VvCash.Services;
 using VvCash.ViewModels;
 using Xunit;
 
@@ -361,6 +362,7 @@ public class QuantityPadTest
         pad.Input = "10";
 
         Assert.Equal(1m, pad.PreviewQuantityInUnit);
+        Assert.Equal(9.999999m, pad.PreviewTotal);
         Assert.False(pad.IsRoundedDown);
     }
 
@@ -402,5 +404,67 @@ public class QuantityPadTest
 
         Assert.PropertyChanged(pad, nameof(pad.IsRoundedDown), () => pad.Mode = PadMode.Money);
         Assert.PropertyChanged(pad, nameof(pad.IsRoundedDown), () => pad.Input = "50");
+    }
+
+    [Fact]
+    public void Commit_InMoneyMode_SetsTheLineInTheSecondaryUnit()
+    {
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(Nuggets());
+        var item = cart.Items[0];
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Money;
+        pad.Input = "50";
+
+        pad.Commit(cart);
+
+        Assert.Equal(1.666m, item.QuantityInUnit);
+        Assert.Equal(3.332m, item.Quantity);
+        Assert.True(item.EnteredInUnit);
+        Assert.Equal(49.98m, item.LineTotal);
+    }
+
+    [Fact]
+    public void Commit_InMoneyMode_SetsPieces_WhenThereIsNoSecondaryUnit()
+    {
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(LooseCandy());
+        var item = cart.Items[0];
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Money;
+        pad.Input = "50";
+
+        pad.Commit(cart);
+
+        Assert.Equal(1.666m, item.Quantity);
+        Assert.False(item.EnteredInUnit);
+        Assert.Equal(49.98m, item.LineTotal);
+    }
+
+    [Fact]
+    public void Commit_InMoneyMode_LeavesTheLineAlone_WhenTheSumIsBelowOneGram()
+    {
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(Nuggets());
+        var item = cart.Items[0];
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Money;
+        pad.Input = "0.01";
+
+        pad.Commit(cart);
+
+        Assert.Equal(1m, item.Quantity);
+        Assert.Single(cart.Items);
+    }
+
+    [Fact]
+    public void PreviewText_TrimsTrailingZeros_LikeTheCartLine()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "60";
+
+        Assert.Equal("→ 4 шт = 2 кг · 60.00", pad.PreviewText);
     }
 }
