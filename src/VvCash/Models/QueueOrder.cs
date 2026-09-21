@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace VvCash.Models;
 
@@ -21,6 +22,13 @@ public class QueueOrder
     public DateTime? ClosedAt { get; set; }
     public string SaleDocumentNumber { get; set; } = string.Empty;
     public List<QueueOrderLine> Lines { get; set; } = new();
+
+    /// <summary>То, что видит клиент: префикс кассы и число, как есть, без
+    /// разделителя — разделитель, если нужен, часть префикса («A-»).
+    /// Invariant: на этой машине ru-RU, и ToString() без культуры однажды
+    /// напечатает не то.</summary>
+    public static string FormatLabel(string prefix, int number) =>
+        prefix + number.ToString(CultureInfo.InvariantCulture);
 }
 
 public class QueueOrderLine
