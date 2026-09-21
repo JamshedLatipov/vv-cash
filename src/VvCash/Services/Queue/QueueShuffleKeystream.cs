@@ -62,22 +62,39 @@ internal sealed class QueueShuffleKeystream
     /// значения выше наибольшего кратного bound отбрасываются и байт берётся
     /// заново — это и убирает перекос, а не просто прячет его.
     ///
-    /// Bound ограничен 256 (один байт) — этого хватает на любой вызов из этого
-    /// пула (наибольший — длина среза, 180). Тому, кому понадобится больше,
-    /// нужно тянуть несколько байт на отбраковку, а не убирать её.</summary>
+    /// Две ветки, а не одна общая. Однобайтовая для bound ≤ 256 оставлена
+    /// дословно: пул 100–999 на 5 касс (срез в 180) уже уехал на точки, а
+    /// порядок детерминирован по дню — любое изменение того, сколько байт
+    /// тянется на бросок, перестроило бы его посреди дня после обновления, и
+    /// касса заново раздала бы утренние номера. Двухбайтовая покрывает любой
+    /// срез, который может дать QueueNumberOptions (одна касса на 1–9999 —
+    /// это 9999 при потолке MaxNumber); 65536 — потолок двухбайтового броска,
+    /// и отбраковка в ней та же, по той же причине.</summary>
     public int NextIndex(int bound)
     {
-        if (bound <= 0 || bound > 256)
-            throw new ArgumentOutOfRangeException(nameof(bound), bound, "Must be in (0, 256].");
+        if (bound <= 0 || bound > 65536)
+            throw new ArgumentOutOfRangeException(nameof(bound), bound, "Must be in (0, 65536].");
         if (bound == 1) return 0;
 
-        var limit = 256 - (256 % bound);
-        byte draw;
+        if (bound <= 256)
+        {
+            var limit = 256 - (256 % bound);
+            byte draw;
+            do
+            {
+                draw = NextByte();
+            } while (draw >= limit);
+
+            return draw % bound;
+        }
+
+        var wideLimit = 65536 - (65536 % bound);
+        int wideDraw;
         do
         {
-            draw = NextByte();
-        } while (draw >= limit);
+            wideDraw = (NextByte() << 8) | NextByte();
+        } while (wideDraw >= wideLimit);
 
-        return draw % bound;
+        return wideDraw % bound;
     }
 }

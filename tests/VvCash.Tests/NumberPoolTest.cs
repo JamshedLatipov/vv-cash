@@ -426,6 +426,37 @@ public class NumberPoolTest
         var narrowed = Pool(() => QueueNumberOptions.Default(0, "secret") with { Max = 500 }, db, () => day);
 
         Assert.InRange(await Issue(narrowed), 100, 500);
+        // Диапазон не различает исходы: второй номер старого пула — 250, он и так
+        // в 100–500. Различает IssueSeq: пересборка обнуляет его и выдача даёт 1,
+        // а ошибочное усыновление оставило бы 2.
+        Assert.Equal("1", await StateAsync(db, "IssueSeq"));
+    }
+
+    /// <summary>Одна касса на точке — срез в 900 номеров, длиннее 256, на
+    /// которые был рассчитан однобайтовый бросок QueueShuffleKeystream. До
+    /// двухбайтовой ветки перемешивание бросало на каждой выдаче, и касса
+    /// молча оставалась без номеров.</summary>
+    [Fact]
+    public async Task ASingleTillShufflesTheWholeDefaultRange()
+    {
+        var pool = Pool(() => QueueNumberOptions.Default(0, "secret") with { TillCount = 1 });
+
+        var issued = new List<int>();
+        for (var i = 0; i < 900; i++) issued.Add(await Issue(pool));
+
+        Assert.Equal(Enumerable.Range(100, 900), issued.OrderBy(n => n));
+        var first20 = issued.Take(20).ToList();
+        var ascendingSteps = first20.Zip(first20.Skip(1), (a, b) => b > a).Count(x => x);
+        Assert.InRange(ascendingSteps, 1, 18);
+    }
+
+    [Fact]
+    public async Task AFourDigitRangeShufflesWithoutThrowing()
+    {
+        var pool = Pool(() => new QueueNumberOptions(0, 1, 1, 9999, true, "", "secret"));
+
+        for (var i = 0; i < 5; i++)
+            Assert.InRange(await Issue(pool), 1, 9999);
     }
 
     [Fact]
