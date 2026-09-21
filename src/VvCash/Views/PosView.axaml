@@ -827,7 +827,7 @@
                                 <TextBlock.Text>
                                     <MultiBinding StringFormat="{}{0:F2} / {1}">
                                         <Binding Path="QuantityPad.PriceInSelectedUnit"/>
-                                        <Binding Path="QuantityPad.UnitLabel"/>
+                                        <Binding Path="QuantityPad.PriceUnitLabel"/>
                                     </MultiBinding>
                                 </TextBlock.Text>
                             </TextBlock>
@@ -838,13 +838,22 @@
                         </Button>
                     </Grid>
 
-                    <!-- Unit toggle. Absent for a piece-only product: there is
-                         nothing to switch to, and an inert control reads as broken. -->
-                    <ToggleSwitch IsVisible="{Binding QuantityPad.CanSwitchUnit}"
-                                  IsChecked="{Binding QuantityPad.EnteredInUnit, Mode=TwoWay}"
-                                  OnContent="{Binding QuantityPad.Item.Product.UnitShortName}"
-                                  OffContent="шт"
-                                  HorizontalAlignment="Center"/>
+                    <!-- Mode selector. Hidden entirely for a piece-only,
+                         indivisible product: there is nothing to switch to,
+                         and an inert control reads as broken. A StackPanel,
+                         not a star Grid, so a hidden segment collapses
+                         instead of leaving a gap. -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center"
+                                IsVisible="{Binding QuantityPad.HasModeSelector}">
+                        <RadioButton Content="шт" Classes="Segmented" Width="130"
+                                     IsChecked="{Binding QuantityPad.IsPiecesMode}"/>
+                        <RadioButton Content="{Binding QuantityPad.Item.Product.UnitShortName}" Classes="Segmented" Width="130"
+                                     IsChecked="{Binding QuantityPad.IsUnitMode}"
+                                     IsVisible="{Binding QuantityPad.CanSwitchUnit}"/>
+                        <RadioButton Content="сум" Classes="Segmented" Width="130"
+                                     IsChecked="{Binding QuantityPad.IsMoneyMode}"
+                                     IsVisible="{Binding QuantityPad.CanEnterMoney}"/>
+                    </StackPanel>
 
                     <!-- Input display -->
                     <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="20,14">
@@ -859,16 +868,36 @@
 
                     <!-- Live preview. The whole reason this modal exists: on an
                          indivisible product the amount rounds up to a whole piece,
-                         and the customer pays for the round-up. -->
+                         and the customer pays for the round-up. In money mode the
+                         same goes the other way: the sum is cut down to a whole
+                         0.001, and the cashier sees what it bills before Apply. -->
                     <StackPanel Spacing="4">
                         <TextBlock Text="{Binding QuantityPad.PreviewText}"
                                    FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
                                    HorizontalAlignment="Center" TextAlignment="Center"
                                    Foreground="{StaticResource Slate700Brush}"/>
-                        <TextBlock IsVisible="{Binding QuantityPad.IsRounded}"
-                                   Text="Округлено вверх до целой штуки"
-                                   FontSize="12" HorizontalAlignment="Center"
-                                   Foreground="{StaticResource Red600Brush}"/>
+                        <!-- Fixed height so a caption coming and going does not
+                             move the numpad under the cashier's finger. The two
+                             are mutually exclusive (unit mode vs money mode), so
+                             overlaying them is safe. -->
+                        <Panel Height="16">
+                            <TextBlock IsVisible="{Binding QuantityPad.IsRounded}"
+                                       Text="Округлено вверх до целой штуки"
+                                       FontSize="12" HorizontalAlignment="Center"
+                                       Foreground="{StaticResource Red600Brush}"/>
+                            <!-- Names the unit, not "gram": money mode is offered
+                                 to any divisible product, and 1.666 шт or 0.5 м²
+                                 is cut to the same 0.001 step. -->
+                            <TextBlock IsVisible="{Binding QuantityPad.IsRoundedDown}"
+                                       FontSize="12" HorizontalAlignment="Center"
+                                       Foreground="{StaticResource Red600Brush}">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="Округлено вниз до 0.001 {0}">
+                                        <Binding Path="QuantityPad.PriceUnitLabel"/>
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </Panel>
                     </StackPanel>
 
                     <!-- Numpad -->
