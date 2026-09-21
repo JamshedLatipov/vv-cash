@@ -16,8 +16,9 @@ public interface INumberPool
     Task<int> IssueAsync(Guid orderId);
 
     /// <summary>Возвращает номер в оборот — но только если он всё ещё выдан
-    /// ИМЕННО заказу <paramref name="orderId"/>. Раньше кулдауна он всё равно
-    /// не выдастся — см. NumberPool.CooldownIssues.
+    /// ИМЕННО заказу <paramref name="orderId"/>. Снова он выйдет не раньше,
+    /// чем кончатся все нетронутые номера и все освобождённые до него — см.
+    /// NumberPool.SelectNumberToIssueAsync.
     ///
     /// Проверка по orderId, не только по значению number, — критично, а не
     /// подстраховка: сервер называет закрытые заказы этой кассы на каждом
@@ -29,7 +30,7 @@ public interface INumberPool
     /// NumberPool.ReleaseAsync за полным разбором.
     ///
     /// Повторный вызов с тем же orderId для уже свободного (или уже переизданного
-    /// кому-то ещё) номера — no-op: он не отодвигает окно кулдауна заново и не
-    /// трогает нового держателя.</summary>
+    /// кому-то ещё) номера — no-op: он не двигает номер назад в очереди
+    /// свободных и не трогает нового держателя.</summary>
     Task ReleaseAsync(int number, Guid orderId);
 }
