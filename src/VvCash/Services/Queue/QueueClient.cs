@@ -92,7 +92,10 @@ public class QueueClient : IQueueClient
     /// for a kitchen screen that never closes anything.
     ///
     /// Same fail-open swallow as EnqueueAsync's own number step, sharing its
-    /// implementation via TryIssueNumberAsync below.</summary>
+    /// implementation via TryIssueNumberAsync below.
+    ///
+    /// Returns the ready-to-print label with the till letter (see IQueueClient), not the
+    /// bare number: nothing outside the pool ever needs the int on this path.</summary>
     public async Task<string?> IssueNumberAsync()
     {
         var number = await TryIssueNumberAsync(Guid.NewGuid());

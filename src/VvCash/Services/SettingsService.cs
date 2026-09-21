@@ -193,8 +193,11 @@ public class SettingsService : ISettingsService, IQueueSettings
     }
 
     /// <summary>Зажимается в 0..TillCount-1, а не принимается как есть:
-    /// значение из settings.json правится руками, и вне диапазона касса начнёт
-    /// делить по чужому классу вычетов пула.</summary>
+    /// значение из settings.json правится руками, и вне диапазона срез кассы
+    /// оказался бы пустым (ни один остаток не равен 9 при пяти кассах), а с
+    /// клэмпом — совпал бы с чужим; ни то ни другое не должно молча вытекать
+    /// из опечатки в файле, поэтому индекс зажимается, а экран настроек
+    /// показывает срез до сохранения (SettingsViewModel.QueueNumberPreview).</summary>
     public int TillIndex
     {
         get => QueueNumberOptions.ClampTillIndex(_data.TillIndex, TillCount);

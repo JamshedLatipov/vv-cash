@@ -108,7 +108,7 @@ public class QueueShuffleKeystreamTest
     [InlineData(900)]
     [InlineData(9999)]
     [InlineData(65536)]
-    public void LargeBoundsDrawUniformlyInRange(int bound)
+    public void LargeBoundsDrawWithinRange(int bound)
     {
         var keystream = new QueueShuffleKeystream("2026-08-31", 0, "secret");
 
