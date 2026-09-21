@@ -16,6 +16,21 @@ public class QuantityPadTest
         UnitFactor = 0.24m, IsDivisible = divisible, SellInSecondaryUnit = true,
     };
 
+    // Nuggets sold by the pack (0.5 kg, 15 each) with kg as the secondary
+    // unit, so the price per kg is 30 — the figure the customer is quoted.
+    private static Product Nuggets() => new()
+    {
+        Id = "p3", Name = "Наггетсы", Price = 15m,
+        UnitId = "u-kg", UnitCode = "kg", UnitShortName = "кг",
+        UnitFactor = 0.5m, IsDivisible = true, SellInSecondaryUnit = true,
+    };
+
+    // Weighed goods with no secondary unit: the piece *is* the kilogram.
+    private static Product LooseCandy() => new()
+    {
+        Id = "p4", Name = "Конфеты", Price = 30m, IsDivisible = true,
+    };
+
     private static QuantityPadViewModel PadFor(Product p, bool inUnit = true) =>
         new(new CartItem { Product = p, Quantity = 1m, EnteredInUnit = inUnit });
 
@@ -150,8 +165,73 @@ public class QuantityPadTest
         Assert.Equal(PadMode.Unit, pad.Mode);
 
         // A RadioButton writes false to the segment it leaves; that must not
-        // knock the pad out of the mode it just entered.
+        // knock the pad out of the mode it just entered. Nor may a false on
+        // the active segment — nothing writes it, but the setter's whole job
+        // is that false never moves the mode.
         pad.IsPiecesMode = false;
+        pad.IsUnitMode = false;
         Assert.Equal(PadMode.Unit, pad.Mode);
+
+        pad.IsPiecesMode = true;
+        Assert.Equal(PadMode.Pieces, pad.Mode);
+
+        // Bindings are reflective: the segments only follow a programmatic
+        // Mode change if the notification actually fires.
+        Assert.PropertyChanged(pad, nameof(pad.IsUnitMode), () => pad.Mode = PadMode.Unit);
+        Assert.PropertyChanged(pad, nameof(pad.IsPiecesMode), () => pad.Mode = PadMode.Pieces);
+        Assert.PropertyChanged(pad, nameof(pad.IsMoneyMode), () => pad.Mode = PadMode.Money);
+    }
+
+    [Fact]
+    public void MoneyMode_IsOfferedOnlyForADivisibleProductWithAPrice()
+    {
+        Assert.True(PadFor(Nuggets()).CanEnterMoney);
+        Assert.True(PadFor(LooseCandy(), inUnit: false).CanEnterMoney);
+
+        // 50 / 3 = 16.67 pieces does not exist.
+        Assert.False(PadFor(Tile(divisible: false)).CanEnterMoney);
+
+        // Nothing to divide by.
+        var free = LooseCandy();
+        free.Price = 0m;
+        Assert.False(PadFor(free, inUnit: false).CanEnterMoney);
+    }
+
+    [Fact]
+    public void ModeSelector_IsShownWhenAnySegmentBesidesPiecesExists()
+    {
+        Assert.True(PadFor(Tile()).HasModeSelector);                      // unit only
+        Assert.True(PadFor(LooseCandy(), inUnit: false).HasModeSelector); // money only
+
+        var pieceOnly = new Product { Id = "p2", Name = "Товар", Price = 10m };
+        Assert.False(PadFor(pieceOnly, inUnit: false).HasModeSelector);
+    }
+
+    [Fact]
+    public void MoneyMode_LabelsTheInputAsMoney_AndTheHeaderInTheDerivedUnit()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Mode = PadMode.Money;
+
+        Assert.Equal("сум", pad.UnitLabel);
+        Assert.Equal("кг", pad.PriceUnitLabel);
+        Assert.Equal(30m, pad.PriceInSelectedUnit);
+
+        var candy = PadFor(LooseCandy(), inUnit: false);
+        candy.Mode = PadMode.Money;
+
+        Assert.Equal("сум", candy.UnitLabel);
+        Assert.Equal("шт", candy.PriceUnitLabel);
+        Assert.Equal(30m, candy.PriceInSelectedUnit);
+    }
+
+    [Fact]
+    public void PriceUnitLabel_MatchesUnitLabel_OutsideMoneyMode()
+    {
+        var pad = PadFor(Tile());
+        Assert.Equal(pad.UnitLabel, pad.PriceUnitLabel);
+
+        pad.Mode = PadMode.Pieces;
+        Assert.Equal(pad.UnitLabel, pad.PriceUnitLabel);
     }
 }

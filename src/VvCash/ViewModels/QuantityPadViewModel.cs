@@ -49,9 +49,9 @@ public partial class QuantityPadViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPiecesMode), nameof(IsUnitMode), nameof(IsMoneyMode),
-        nameof(PriceInSelectedUnit), nameof(UnitLabel), nameof(PreviewQuantity),
-        nameof(PreviewQuantityInUnit), nameof(PreviewTotal), nameof(PreviewText),
-        nameof(IsRounded), nameof(IsValid))]
+        nameof(PriceInSelectedUnit), nameof(UnitLabel), nameof(PriceUnitLabel),
+        nameof(PreviewQuantity), nameof(PreviewQuantityInUnit), nameof(PreviewTotal),
+        nameof(PreviewText), nameof(IsRounded), nameof(IsValid))]
     private PadMode _mode;
 
     // One bool per segment, the way the discount modal's IsDiscountPercentMode /
@@ -61,16 +61,44 @@ public partial class QuantityPadViewModel : ObservableObject
     public bool IsUnitMode { get => Mode == PadMode.Unit; set { if (value) Mode = PadMode.Unit; } }
     public bool IsMoneyMode { get => Mode == PadMode.Money; set { if (value) Mode = PadMode.Money; } }
 
-    /// <summary>Whether the piece/unit toggle is offered at all. A piece-only
+    /// <summary>Whether the piece/unit segment is offered at all. A piece-only
     /// product has nothing to switch to.</summary>
     public bool CanSwitchUnit => _item.Product.HasSecondaryUnit;
 
-    /// <summary>Whether the pad's result is expressed in the secondary unit.</summary>
-    private bool DerivesInUnit => Mode == PadMode.Unit;
+    /// <summary>Whether "sell for N" is offered. Only a divisible product can
+    /// carry a derived fractional amount — 50 / 3 = 16.67 pieces does not
+    /// exist — and a free one has nothing to divide by.</summary>
+    public bool CanEnterMoney => _item.Product.IsDivisible && _item.UnitPrice > 0m;
 
-    public string UnitLabel => DerivesInUnit ? _item.Product.UnitShortName : "шт";
+    /// <summary>Whether any segment besides "шт" exists. With none, the whole
+    /// selector is hidden: an inert control reads as broken.</summary>
+    public bool HasModeSelector => CanSwitchUnit || CanEnterMoney;
 
-    /// <summary>Price expressed in whichever unit is selected, so the ticket
+    /// <summary>Whether the pad's result is expressed in the secondary unit.
+    /// In money mode a product that has one derives in it regardless of
+    /// SellInSecondaryUnit: the customer asking for "50 somoni of nuggets"
+    /// thinks in kilograms, not packs.</summary>
+    private bool DerivesInUnit => Mode switch
+    {
+        PadMode.Unit => true,
+        PadMode.Money => _item.Product.HasSecondaryUnit,
+        _ => false,
+    };
+
+    /// <summary>Label next to the typed figure: "3 шт", "12.5 м²", "50 сум".</summary>
+    public string UnitLabel => Mode switch
+    {
+        PadMode.Unit => _item.Product.UnitShortName,
+        PadMode.Money => "сум",
+        _ => "шт",
+    };
+
+    /// <summary>Unit the entered figure resolves to, for the "price / unit"
+    /// header. Differs from <see cref="UnitLabel"/> only in money mode, where
+    /// the header must read "30.00 / кг" and not "30.00 / сум".</summary>
+    public string PriceUnitLabel => DerivesInUnit ? _item.Product.UnitShortName : "шт";
+
+    /// <summary>Price expressed in the unit the entry resolves to, so the ticket
     /// reads "416.67 / м²" while the cashier is typing square metres.
     ///
     /// Built on the line's own unit price, not the cached catalogue one: once a
