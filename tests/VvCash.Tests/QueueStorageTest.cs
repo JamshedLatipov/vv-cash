@@ -114,6 +114,46 @@ public class QueueStorageTest
     }
 
     [Fact]
+    public async Task ThePrefixSurvivesARoundTrip()
+    {
+        var storage = new QueueStorage(TempDb());
+        var order = Order();
+        order.Prefix = "A-";
+
+        await storage.SaveOrderAsync(order, order.CreatedAt);
+
+        var stored = Assert.Single(await storage.GetLiveOrdersAsync());
+        Assert.Equal("A-", stored.Prefix);
+        Assert.Equal("A-305", stored.Label);
+    }
+
+    /// <summary>queue.db, созданный до колонки Prefix: строка вставлена мимо
+    /// SaveOrderAsync, без Prefix вовсе — так выглядит заказ, записанный
+    /// прежней версией. Читается пустым префиксом, а не падает на NULL.</summary>
+    [Fact]
+    public async Task AnOrderWrittenBeforeThePrefixColumnReadsAsUnprefixed()
+    {
+        var db = TempDb();
+        var storage = new QueueStorage(db);
+        await storage.InitializeAsync();
+
+        using (var connection = new SqliteConnection($"Data Source={db}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                INSERT INTO QueueOrders (Id, Number, TillIndex, State, CreatedAt, Lines, ReceivedAt)
+                VALUES ($Id, 305, 0, 'New', '2026-09-22T10:00:00.0000000', '[]', '2026-09-22T10:00:00.0000000')";
+            cmd.Parameters.AddWithValue("$Id", Guid.NewGuid().ToString());
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var stored = Assert.Single(await storage.GetLiveOrdersAsync());
+        Assert.Equal(string.Empty, stored.Prefix);
+        Assert.Equal("305", stored.Label);
+    }
+
+    [Fact]
     public async Task SavingTheSameOrderTwiceDoesNotDuplicateIt()
     {
         var storage = new QueueStorage(TempDb());

@@ -10,11 +10,26 @@ namespace VvCash.Models;
 /// заказе с этой кассы и схлопнул бы дедупликацию на сервере в один заказ.
 ///
 /// SaleDocumentNumber пуст у продажи, пробитой без интернета: номер документа
-/// придёт с бэкенда позже, и ни печать, ни экраны от него не зависят.</summary>
+/// придёт с бэкенда позже, и ни печать, ни экраны от него не зависят.
+///
+/// Prefix — буквенный префикс кассы, приклеенный к Number для показа (см.
+/// Label).</summary>
 public class QueueOrder
 {
     public Guid Id { get; set; }
     public int Number { get; set; }
+
+    /// <summary>Буква кассы, как она была на момент постановки заказа: та
+    /// касса, что пробила заказ, кладёт сюда свой QueueNumberPrefix.
+    /// Число остаётся числом (Number) — пул, ReleaseAsync и SQL выбора
+    /// работают с ним, а буква — только оформление.</summary>
+    public string Prefix { get; set; } = string.Empty;
+
+    /// <summary>Что видит клиент на талоне, табло и экране кухни. Только
+    /// геттер: System.Text.Json сериализует его в JSON сервера
+    /// (kds.html/board.html читают o.label) и игнорирует на входе.</summary>
+    public string Label => FormatLabel(Prefix, Number);
+
     public int TillIndex { get; set; }
     public QueueOrderState State { get; set; } = QueueOrderState.New;
     public DateTime CreatedAt { get; set; }
