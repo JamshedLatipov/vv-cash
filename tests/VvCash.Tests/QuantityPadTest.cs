@@ -180,6 +180,9 @@ public class QuantityPadTest
         Assert.PropertyChanged(pad, nameof(pad.IsUnitMode), () => pad.Mode = PadMode.Unit);
         Assert.PropertyChanged(pad, nameof(pad.IsPiecesMode), () => pad.Mode = PadMode.Pieces);
         Assert.PropertyChanged(pad, nameof(pad.IsMoneyMode), () => pad.Mode = PadMode.Money);
+
+        pad.Mode = PadMode.Pieces;
+        Assert.PropertyChanged(pad, nameof(pad.PriceUnitLabel), () => pad.Mode = PadMode.Money);
     }
 
     [Fact]
@@ -195,6 +198,11 @@ public class QuantityPadTest
         var free = LooseCandy();
         free.Price = 0m;
         Assert.False(PadFor(free, inUnit: false).CanEnterMoney);
+
+        // A server quote is what the line is priced at; a free catalogue
+        // price with a live quote is still something to divide by.
+        var quoted = new CartItem { Product = free, Quantity = 1m, EnteredInUnit = false, QuotedUnitPrice = 30m };
+        Assert.True(new QuantityPadViewModel(quoted).CanEnterMoney);
     }
 
     [Fact]
@@ -223,6 +231,12 @@ public class QuantityPadTest
         Assert.Equal("сум", candy.UnitLabel);
         Assert.Equal("шт", candy.PriceUnitLabel);
         Assert.Equal(30m, candy.PriceInSelectedUnit);
+
+        // Entered in pieces or not, "50 somoni of nuggets" is weighed in kilograms.
+        var fromPieces = PadFor(Nuggets(), inUnit: false);
+        fromPieces.Mode = PadMode.Money;
+        Assert.Equal("кг", fromPieces.PriceUnitLabel);
+        Assert.Equal(30m, fromPieces.PriceInSelectedUnit);
     }
 
     [Fact]
@@ -233,5 +247,85 @@ public class QuantityPadTest
 
         pad.Mode = PadMode.Pieces;
         Assert.Equal(pad.UnitLabel, pad.PriceUnitLabel);
+    }
+
+    [Fact]
+    public void MoneyMode_DerivesTheWeight_FlooredToTheGram()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "50";
+
+        // 50 / 30 = 1.6666…; the customer named 50, so it is cut, not rounded.
+        Assert.Equal(1.666m, pad.PreviewQuantityInUnit);
+        Assert.Equal(3.332m, pad.PreviewQuantity);
+        Assert.Equal(49.98m, pad.PreviewTotal);
+        Assert.True(pad.IsRoundedDown);
+        Assert.False(pad.IsRounded);
+        Assert.True(pad.IsValid);
+    }
+
+    [Fact]
+    public void MoneyMode_DerivesPieces_WhenThereIsNoSecondaryUnit()
+    {
+        var pad = PadFor(LooseCandy(), inUnit: false);
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "50";
+
+        Assert.Equal(1.666m, pad.PreviewQuantity);
+        Assert.Equal(0m, pad.PreviewQuantityInUnit);
+        Assert.Equal(49.98m, pad.PreviewTotal);
+        Assert.True(pad.IsRoundedDown);
+        Assert.True(pad.IsValid);
+    }
+
+    [Fact]
+    public void MoneyMode_DoesNotFlagRoundDown_OnAnExactDivision()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "60";
+
+        Assert.Equal(2m, pad.PreviewQuantityInUnit);
+        Assert.Equal(60m, pad.PreviewTotal);
+        Assert.False(pad.IsRoundedDown);
+    }
+
+    [Fact]
+    public void MoneyMode_RejectsASumBelowOneGram()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "0.01";
+
+        Assert.False(pad.IsValid);
+        Assert.Equal(0m, pad.PreviewQuantity);
+        Assert.False(pad.IsRoundedDown);
+    }
+
+    [Fact]
+    public void MoneyMode_DividesByTheQuotedPrice_NotTheCatalogueOne()
+    {
+        var item = new CartItem { Product = LooseCandy(), Quantity = 1m, QuotedUnitPrice = 25m };
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "50";
+
+        Assert.Equal(2m, pad.PreviewQuantity);
+        Assert.Equal(50m, pad.PreviewTotal);
+    }
+
+    [Fact]
+    public void IsRoundedDown_IsFalse_OutsideMoneyMode()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Input = "1.6666";
+
+        Assert.False(pad.IsRoundedDown);
     }
 }

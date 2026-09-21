@@ -27,6 +27,10 @@ public enum PadMode
 /// discovered on the receipt.</summary>
 public partial class QuantityPadViewModel : ObservableObject
 {
+    /// <summary>Where a money-derived amount is cut: scales weigh in grams,
+    /// and the cashier weighs out exactly the figure on screen.</summary>
+    private const decimal WeightStep = 0.001m;
+
     private readonly CartItem _item;
 
     public QuantityPadViewModel(CartItem item)
@@ -44,14 +48,14 @@ public partial class QuantityPadViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PreviewQuantity), nameof(PreviewQuantityInUnit),
-        nameof(PreviewTotal), nameof(PreviewText), nameof(IsRounded), nameof(IsValid))]
+        nameof(PreviewTotal), nameof(PreviewText), nameof(IsRounded), nameof(IsRoundedDown), nameof(IsValid))]
     private string _input = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsPiecesMode), nameof(IsUnitMode), nameof(IsMoneyMode),
         nameof(PriceInSelectedUnit), nameof(UnitLabel), nameof(PriceUnitLabel),
         nameof(PreviewQuantity), nameof(PreviewQuantityInUnit), nameof(PreviewTotal),
-        nameof(PreviewText), nameof(IsRounded), nameof(IsValid))]
+        nameof(PreviewText), nameof(IsRounded), nameof(IsRoundedDown), nameof(IsValid))]
     private PadMode _mode;
 
     // One bool per segment, the way the discount modal's IsDiscountPercentMode /
@@ -113,6 +117,30 @@ public partial class QuantityPadViewModel : ObservableObject
             ? v
             : null;
 
+    /// <summary>The amount the pad resolves to, in <see cref="PriceUnitLabel"/>'s
+    /// unit: the typed figure, or in money mode the sum divided by the price
+    /// and floored to the gram. Null when there is nothing valid to resolve.
+    /// Shared by the preview and <see cref="Commit"/> so the two cannot
+    /// disagree.</summary>
+    private decimal? Amount
+    {
+        get
+        {
+            var typed = Parsed;
+            if (typed is null) return null;
+            if (Mode != PadMode.Money) return typed;
+            if (!CanEnterMoney) return null;
+
+            // Floor, not round: the customer named the sum, so the line must
+            // not come out above it. 50 / 30 → 1.666 kg → 49.98.
+            var amount = FloorToWeight(typed.Value / PriceInSelectedUnit);
+            return amount > 0m ? amount : null;
+        }
+    }
+
+    private static decimal FloorToWeight(decimal value)
+        => decimal.Truncate(value / WeightStep) * WeightStep;
+
     /// <summary>Whether the current input can be committed. Rejects an empty or
     /// unparseable box, a non-positive amount, and a fractional piece count on
     /// an indivisible product — half a tile does not exist.</summary>
@@ -120,7 +148,7 @@ public partial class QuantityPadViewModel : ObservableObject
     {
         get
         {
-            var amount = Parsed;
+            var amount = Amount;
             if (amount is null) return false;
             if (!DerivesInUnit && !_item.Product.IsDivisible && amount != decimal.Truncate(amount.Value))
                 return false;
@@ -132,7 +160,7 @@ public partial class QuantityPadViewModel : ObservableObject
     {
         get
         {
-            var amount = Parsed;
+            var amount = Amount;
             if (amount is null) return 0m;
             if (!DerivesInUnit) return amount.Value;
             return UnitConverter.ToBase(
@@ -144,7 +172,7 @@ public partial class QuantityPadViewModel : ObservableObject
     {
         get
         {
-            var amount = Parsed;
+            var amount = Amount;
             if (amount is null || !_item.Product.HasSecondaryUnit) return 0m;
             if (!DerivesInUnit) return UnitConverter.ToUnit(amount.Value, _item.Product.UnitFactor);
             return UnitConverter.ToBase(
@@ -161,9 +189,22 @@ public partial class QuantityPadViewModel : ObservableObject
     {
         get
         {
-            var amount = Parsed;
-            if (amount is null || !DerivesInUnit) return false;
+            var amount = Amount;
+            if (amount is null || Mode != PadMode.Unit) return false;
             return PreviewQuantityInUnit != amount.Value;
+        }
+    }
+
+    /// <summary>Whether the derived weight was cut below the sum the customer
+    /// named — the money-mode counterpart of <see cref="IsRounded"/>. 50 / 30
+    /// = 1.666 kg bills 49.98, and the cashier should see that before the
+    /// receipt does.</summary>
+    public bool IsRoundedDown
+    {
+        get
+        {
+            if (Mode != PadMode.Money || Amount is null) return false;
+            return PreviewTotal < Parsed!.Value;
         }
     }
 
