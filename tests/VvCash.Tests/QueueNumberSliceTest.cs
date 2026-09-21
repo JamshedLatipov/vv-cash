@@ -26,15 +26,30 @@ public class QueueNumberSliceTest
         Assert.Equal(180, slice.Length);
     }
 
-    [Fact]
-    public void ShuffledSlicesOfAllTillsPartitionTheRange()
+    /// <summary>Одинаковый диапазон делится без пропусков и без пересечений
+    /// у обоих правил, даже когда он не делится на TillCount без остатка
+    /// (56 на 3 кассы). При отсутствии шаффла дополнительно проверяем, что
+    /// каждый срез — сплошной блок, а не что попало: это то, что видит
+    /// клиент на бумаге.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SlicesOfAllTillsPartitionTheRange(bool shuffle)
     {
-        var all = Enumerable.Range(0, 3)
-            .SelectMany(i => QueueNumberSlice.Ascending(Options(i, tillCount: 3, min: 7, max: 63)))
-            .OrderBy(n => n)
+        var slices = Enumerable.Range(0, 3)
+            .Select(i => QueueNumberSlice.Ascending(Options(i, tillCount: 3, min: 7, max: 62, shuffle: shuffle)))
             .ToArray();
 
-        Assert.Equal(Enumerable.Range(7, 57).ToArray(), all);
+        var all = slices.SelectMany(s => s).OrderBy(n => n).ToArray();
+        Assert.Equal(Enumerable.Range(7, 56).ToArray(), all);
+
+        if (!shuffle)
+        {
+            foreach (var slice in slices)
+            {
+                Assert.Equal(slice.Length, slice[^1] - slice[0] + 1);
+            }
+        }
     }
 
     [Fact]
@@ -45,6 +60,28 @@ public class QueueNumberSliceTest
 
         Assert.Equal(Enumerable.Range(1, 50).ToArray(), first);
         Assert.Equal(Enumerable.Range(51, 49).ToArray(), second);
+    }
+
+    /// <summary>Регрессия к ceil(count / TillCount): на 100–120 (21 номер) на
+    /// 9 касс ceil отдал бы по 3 первым семи и ничего последним двум, а
+    /// предпросмотр показывает только свою кассу — никто бы не заметил.
+    /// Ровное деление обязано дать каждой кассе хотя бы один номер.</summary>
+    [Fact]
+    public void EveryTillGetsANumberWhileTheRangeIsLongEnough()
+    {
+        var sizes = Enumerable.Range(0, 9)
+            .Select(i => QueueNumberSlice.Ascending(Options(i, tillCount: 9, min: 100, max: 120, shuffle: false)).Length)
+            .ToArray();
+
+        Assert.All(sizes, size => Assert.True(size > 0));
+        Assert.Equal(new[] { 3, 3, 3, 2, 2, 2, 2, 2, 2 }, sizes);
+    }
+
+    [Fact]
+    public void ATillIndexBeyondTheTillCountGetsAnEmptySlice()
+    {
+        Assert.Empty(QueueNumberSlice.Ascending(Options(5, tillCount: 5)));
+        Assert.Empty(QueueNumberSlice.Ascending(Options(5, tillCount: 5, shuffle: false)));
     }
 
     [Fact]

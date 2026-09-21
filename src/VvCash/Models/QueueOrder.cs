@@ -25,8 +25,9 @@ public class QueueOrder
 
     /// <summary>То, что видит клиент: префикс кассы и число, как есть, без
     /// разделителя — разделитель, если нужен, часть префикса («A-»).
-    /// Invariant: на этой машине ru-RU, и ToString() без культуры однажды
-    /// напечатает не то.</summary>
+    /// Invariant — правило проекта для всего, что уходит на печать и в JSON;
+    /// для положительного int культура ничего не меняет, но одна форма везде
+    /// дешевле, чем помнить, где можно без неё.</summary>
     public static string FormatLabel(string prefix, int number) =>
         prefix + number.ToString(CultureInfo.InvariantCulture);
 }
