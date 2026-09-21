@@ -5,6 +5,19 @@ using VvCash.Services;
 
 namespace VvCash.ViewModels;
 
+/// <summary>Which figure the cashier is typing into the pad.</summary>
+public enum PadMode
+{
+    /// <summary>A piece count.</summary>
+    Pieces,
+
+    /// <summary>An amount in the product's secondary unit — m², kg.</summary>
+    Unit,
+
+    /// <summary>Money: "50 somoni of nuggets". The pad derives the weight.</summary>
+    Money,
+}
+
 /// <summary>Backs the quantity pad: the cashier types an amount, and the pad
 /// shows what it becomes before anything is committed.
 ///
@@ -19,8 +32,10 @@ public partial class QuantityPadViewModel : ObservableObject
     public QuantityPadViewModel(CartItem item)
     {
         _item = item;
-        _enteredInUnit = item.EnteredInUnit && item.Product.HasSecondaryUnit;
-        _input = _enteredInUnit
+        // Never Money: that is a one-off gesture, and the line stores a
+        // quantity, not the sum it came from.
+        _mode = item.EnteredInUnit && item.Product.HasSecondaryUnit ? PadMode.Unit : PadMode.Pieces;
+        _input = _mode == PadMode.Unit
             ? item.QuantityInUnit.ToString(CultureInfo.InvariantCulture)
             : item.Quantity.ToString(CultureInfo.InvariantCulture);
     }
@@ -33,16 +48,27 @@ public partial class QuantityPadViewModel : ObservableObject
     private string _input = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PriceInSelectedUnit), nameof(UnitLabel), nameof(PreviewQuantity),
+    [NotifyPropertyChangedFor(nameof(IsPiecesMode), nameof(IsUnitMode), nameof(IsMoneyMode),
+        nameof(PriceInSelectedUnit), nameof(UnitLabel), nameof(PreviewQuantity),
         nameof(PreviewQuantityInUnit), nameof(PreviewTotal), nameof(PreviewText),
         nameof(IsRounded), nameof(IsValid))]
-    private bool _enteredInUnit;
+    private PadMode _mode;
+
+    // One bool per segment, the way the discount modal's IsDiscountPercentMode /
+    // IsDiscountAmountMode pair works. A RadioButton binds IsChecked two-way and
+    // writes false to the segment it leaves, which must not move the mode.
+    public bool IsPiecesMode { get => Mode == PadMode.Pieces; set { if (value) Mode = PadMode.Pieces; } }
+    public bool IsUnitMode { get => Mode == PadMode.Unit; set { if (value) Mode = PadMode.Unit; } }
+    public bool IsMoneyMode { get => Mode == PadMode.Money; set { if (value) Mode = PadMode.Money; } }
 
     /// <summary>Whether the piece/unit toggle is offered at all. A piece-only
     /// product has nothing to switch to.</summary>
     public bool CanSwitchUnit => _item.Product.HasSecondaryUnit;
 
-    public string UnitLabel => EnteredInUnit ? _item.Product.UnitShortName : "шт";
+    /// <summary>Whether the pad's result is expressed in the secondary unit.</summary>
+    private bool DerivesInUnit => Mode == PadMode.Unit;
+
+    public string UnitLabel => DerivesInUnit ? _item.Product.UnitShortName : "шт";
 
     /// <summary>Price expressed in whichever unit is selected, so the ticket
     /// reads "416.67 / м²" while the cashier is typing square metres.
@@ -50,7 +76,7 @@ public partial class QuantityPadViewModel : ObservableObject
     /// Built on the line's own unit price, not the cached catalogue one: once a
     /// server quote prices the line that is what the customer pays, and showing
     /// the stale figure here would contradict the cart total.</summary>
-    public decimal PriceInSelectedUnit => EnteredInUnit
+    public decimal PriceInSelectedUnit => DerivesInUnit
         ? _item.UnitPrice / _item.Product.UnitFactor
         : _item.UnitPrice;
 
@@ -68,7 +94,7 @@ public partial class QuantityPadViewModel : ObservableObject
         {
             var amount = Parsed;
             if (amount is null) return false;
-            if (!EnteredInUnit && !_item.Product.IsDivisible && amount != decimal.Truncate(amount.Value))
+            if (!DerivesInUnit && !_item.Product.IsDivisible && amount != decimal.Truncate(amount.Value))
                 return false;
             return true;
         }
@@ -80,7 +106,7 @@ public partial class QuantityPadViewModel : ObservableObject
         {
             var amount = Parsed;
             if (amount is null) return 0m;
-            if (!EnteredInUnit) return amount.Value;
+            if (!DerivesInUnit) return amount.Value;
             return UnitConverter.ToBase(
                 amount.Value, _item.Product.UnitFactor, _item.Product.IsDivisible).Quantity;
         }
@@ -92,7 +118,7 @@ public partial class QuantityPadViewModel : ObservableObject
         {
             var amount = Parsed;
             if (amount is null || !_item.Product.HasSecondaryUnit) return 0m;
-            if (!EnteredInUnit) return UnitConverter.ToUnit(amount.Value, _item.Product.UnitFactor);
+            if (!DerivesInUnit) return UnitConverter.ToUnit(amount.Value, _item.Product.UnitFactor);
             return UnitConverter.ToBase(
                 amount.Value, _item.Product.UnitFactor, _item.Product.IsDivisible).QuantityInUnit;
         }
@@ -108,7 +134,7 @@ public partial class QuantityPadViewModel : ObservableObject
         get
         {
             var amount = Parsed;
-            if (amount is null || !EnteredInUnit) return false;
+            if (amount is null || !DerivesInUnit) return false;
             return PreviewQuantityInUnit != amount.Value;
         }
     }
@@ -133,8 +159,8 @@ public partial class QuantityPadViewModel : ObservableObject
         var amount = Parsed;
         if (amount is null || !IsValid) return;
 
-        _item.EnteredInUnit = EnteredInUnit;
-        if (EnteredInUnit) cart.SetQuantityInUnit(_item, amount.Value);
+        _item.EnteredInUnit = DerivesInUnit;
+        if (DerivesInUnit) cart.SetQuantityInUnit(_item, amount.Value);
         else cart.SetQuantity(_item, amount.Value);
     }
 }

@@ -847,13 +847,18 @@
                         </Button>
                     </Grid>
 
-                    <!-- Unit toggle. Absent for a piece-only product: there is
-                         nothing to switch to, and an inert control reads as broken. -->
-                    <ToggleSwitch IsVisible="{Binding QuantityPad.CanSwitchUnit}"
-                                  IsChecked="{Binding QuantityPad.EnteredInUnit, Mode=TwoWay}"
-                                  OnContent="{Binding QuantityPad.Item.Product.UnitShortName}"
-                                  OffContent="шт"
-                                  HorizontalAlignment="Center"/>
+                    <!-- Mode selector. Hidden entirely for a piece-only product:
+                         there is nothing to switch to, and an inert control
+                         reads as broken. A StackPanel, not a star Grid, so a
+                         hidden segment collapses instead of leaving a gap. -->
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center"
+                                IsVisible="{Binding QuantityPad.CanSwitchUnit}">
+                        <RadioButton Content="шт" Classes="Segmented" Width="130"
+                                     IsChecked="{Binding QuantityPad.IsPiecesMode}"/>
+                        <RadioButton Content="{Binding QuantityPad.Item.Product.UnitShortName}" Classes="Segmented" Width="130"
+                                     IsChecked="{Binding QuantityPad.IsUnitMode}"
+                                     IsVisible="{Binding QuantityPad.CanSwitchUnit}"/>
+                    </StackPanel>
 
                     <!-- Input display -->
                     <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="16" Padding="20,14">

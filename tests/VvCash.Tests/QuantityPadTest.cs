@@ -83,7 +83,7 @@ public class QuantityPadTest
         Assert.Equal(416.67m, decimal.Round(pad.PriceInSelectedUnit, 2));
         Assert.Equal("м²", pad.UnitLabel);
 
-        pad.EnteredInUnit = false;
+        pad.Mode = PadMode.Pieces;
 
         Assert.Equal(100m, pad.PriceInSelectedUnit);
         Assert.Equal("шт", pad.UnitLabel);
@@ -125,5 +125,33 @@ public class QuantityPadTest
 
         Assert.False(pad.CanSwitchUnit);
         Assert.Equal("шт", pad.UnitLabel);
+    }
+
+    [Fact]
+    public void OpensInTheUnitTheLineWasEnteredIn()
+    {
+        Assert.Equal(PadMode.Unit, PadFor(Tile(), inUnit: true).Mode);
+        Assert.Equal(PadMode.Pieces, PadFor(Tile(), inUnit: false).Mode);
+
+        // EnteredInUnit on a piece-only line is stale data, not a unit to open in.
+        var pieceOnly = new Product { Id = "p2", Name = "Товар", Price = 10m };
+        Assert.Equal(PadMode.Pieces, PadFor(pieceOnly, inUnit: true).Mode);
+    }
+
+    [Fact]
+    public void ModeBools_MirrorTheMode_AndOnlyATrueWriteMovesIt()
+    {
+        var pad = PadFor(Tile(), inUnit: false);
+
+        Assert.True(pad.IsPiecesMode);
+        Assert.False(pad.IsUnitMode);
+
+        pad.IsUnitMode = true;
+        Assert.Equal(PadMode.Unit, pad.Mode);
+
+        // A RadioButton writes false to the segment it leaves; that must not
+        // knock the pad out of the mode it just entered.
+        pad.IsPiecesMode = false;
+        Assert.Equal(PadMode.Unit, pad.Mode);
     }
 }
