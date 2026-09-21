@@ -673,11 +673,7 @@ public class QueueStorage : IQueueStorage
         CreatedAt = ParseDate(reader.GetString(4))!.Value,
         ReadyAt = reader.IsDBNull(5) ? null : ParseDate(reader.GetString(5)),
         ClosedAt = reader.IsDBNull(6) ? null : ParseDate(reader.GetString(6)),
-        // IsDBNull, не голый GetString — тем же приёмом, что и Prefix ниже: строка,
-        // вставленная мимо SaveOrderAsync (как в тесте на Prefix-миграцию) не пишет
-        // эту колонку вовсе, и без проверки чтение такой строки падает вместо того,
-        // чтобы прочитать её пустой.
-        SaleDocumentNumber = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+        SaleDocumentNumber = reader.GetString(7),
         Lines = JsonSerializer.Deserialize<List<QueueOrderLine>>(reader.GetString(8)) ?? new(),
         Prefix = reader.IsDBNull(9) ? string.Empty : reader.GetString(9)
     };

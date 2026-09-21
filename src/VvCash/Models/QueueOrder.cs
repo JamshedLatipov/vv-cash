@@ -25,9 +25,9 @@ public class QueueOrder
     /// работают с ним, а буква — только оформление.</summary>
     public string Prefix { get; set; } = string.Empty;
 
-    /// <summary>Что видит клиент на талоне, табло и экране кухни. Только
-    /// геттер: System.Text.Json сериализует его в JSON сервера
-    /// (kds.html/board.html читают o.label) и игнорирует на входе.</summary>
+    /// <summary>Что видит клиент на талоне. Только геттер: System.Text.Json
+    /// сериализует его в JSON сервера как label — то, что показывают кухонный
+    /// экран и табло, — и игнорирует на входе.</summary>
     public string Label => FormatLabel(Prefix, Number);
 
     public int TillIndex { get; set; }
