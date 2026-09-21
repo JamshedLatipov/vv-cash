@@ -24,7 +24,9 @@ public enum PadMode
 /// The live preview exists for one reason. An indivisible product rounds up to
 /// the next whole piece, so 12.5 m² of tile bills as 12.72 m². That is the
 /// customer's money, and it must be on screen before the line is confirmed, not
-/// discovered on the receipt.</summary>
+/// discovered on the receipt. The same goes the other way in money mode: 50
+/// somoni at 30 per kilogram is 1.666 kg and bills 49.98, and that cut is
+/// shown before Apply, not on the receipt.</summary>
 public partial class QuantityPadViewModel : ObservableObject
 {
     /// <summary>Where a money-derived amount is cut: scales weigh in grams,
@@ -39,9 +41,7 @@ public partial class QuantityPadViewModel : ObservableObject
         // Never Money: that is a one-off gesture, and the line stores a
         // quantity, not the sum it came from.
         _mode = item.EnteredInUnit && item.Product.HasSecondaryUnit ? PadMode.Unit : PadMode.Pieces;
-        _input = _mode == PadMode.Unit
-            ? item.QuantityInUnit.ToString(CultureInfo.InvariantCulture)
-            : item.Quantity.ToString(CultureInfo.InvariantCulture);
+        _input = _mode == PadMode.Unit ? Seed(item.QuantityInUnit) : Seed(item.Quantity);
     }
 
     public CartItem Item => _item;
@@ -145,6 +145,15 @@ public partial class QuantityPadViewModel : ObservableObject
     private static decimal FloorToWeight(decimal value)
         => decimal.Truncate(value / WeightStep) * WeightStep;
 
+    /// <summary>The stored quantity as the box should open on it: without
+    /// the trailing zeros a money-derived amount carries (2.000 kg reads
+    /// "2", like the cart line), but with every significant digit — a format
+    /// mask would cut 52.083333 pieces to "52.083", and an untouched Apply
+    /// would then rewrite the line. Dividing by 1.000… is decimal's way of
+    /// dropping scale without touching value.</summary>
+    private static string Seed(decimal value)
+        => (value / 1.000000000000000000000000000000m).ToString(CultureInfo.InvariantCulture);
+
     /// <summary>The typed sum expressed against the per-piece price, so that
     /// one division by the line's unit price gives the amount in
     /// <see cref="PriceUnitLabel"/>'s unit: 50 somoni of 0.5 kg packs at 15
@@ -155,7 +164,9 @@ public partial class QuantityPadViewModel : ObservableObject
 
     /// <summary>Whether the current input can be committed. Rejects an empty or
     /// unparseable box, a non-positive amount, and a fractional piece count on
-    /// an indivisible product — half a tile does not exist.</summary>
+    /// an indivisible product — half a tile does not exist. In money mode it
+    /// also rejects a product the mode is not offered for and a sum below one
+    /// gram — both surface as a null <see cref="Amount"/>.</summary>
     public bool IsValid
     {
         get

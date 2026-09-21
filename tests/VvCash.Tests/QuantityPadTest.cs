@@ -467,4 +467,72 @@ public class QuantityPadTest
 
         Assert.Equal("→ 4 шт = 2 кг · 60.00", pad.PreviewText);
     }
+
+    [Fact]
+    public void OpensOnTheStoredAmount_WithoutTrailingZeros_ButWithEveryDigit()
+    {
+        // A money commit stores 2.000 kg; the box must open on "2" like the
+        // cart line, not "2.000".
+        var whole = new CartItem { Product = Nuggets(), Quantity = 4.00m, QuantityInUnit = 2.000m, EnteredInUnit = true };
+        Assert.Equal("2", new QuantityPadViewModel(whole).Input);
+
+        // But never at the cost of a digit: 52.083333 pieces must survive an
+        // untouched Apply.
+        var fine = new CartItem { Product = Tile(divisible: true), Quantity = 52.083333m, QuantityInUnit = 12.5m, EnteredInUnit = false };
+        Assert.Equal("52.083333", new QuantityPadViewModel(fine).Input);
+    }
+
+    [Fact]
+    public void Commit_InUnitMode_StillWritesTheTypedAmount()
+    {
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(Tile(divisible: true));
+        var item = cart.Items[0];
+        var pad = new QuantityPadViewModel(item);
+        pad.Input = "12.5";
+
+        pad.Commit(cart);
+
+        Assert.Equal(12.5m, item.QuantityInUnit);
+        Assert.Equal(52.083333m, item.Quantity);
+        Assert.True(item.EnteredInUnit);
+    }
+
+    [Fact]
+    public void Commit_InMoneyMode_SwitchesALineEnteredInPieces_ToTheUnit()
+    {
+        // The line was added by the piece (card says pieces), but "50 somoni
+        // of nuggets" is weighed — the line must now read in kilograms.
+        var byThePiece = Nuggets();
+        byThePiece.SellInSecondaryUnit = false;
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(byThePiece);
+        var item = cart.Items[0];
+        Assert.False(item.EnteredInUnit);
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Money;
+        pad.Input = "50";
+
+        pad.Commit(cart);
+
+        Assert.True(item.EnteredInUnit);
+        Assert.Equal(1.666m, item.QuantityInUnit);
+        Assert.Equal(3.332m, item.Quantity);
+    }
+
+    [Fact]
+    public void Commit_InMoneyMode_OnAProductThatCannotTakeIt_LeavesTheLineAlone()
+    {
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(Tile(divisible: false));
+        var item = cart.Items[0];
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Money;
+        pad.Input = "50";
+
+        pad.Commit(cart);
+
+        Assert.Equal(1m, item.Quantity);
+        Assert.Single(cart.Items);
+    }
 }
