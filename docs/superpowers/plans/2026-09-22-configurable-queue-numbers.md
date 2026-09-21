@@ -1088,91 +1088,43 @@ git commit -m "feat(queue): rebuild the number pool whenever its shape changes, 
 
 ---
 
-### Task 5: Исчерпание — свободный номер раньше живого
+### Task 5: Исчерпание — свободный номер раньше живого, кулдаун удалён
+
+> **Выполнено с отклонением от первой редакции плана** (коммиты `9409a3b`,
+> и docs-фикс следом). Первая редакция сохраняла кулдаун и делила третью
+> ветку на 3а/3б; при исполнении выяснилось, что под порядком «свежий →
+> свободный → живой» кулдаун доказуемо мёртв, а пять существующих тестов
+> фиксировали не ширину кулдауна, а «отбери 49 живых номеров прежде чем
+> вернуть свободный». Спека переписана (`c9879e3`, решение 6). Ниже —
+> фактическое содержание задачи.
 
 **Files:**
-- Modify: `src/VvCash/Services/Queue/NumberPool.cs` (`SelectNumberToIssueAsync`)
-- Modify: `tests/VvCash.Tests/NumberPoolTest.cs`
+- Modify: `src/VvCash/Services/Queue/NumberPool.cs` — `CooldownIssues` и
+  ветка 2 удалены; `SelectNumberToIssueAsync(connection, transaction)` без
+  `seq`: свежий по `Position` → свободный по `ReleasedAtSeq` → живой по
+  `IssuedSeq`; докстринги `SelectNumberToIssueAsync`, `ReleaseAsync`,
+  `ReadSeqAsync` без кулдауна.
+- Modify: `src/VvCash/Services/Queue/INumberPool.cs` — докстринг `ReleaseAsync`.
+- Modify: `tests/VvCash.Tests/NumberPoolTest.cs` —
+  `AFreedNumberReturnsAfterEveryFreshAndEarlierFreedNumber` (100 из 180
+  выдано, первый освобождён → 80 свежих, затем он; A и B освобождены с
+  выдачей между ними → A, затем B),
+  `ARepeatedReleaseDoesNotMoveTheNumberBackInTheFreedQueue`,
+  `AStaleReleaseForAReissuedNumberDoesNotFreeALiveOrder` (переиздание на
+  следующей выдаче), `ExhaustionPrefersAFreedNumberOverAliveOne`,
+  `ExhaustionWithNothingFreedTakesTheOldestLiveNumber`.
+- Modify: `tests/VvCash.Tests/QueueClientTest.cs` —
+  `RepeatedFlushesOfTheSameClosedOrderDoNotMoveItInTheFreedQueue`,
+  `AStaleClosedOrderReplayDoesNotFreeANumberIssuedToSomeoneElse` без цикла
+  на 49 выдач.
 
-- [ ] **Step 1: Write the failing test**
+Ловушка, пойманная при исполнении: два `ReleaseAsync` подряд без выдачи
+между ними получают один `ReleasedAtSeq`, и `ORDER BY ReleasedAtSeq LIMIT 1`
+решает по rowid — тест на порядок возврата обязан разделять освобождения
+выдачей.
 
-```csharp
-    /// <summary>Срез из трёх номеров, все выданы, второй вернули. Кулдаун 50
-    /// пройти не успеет никогда, так что решает третья ветка — и она обязана
-    /// отдать свободный второй, а не отобрать первый у клиента, который его
-    /// ещё держит. Прежний ORDER BY COALESCE(IssuedSeq, ReleasedAtSeq)
-    /// выбирал первый: у него seq 1, у возвращённого — 3.</summary>
-    [Fact]
-    public async Task ExhaustionPrefersAFreedNumberOverAliveOne()
-    {
-        var pool = Pool(() => new QueueNumberOptions(0, 1, 1, 3, false, "", "secret"));
-
-        var ids = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var issued = new List<int>();
-        foreach (var id in ids) issued.Add(await pool.IssueAsync(id));
-        Assert.Equal(new[] { 1, 2, 3 }, issued);
-
-        await pool.ReleaseAsync(2, ids[1]);
-
-        Assert.Equal(2, await Issue(pool));
-    }
-
-    [Fact]
-    public async Task ExhaustionWithNothingFreedTakesTheOldestLiveNumber()
-    {
-        var pool = Pool(() => new QueueNumberOptions(0, 1, 1, 3, false, "", "secret"));
-
-        for (var i = 0; i < 3; i++) await Issue(pool);
-
-        Assert.Equal(1, await Issue(pool));
-    }
-```
-
-- [ ] **Step 2: Run to verify the first fails**
-
-Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~NumberPoolTest.Exhaustion"`
-Expected: `ExhaustionPrefersAFreedNumberOverAliveOne` красный — `Assert.Equal(2, …)` получает `1`. Второй зелёный уже сейчас.
-
-- [ ] **Step 3: Split the third branch**
-
-В `SelectNumberToIssueAsync` заменить последний `return await ScalarNumberAsync(... COALESCE ...)` на:
-
-```csharp
-        // 3а: свободных, отстоявших кулдаун, нет — но есть свободные вообще.
-        // Самый давно возвращённый, живые не трогаем: у клиента с живым
-        // номером талон на руках, а этот — ничей.
-        var freed = await ScalarNumberAsync(connection, transaction, @"
-            SELECT Number FROM NumberPool
-            WHERE IssuedSeq IS NULL AND ReleasedAtSeq IS NOT NULL
-            ORDER BY ReleasedAtSeq LIMIT 1", null);
-        if (freed.HasValue) return freed;
-
-        // 3б: свободных нет вовсе — самый давно выданный. Это то, что не даёт
-        // кассе без экрана на кухне встать намертво: там никто ничего не
-        // возвращает.
-        return await ScalarNumberAsync(connection, transaction, @"
-            SELECT Number FROM NumberPool
-            ORDER BY IssuedSeq LIMIT 1", null);
-```
-
-Обновить докстринг метода: абзац про «обратную сторону третьей ветки»
-переписать так: «3а отдаёт свободный номер, не дожидаясь кулдауна, — но
-только когда отстоявших нет, и раньше живого, а не вместо него. Прежний
-`COALESCE(IssuedSeq, ReleasedAtSeq)` мог выбрать живой номер с seq 10
-вместо свободного с seq 30; со 180 номерами на кассу это было недостижимо,
-с настраиваемым диапазоном 1–30 — обычный обед.»
-
-- [ ] **Step 4: Run to verify they pass**
-
-Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~NumberPoolTest"`
-Expected: все зелёные, включая `AnExhaustedSliceReusesTheOldestRatherThanStalling` и `AStaleReleaseForAReissuedNumberDoesNotFreeALiveOrder`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/VvCash/Services/Queue/NumberPool.cs tests/VvCash.Tests/NumberPoolTest.cs
-git commit -m "fix(queue): hand out a freed number before stealing a live one on exhaustion"
-```
+- [x] Реализовано, проверено на старом коде (6 дискриминирующих тестов
+  красные на `NumberPool.cs` из `c9879e3`), закоммичено.
 
 ---
 
