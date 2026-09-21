@@ -45,6 +45,19 @@ public class QueueSettingsTest
     }
 
     [Fact]
+    public void AnUntouchedRegisterKeepsTheShippedNumberShape()
+    {
+        IQueueSettings settings = new SettingsService(WriteSettings("{}"));
+
+        Assert.Equal(5, settings.TillCount);
+        Assert.Equal(100, settings.QueueNumberMin);
+        Assert.Equal(999, settings.QueueNumberMax);
+        Assert.True(settings.QueueNumberShuffle);
+        Assert.Equal(string.Empty, settings.QueueNumberPrefix);
+        Assert.True(QueueNumberOptions.From(settings).ShapesTheLegacyPool);
+    }
+
+    [Fact]
     public void RoleIsReadAsAName()
     {
         IQueueSettings settings = new SettingsService(WriteSettings("""{ "QueueRole": "Server" }"""));

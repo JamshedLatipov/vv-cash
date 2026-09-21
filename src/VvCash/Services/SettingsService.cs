@@ -45,7 +45,7 @@ public class SettingsData
     public string QueueNumberPrefix { get; set; } = string.Empty;
     public int QueueNumberMin { get; set; } = QueueNumberOptions.DefaultMin;
     public int QueueNumberMax { get; set; } = QueueNumberOptions.DefaultMax;
-    public bool QueueNumberShuffle { get; set; } = true;
+    public bool QueueNumberShuffle { get; set; } = QueueNumberOptions.DefaultShuffle;
 }
 
 public class SettingsService : ISettingsService, IQueueSettings

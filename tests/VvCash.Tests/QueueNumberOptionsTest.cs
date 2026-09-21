@@ -29,7 +29,8 @@ public class QueueNumberOptionsTest
     public void OnlyTheShippedShapeCountsAsLegacy(
         int tillCount, int min, int max, bool shuffle, bool expected)
     {
-        var options = new QueueNumberOptions(0, tillCount, min, max, shuffle, "", "s");
+        var options = new QueueNumberOptions(
+            TillIndex: 0, TillCount: tillCount, Min: min, Max: max, Shuffle: shuffle, Prefix: "", Secret: "s");
 
         Assert.Equal(expected, options.ShapesTheLegacyPool);
     }
@@ -63,6 +64,8 @@ public class QueueNumberOptionsTest
     [InlineData(50, 100, 100)]    // below Min → Min
     [InlineData(99999, 100, 9999)]
     [InlineData(0, 1, 1)]
+    [InlineData(500, 50000, 9999)] // raw min above the ceiling → ceiling
+    [InlineData(500, -5, 500)]
     public void MaxIsClampedBetweenMinAndFourDigits(int raw, int min, int expected)
     {
         Assert.Equal(expected, QueueNumberOptions.ClampMax(raw, min));
@@ -75,6 +78,8 @@ public class QueueNumberOptionsTest
     [InlineData(-3, 5, 0)]
     [InlineData(3, 2, 1)]
     [InlineData(0, 1, 0)]
+    [InlineData(3, 0, 0)]
+    [InlineData(3, 50, 3)]
     public void TillIndexIsClampedIntoTheTillCount(int raw, int tillCount, int expected)
     {
         Assert.Equal(expected, QueueNumberOptions.ClampTillIndex(raw, tillCount));

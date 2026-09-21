@@ -15,21 +15,24 @@ public sealed record QueueNumberOptions(
     int TillIndex, int TillCount, int Min, int Max, bool Shuffle,
     string Prefix, string Secret)
 {
-    /// <summary>Константы, с которыми пул уехал на точки до этой настройки.
-    /// Значения по умолчанию SettingsData — они же, и это не совпадение:
-    /// settings.json без новых полей обязан читаться как сегодняшнее
-    /// поведение.</summary>
+    // Константы, с которыми пул уехал на точки до этой настройки. Значения
+    // по умолчанию SettingsData — они же, и это не совпадение: settings.json
+    // без новых полей обязан читаться как сегодняшнее поведение.
     public const int DefaultTillCount = 5;
     public const int DefaultMin = 100;
     public const int DefaultMax = 999;
+    public const bool DefaultShuffle = true;
 
     public const int MinTillCount = 1;
     public const int MaxTillCount = 9;
     public const int MinNumber = 1;
-    /// <summary>Четыре цифры: талон печатает номер двойной шириной, и 3
-    /// символа префикса плюс 4 цифры — предел, который помещается на 58-мм
-    /// ленте (см. EscPosPrinterService.BuildTicket).</summary>
+
+    /// <summary>Четыре цифры — верх, за которым номер перестаёт читаться с
+    /// талона на расстоянии. Не предел ленты: при 2× (см.
+    /// EscPosPrinterService.BuildTicket) в строку помещается 16 символов, и
+    /// 3 символа префикса плюс 4 цифры оставляют запас.</summary>
     public const int MaxNumber = 9999;
+
     public const int MaxPrefixLength = 3;
 
     public static QueueNumberOptions From(IQueueSettings settings) => new(
@@ -39,14 +42,20 @@ public sealed record QueueNumberOptions(
     /// <summary>Сегодняшние константы — для тестов и для места, где
     /// IQueueSettings нет.</summary>
     public static QueueNumberOptions Default(int tillIndex, string secret) =>
-        new(tillIndex, DefaultTillCount, DefaultMin, DefaultMax, true, string.Empty, secret);
+        new(tillIndex, DefaultTillCount, DefaultMin, DefaultMax, DefaultShuffle, string.Empty, secret);
 
     /// <summary>Истинно, когда пул на диске, собранный кодом до этой
     /// настройки (он знал только константы), совпал бы с пулом от этих
     /// настроек. NumberPool по этому признаку усыновляет старый пул вместо
-    /// пересборки посреди дня — см. его EnsurePoolAsync.</summary>
+    /// пересборки посреди дня — см. его EnsurePoolAsync.
+    ///
+    /// TillIndex в проверке нарочно нет: старый пул никогда не хранил индекс
+    /// кассы — его срез был неявным, определённым тем, какие номера лежали
+    /// в файле, а не отдельным полем для сравнения. Касса, сменившая индекс
+    /// посреди дня, получает то же поведение «применится при следующей
+    /// пересборке», что было и раньше.</summary>
     public bool ShapesTheLegacyPool =>
-        TillCount == DefaultTillCount && Min == DefaultMin && Max == DefaultMax && Shuffle;
+        TillCount == DefaultTillCount && Min == DefaultMin && Max == DefaultMax && Shuffle == DefaultShuffle;
 
     // Клэмпы — здесь, а не в SettingsService: предпросмотр в настройках
     // обязан показывать то, что реально сохранится, и делить формулу на два
@@ -57,9 +66,14 @@ public sealed record QueueNumberOptions(
 
     public static int ClampMin(int raw) => Math.Clamp(raw, MinNumber, MaxNumber);
 
-    public static int ClampMax(int raw, int min) => Math.Clamp(raw, min, MaxNumber);
+    // Второй аргумент клэмпится внутри, а не принимается как уже клэмпленный:
+    // иначе Math.Clamp падает с ArgumentException, когда min > MaxNumber или
+    // tillCount < 1, и функция незаметно требует вызова после ClampMin /
+    // ClampTillCount. Сырое значение из settings.json не должно превращать
+    // геттер в исключение — порядок вызовов не должен быть важен вовсе.
+    public static int ClampMax(int raw, int min) => Math.Clamp(raw, ClampMin(min), MaxNumber);
 
-    public static int ClampTillIndex(int raw, int tillCount) => Math.Clamp(raw, 0, tillCount - 1);
+    public static int ClampTillIndex(int raw, int tillCount) => Math.Clamp(raw, 0, ClampTillCount(tillCount) - 1);
 
     public static string NormalizePrefix(string? raw)
     {
