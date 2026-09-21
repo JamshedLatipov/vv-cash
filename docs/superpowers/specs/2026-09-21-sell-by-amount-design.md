@@ -2,7 +2,7 @@
 
 **Дата:** 2026-09-21
 **Репозиторий:** `vv-cash` (касса)
-**Статус:** дизайн утверждён, план не написан
+**Статус:** реализовано в ветке `feat/sell-by-amount` (задачи 1–6 плана); живая проверка XAML в приложении — по чек-листу задачи 5 плана
 
 ## Контекст
 
@@ -42,7 +42,7 @@
 
 ### Округление вниз до грамма
 
-Выведенное количество усекается до трёх знаков: `decimal.Truncate(x * 1000) / 1000`.
+Выведенное количество усекается до трёх знаков: `decimal.Truncate(x / 0.001) * 0.001`.
 Шаг `WeightStep = 0.001` — весы показывают граммы, и кассир взвешивает ровно ту
 цифру, что на экране.
 
@@ -107,10 +107,11 @@ public enum PadMode { Pieces, Unit, Money }
 | `IsValid` | парсинг + дробные штуки на неделимом | плюс в `Money`: выведенное количество `> 0` |
 | `PreviewQuantity` / `PreviewQuantityInUnit` | по `EnteredInUnit` | в `Money` — через конвертацию суммы, дальше как в `Unit` / `Pieces` |
 | `PreviewTotal` | `PreviewQuantity × UnitPrice` | без изменений — итог считается от штук, как в корзине |
-| `PreviewText` | есть | без изменений формата: `→ 3.332 шт = 1.666 кг · 49.98` |
+| `PreviewText` | есть | тот же формат `→ 3.332 шт = 1.666 кг · 49.98`; хвостовые нули срезаются через `QuantityFormat.Display` (как в строке корзины), иначе после ввода суммы читалось бы `4.00 шт = 2.000 кг`; числа — инвариантной культурой, как строка корзины и чек |
 | `IsRounded` | округление вверх в `Unit` | без изменений; в `Money` всегда `false` |
 | `IsRoundedDown` | — | `Mode == Money && amount × UnitPrice < money × factor` (точные произведения, не через `PreviewTotal` — тот идёт через 6-значные штуки) → подпись «Округлено вниз до грамма» |
 | `Commit` | ветка по `EnteredInUnit` | третья ветка по таблице выше |
+| `Seed` (конструктор) | сырой `ToString` | хвостовые нули снимаются делением на `1.000…m`, без маски формата — `2.000 кг` открывается как `2`, а `52.083333 шт` не теряет ни знака, иначе нетронутое «Применить» перезаписало бы строку |
 
 Конвертация `money → количество` — один приватный статический метод, чтобы превью и
 `Commit` не разошлись:
@@ -129,23 +130,38 @@ private static decimal FloorToWeight(decimal value)
 В `Quantity Pad Modal` блок `<!-- Unit toggle -->`:
 
 ```xml
-<Grid ColumnDefinitions="*, *, *" IsVisible="{Binding QuantityPad.HasModeSelector}">
-    <RadioButton Grid.Column="0" Content="шт"
-                 IsChecked="{Binding QuantityPad.IsPiecesMode}" Classes="Segmented"/>
-    <RadioButton Grid.Column="1" Content="{Binding QuantityPad.Item.Product.UnitShortName}"
-                 IsChecked="{Binding QuantityPad.IsUnitMode}" Classes="Segmented"
+<!-- StackPanel, а не Grid со звёздными колонками: скрытый сегмент
+     схлопывается, а не оставляет пустую треть. -->
+<StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center"
+            IsVisible="{Binding QuantityPad.HasModeSelector}">
+    <RadioButton Content="шт" Classes="Segmented" Width="130"
+                 IsChecked="{Binding QuantityPad.IsPiecesMode}"/>
+    <RadioButton Content="{Binding QuantityPad.Item.Product.UnitShortName}" Classes="Segmented" Width="130"
+                 IsChecked="{Binding QuantityPad.IsUnitMode}"
                  IsVisible="{Binding QuantityPad.CanSwitchUnit}"/>
-    <RadioButton Grid.Column="2" Content="сум"
-                 IsChecked="{Binding QuantityPad.IsMoneyMode}" Classes="Segmented"
+    <RadioButton Content="сум" Classes="Segmented" Width="130"
+                 IsChecked="{Binding QuantityPad.IsMoneyMode}"
                  IsVisible="{Binding QuantityPad.CanEnterMoney}"/>
-</Grid>
+</StackPanel>
 ```
 
-Под превью — вторая подпись рядом с существующей `IsRounded`:
+Под превью — вторая подпись рядом с существующей `IsRounded`. Называет единицу, а не
+«грамм»: режим суммы доступен любому делимому товару, и `1.666 шт` или `0.5 м²` режутся
+до того же шага `0.001`. Обе подписи лежат в `<Panel Height="16">` — они
+взаимоисключающие (`Unit` vs `Money`), а фиксированная высота не даёт нумпаду прыгать
+под пальцем при каждой второй цифре.
 
 ```xml
-<TextBlock IsVisible="{Binding QuantityPad.IsRoundedDown}"
-           Text="Округлено вниз до грамма" .../>
+<Panel Height="16">
+    <TextBlock IsVisible="{Binding QuantityPad.IsRounded}" Text="Округлено вверх до целой штуки" .../>
+    <TextBlock IsVisible="{Binding QuantityPad.IsRoundedDown}" ...>
+        <TextBlock.Text>
+            <MultiBinding StringFormat="Округлено вниз до 0.001 {0}">
+                <Binding Path="QuantityPad.PriceUnitLabel"/>
+            </MultiBinding>
+        </TextBlock.Text>
+    </TextBlock>
+</Panel>
 ```
 
 Заголовок `{PriceInSelectedUnit} / {UnitLabel}` → `{PriceInSelectedUnit} / {PriceUnitLabel}`.
@@ -170,8 +186,13 @@ private static decimal FloorToWeight(decimal value)
 | `Commit` без второй единицы | вызывает `SetQuantity(item, 1.666)`, `item.EnteredInUnit == false` |
 | открытие пада | `Mode` никогда не `Money` при конструировании |
 
-Существующие тесты на `EnteredInUnit` переписываются на `Mode`/`IsUnitMode` — поведение
-`Pieces`/`Unit` не меняется.
+Существующие тесты на `EnteredInUnit` переписаны на `Mode`. По итогам ревью добавлены
+регрессии на: одно деление вместо двух
+(`MoneyMode_DoesNotLoseAGram_WhenThePricePerUnitDoesNotTerminate`), сравнение флага по
+весу (`IsRoundedDown_IgnoresTheSixDecimalPieceRounding`), сид без хвостовых нулей,
+`Commit` из строки, введённой в штуках, `PropertyChanged` на bool-ах режима и
+подписях — биндинги рефлективные, и пропущенное имя в `NotifyPropertyChangedFor`
+собирается чисто. Итого 34 теста в `QuantityPadTest`.
 
 ## Вне рамок
 
@@ -180,3 +201,11 @@ private static decimal FloorToWeight(decimal value)
 - Подгонка итога строки под названную сумму (итог всегда `pieces × UnitPrice`).
 - Локализация `"сум"` / «Округлено вниз до грамма» — по образцу существующих
   `"шт"` и «Округлено вверх до целой штуки», которые тоже не локализованы.
+- Подпись «сум»: в проекте валюта — сомони (TJS), «сум» — узбекская. Хардкод как у
+  «шт»; вопрос подписи открыт.
+- Заголовок пада `{0:F2} / кг` форматирует Avalonia культурой ОС (на ru-RU —
+  `30,00`), а превью и корзина — инвариантно. Унаследовано всеми `{0:F2}` в
+  `PosView.axaml`, не предмет этой работы.
+- Котировка сервера, прилетевшая пока пад открыт, не переуведомляет `CanEnterMoney` /
+  `PriceInSelectedUnit` (`UnitPrice` меняется под падом). Унаследовано от старого
+  пада; окно — дебаунс 300 мс + RTT.
