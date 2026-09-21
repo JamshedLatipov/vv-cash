@@ -905,6 +905,30 @@ public class SettingsViewModelTest
         Assert.Equal(6, raised);
     }
 
+    [Fact]
+    public void QueueNumberPreview_FlagsAnEmptySlice()
+    {
+        // Флаг красит строку предпросмотра в красный (SettingsView.axaml,
+        // TextBlock.QueuePreview.empty). Считаем уведомления только по двум
+        // присваиваниям верхней границы — по одному на каждый переход флага;
+        // без уведомления класс на экране не снялся бы и после исправления.
+        var vm = Build(out _);
+        vm.TillCountText = "5";
+        vm.TillIndexText = "4";
+        vm.QueueNumberMinText = "1";
+
+        var raised = 0;
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.IsQueueNumberPreviewEmpty)) raised++; };
+
+        vm.QueueNumberMaxText = "3";
+        Assert.True(vm.IsQueueNumberPreviewEmpty);
+
+        vm.QueueNumberMaxText = "99";
+        Assert.False(vm.IsQueueNumberPreviewEmpty);
+
+        Assert.Equal(2, raised);
+    }
+
     [Theory]
     [InlineData(QueueRole.Off, false, false)]
     [InlineData(QueueRole.Server, true, false)]

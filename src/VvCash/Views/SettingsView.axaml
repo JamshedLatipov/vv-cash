@@ -114,6 +114,19 @@
             <Setter Property="Margin" Value="0"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
         </Style>
+
+        <!-- Предпросмотр номеров очереди. Серый по умолчанию задан здесь, а не
+             атрибутом Foreground на самом TextBlock: локальное значение в
+             Avalonia сильнее любого стиля, и красный от класса empty его бы
+             не перебил — сборка чистая, цвет не меняется. Класс вешается
+             привязкой (Classes.empty="{Binding IsQueueNumberPreviewEmpty}");
+             красный — тот же, что у баннеров ошибок ниже. -->
+        <Style Selector="TextBlock.QueuePreview">
+            <Setter Property="Foreground" Value="{StaticResource Slate500Brush}"/>
+        </Style>
+        <Style Selector="TextBlock.QueuePreview.empty">
+            <Setter Property="Foreground" Value="#B91C1C"/>
+        </Style>
     </UserControl.Styles>
 
     <Grid RowDefinitions="Auto, *" Height="{Binding $parent[Window].ClientSize.Height}">
@@ -372,14 +385,16 @@
                              до перезапуска кассы, отсюда и прежняя формулировка ("после
                              перезапуска приложения"). Теперь QueueServerHost перезапускает
                              сервер сразу на Save() (см. её remarks), так что роль/порт/
-                             секрет применяются немедленно. Форма номера (буква, число касс,
-                             номер кассы, диапазон, перемешивание) — на следующем талоне:
-                             NumberPool сверяет PoolKey на каждой выдаче и пересобирает пул
-                             при несовпадении (см. EnsurePoolAsync). Пересборка сбрасывает
-                             IssueSeq и забывает, какие номера сейчас на руках, — поэтому
-                             текст ключа QueueSettingsNotice в i18n/*.json обязан говорить
-                             «меняйте между сменами», а не «перезапустите приложение» и не
-                             «со следующего дня». -->
+                             секрет применяются немедленно. Форма номера — на следующем
+                             талоне: NumberPool сверяет PoolKey на каждой выдаче и
+                             пересобирает пул при несовпадении (см. EnsurePoolAsync). В
+                             PoolKey входят число касс, номер кассы, диапазон и
+                             перемешивание — их смена сбрасывает IssueSeq и забывает, какие
+                             номера сейчас на руках; буква в ключ не входит, она лишь
+                             приписывается к следующему выданному числу (см. докстринг
+                             NumberPool.PoolKey). Поэтому текст ключа QueueSettingsNotice в
+                             i18n/*.json обязан говорить «меняйте между сменами», а не
+                             «перезапустите приложение» и не «со следующего дня». -->
                         <TextBlock Text="{Binding [QueueSettingsNotice], Source={x:Static services:I18nService.Instance}}"
                                    FontSize="12" Foreground="{StaticResource Slate500Brush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
@@ -415,8 +430,10 @@
 
                                 <!-- Предпросмотр: первый и последний номер среза этой кассы по
                                      введённым значениям — те же клэмпы и формула, что у пула.
-                                     Единственное место, где пустой срез виден до сохранения. -->
-                                <TextBlock Text="{Binding QueueNumberPreview}" FontSize="12" Foreground="{StaticResource Slate500Brush}" TextWrapping="Wrap"/>
+                                     Единственное место, где пустой срез виден до сохранения,
+                                     поэтому он ещё и красный (TextBlock.QueuePreview.empty в
+                                     стилях выше; Foreground нарочно не задан локально). -->
+                                <TextBlock Text="{Binding QueueNumberPreview}" Classes="QueuePreview" Classes.empty="{Binding IsQueueNumberPreviewEmpty}" FontSize="12" TextWrapping="Wrap"/>
 
                                 <StackPanel IsVisible="{Binding IsQueueClientFieldsVisible}">
                                     <TextBlock Text="{Binding [QueueServerAddress], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,4"/>

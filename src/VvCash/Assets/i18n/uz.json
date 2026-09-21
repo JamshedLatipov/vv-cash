@@ -116,7 +116,7 @@
   "QueueServerAddressWatermark": "10.0.0.5:8770",
   "QueuePort": "Port",
   "QueueSecret": "Maxfiy kalit",
-  "QueueSettingsNotice": "Rol, port va sir saqlangach darhol kuchga kiradi. Raqam formati — keyingi talondan; uni smenalar orasida o'zgartiring: pul qayta yig'ilganda qaysi raqamlar qo'lda ekani unutiladi. Har bir kassaning o'z harfi bo'lsa, «Nuqtadagi kassalar» = 1 qo'ying.",
+  "QueueSettingsNotice": "Rol, port va sir saqlangach darhol kuchga kiradi. Raqam formati — keyingi talondan; uni smenalar orasida o'zgartiring: raqamlar to'plami qayta yig'ilganda qaysi raqamlar qo'lda ekani unutiladi. Har bir kassaning o'z harfi bo'lsa, «Nuqtadagi kassalar» = 1 qo'ying.",
   "QueueBoardLink": "Taxta havolasi",
   "QueueKdsLink": "Oshxona ekrani havolasi",
   "SaveConfiguration": "Sozlamalarni saqlash",

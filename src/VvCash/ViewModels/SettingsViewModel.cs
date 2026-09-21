@@ -315,6 +315,7 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    [NotifyPropertyChangedFor(nameof(IsQueueNumberPreviewEmpty))]
     private string _tillIndexText = "0";
 
     /// <summary>Форма номера талона (см. IQueueSettings): буква кассы, число
@@ -324,26 +325,31 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    [NotifyPropertyChangedFor(nameof(IsQueueNumberPreviewEmpty))]
     private string _queueNumberPrefix = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    [NotifyPropertyChangedFor(nameof(IsQueueNumberPreviewEmpty))]
     private string _tillCountText = QueueNumberOptions.DefaultTillCount.ToString(CultureInfo.InvariantCulture);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    [NotifyPropertyChangedFor(nameof(IsQueueNumberPreviewEmpty))]
     private string _queueNumberMinText = QueueNumberOptions.DefaultMin.ToString(CultureInfo.InvariantCulture);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    [NotifyPropertyChangedFor(nameof(IsQueueNumberPreviewEmpty))]
     private string _queueNumberMaxText = QueueNumberOptions.DefaultMax.ToString(CultureInfo.InvariantCulture);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
     [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    [NotifyPropertyChangedFor(nameof(IsQueueNumberPreviewEmpty))]
     private bool _queueNumberShuffle = QueueNumberOptions.DefaultShuffle;
 
     /// <summary>Первый и последний номер среза этой кассы и их число — по
@@ -383,6 +389,11 @@ public partial class SettingsViewModel : ViewModelBase
     public string QueueNumberPreview => QueueNumberPreviewData is { } p
         ? string.Format(CultureInfo.InvariantCulture, I18nService.Instance["QueueNumberPreview"], p.First, p.Last, p.Count)
         : I18nService.Instance["QueueNumberPreviewEmpty"];
+
+    /// <summary>Пустой срез (или нечитаемое поле) — строка предпросмотра
+    /// красится в красный (SettingsView.axaml, класс TextBlock.empty), а не
+    /// только меняет текст: серую подпись под тремя полями легко не дочитать.</summary>
+    public bool IsQueueNumberPreviewEmpty => QueueNumberPreviewData is null;
 
     /// <summary>Fix 4: причина, по которой сервер очереди этой кассы не поднялся —
     /// занятый порт, пустой секрет. QueueServer.LastError уже нёс её, но экран
