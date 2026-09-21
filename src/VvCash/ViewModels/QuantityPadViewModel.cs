@@ -65,6 +65,19 @@ public partial class QuantityPadViewModel : ObservableObject
     public bool IsUnitMode { get => Mode == PadMode.Unit; set { if (value) Mode = PadMode.Unit; } }
     public bool IsMoneyMode { get => Mode == PadMode.Money; set { if (value) Mode = PadMode.Money; } }
 
+    /// <summary>A sum and a quantity are different kinds of number, so the
+    /// box is emptied on the way into money mode and on the way out. Left
+    /// alone, the seeded "0.5" would read as 0.5 somoni the moment the
+    /// segment is tapped — a derived weight for a figure nobody typed, and
+    /// one hasty Apply away from the cart. Pieces ↔ unit keep the box, as
+    /// they always have: same kind of number, and the card decides which
+    /// one the pad opens in.</summary>
+    partial void OnModeChanged(PadMode oldValue, PadMode newValue)
+    {
+        if (oldValue == PadMode.Money || newValue == PadMode.Money)
+            Input = string.Empty;
+    }
+
     /// <summary>Whether the piece/unit segment is offered at all. A piece-only
     /// product has nothing to switch to.</summary>
     public bool CanSwitchUnit => _item.Product.HasSecondaryUnit;
@@ -152,7 +165,7 @@ public partial class QuantityPadViewModel : ObservableObject
     /// would then rewrite the line. Dividing by 1.000… is decimal's way of
     /// dropping scale without touching value.</summary>
     private static string Seed(decimal value)
-        => (value / 1.000000000000000000000000000000m).ToString(CultureInfo.InvariantCulture);
+        => (value / 1.0000000000000000000000000000m).ToString(CultureInfo.InvariantCulture);
 
     /// <summary>The typed sum expressed against the per-piece price, so that
     /// one division by the line's unit price gives the amount in

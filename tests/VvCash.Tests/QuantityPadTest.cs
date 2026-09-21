@@ -535,4 +535,53 @@ public class QuantityPadTest
         Assert.Equal(1m, item.Quantity);
         Assert.Single(cart.Items);
     }
+
+    [Fact]
+    public void EnteringOrLeavingMoneyMode_EmptiesTheBox()
+    {
+        var pad = PadFor(Nuggets());
+        Assert.Equal("0", pad.Input); // seeded from the line — Quantity 1, QuantityInUnit 0 in PadFor
+
+        pad.Input = "0.5";
+        pad.Mode = PadMode.Money;
+        Assert.Equal(string.Empty, pad.Input);
+
+        pad.Input = "50";
+        pad.Mode = PadMode.Unit;
+        Assert.Equal(string.Empty, pad.Input);
+    }
+
+    [Fact]
+    public void SwitchingBetweenPiecesAndUnit_KeepsTheBox()
+    {
+        var pad = PadFor(Tile(), inUnit: false);
+        pad.Input = "10";
+
+        pad.Mode = PadMode.Unit;
+        Assert.Equal("10", pad.Input);
+
+        pad.Mode = PadMode.Pieces;
+        Assert.Equal("10", pad.Input);
+    }
+
+    [Fact]
+    public void Commit_InPiecesMode_WritesPieces_OnALineOpenedInTheUnit()
+    {
+        // The line came in by the m² (card says so); the cashier flips to
+        // pieces and types 10 — that is the branch the bool→enum refactor
+        // touched most directly.
+        var cart = new CartService(new StubPromotionProvider());
+        cart.AddProduct(Tile(divisible: true));
+        var item = cart.Items[0];
+        Assert.True(item.EnteredInUnit);
+        var pad = new QuantityPadViewModel(item);
+        pad.Mode = PadMode.Pieces;
+        pad.Input = "10";
+
+        pad.Commit(cart);
+
+        Assert.Equal(10m, item.Quantity);
+        Assert.Equal(2.4m, item.QuantityInUnit);
+        Assert.False(item.EnteredInUnit);
+    }
 }
