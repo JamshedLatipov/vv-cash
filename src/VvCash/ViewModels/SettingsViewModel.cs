@@ -530,9 +530,9 @@ public partial class SettingsViewModel : ViewModelBase
         {
             QueueRole = queueSettings.QueueRole;
             QueueServerAddress = queueSettings.QueueServerAddress;
-            QueuePortText = queueSettings.QueuePort.ToString();
+            QueuePortText = queueSettings.QueuePort.ToString(CultureInfo.InvariantCulture);
             QueueSecret = queueSettings.QueueSecret;
-            TillIndexText = queueSettings.TillIndex.ToString();
+            TillIndexText = queueSettings.TillIndex.ToString(CultureInfo.InvariantCulture);
             TillCountText = queueSettings.TillCount.ToString(CultureInfo.InvariantCulture);
             QueueNumberPrefix = queueSettings.QueueNumberPrefix;
             QueueNumberMinText = queueSettings.QueueNumberMin.ToString(CultureInfo.InvariantCulture);
@@ -1038,6 +1038,10 @@ public partial class SettingsViewModel : ViewModelBase
 
         _settingsService.Language = SelectedLanguage;
         I18nService.Instance.Initialize(SelectedLanguage);
+        // Строка предпросмотра собирается из I18nService в момент чтения, и
+        // смену языка ей никто больше не сообщает — без этого она осталась бы
+        // на старом языке до следующей правки любого поля формы номера.
+        OnPropertyChanged(nameof(QueueNumberPreview));
 
         // Как и с категорией платежа ниже: пустой выбор — это не «формат сбросили»,
         // и записывать его поверх настроенной кассы нельзя.
@@ -1073,14 +1077,16 @@ public partial class SettingsViewModel : ViewModelBase
             // SyncIntervalText/CustomerDisplayBaudRateText выше, но без их
             // отката к дефолту: SettingsService.QueuePort уже сам подменяет
             // 0 и отрицательное на DefaultQueuePort (см. его геттер), так
-            // что откатывать здесь ещё раз нечего.
-            if (int.TryParse(QueuePortText, out var queuePort) && queuePort > 0)
+            // что откатывать здесь ещё раз нечего. InvariantCulture — как у
+            // полей формы номера ниже: предпросмотр и Save обязаны читать одну
+            // и ту же строку одинаково, а не по-разному в зависимости от ОС.
+            if (int.TryParse(QueuePortText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var queuePort) && queuePort > 0)
                 queueSettings.QueuePort = queuePort;
             queueSettings.QueueSecret = QueueSecret;
             // Не зажимается здесь — IQueueSettings.TillIndex зажимает сам на
             // чтении (0..TillCount-1), так что записывать можно как
             // распарсилось.
-            if (int.TryParse(TillIndexText, out var tillIndex))
+            if (int.TryParse(TillIndexText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tillIndex))
                 queueSettings.TillIndex = tillIndex;
             // Те же правила, что у TillIndexText: нечитаемое пропускается, не
             // затирает сохранённое; клэмпы — на чтении в SettingsService.

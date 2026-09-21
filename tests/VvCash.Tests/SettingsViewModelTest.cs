@@ -835,12 +835,19 @@ public class SettingsViewModelTest
         vm.TillCountText = "many";
         vm.QueueNumberMinText = "";
         vm.QueueNumberMaxText = "lots";
+        vm.QueueNumberPrefix = "Z";
+        vm.QueueNumberShuffle = false;
 
         vm.SaveCommand.Execute(null);
 
+        // Пропуск — по полю, а не отказ от всего блока: читаемые поля рядом
+        // с нечитаемыми всё равно сохраняются.
+        Assert.Equal(1, settings.SaveCallCount);
         Assert.Equal(4, settings.TillCount);
         Assert.Equal(50, settings.QueueNumberMin);
         Assert.Equal(60, settings.QueueNumberMax);
+        Assert.Equal("Z", settings.QueueNumberPrefix);
+        Assert.False(settings.QueueNumberShuffle);
     }
 
     /// <summary>Предпросмотр считает по тем же клэмпам и той же формуле среза,
