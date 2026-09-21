@@ -84,9 +84,9 @@ public class QueueClient : IQueueClient
     /// QueueFlushLoop unstarted — see App.axaml.cs). Mints its own throwaway order id
     /// purely so NumberPool has something to stamp IssuedFor with (see NumberPool's own
     /// docstring on why that identity matters); nothing outside this call ever learns
-    /// that id, so the number simply sits issued until the pool's cooldown/exhaustion
-    /// branches recycle it — the same degenerate-but-expected fate the design doc
-    /// describes for a kitchen screen that never closes anything.
+    /// that id, so the number simply sits issued until the pool's exhaustion branch
+    /// recycles it — the same degenerate-but-expected fate the design doc describes
+    /// for a kitchen screen that never closes anything.
     ///
     /// Same fail-open swallow as EnqueueAsync's own number step, sharing its
     /// implementation via TryIssueNumberAsync below.</summary>
