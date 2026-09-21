@@ -86,4 +86,21 @@ public interface IQueueSettings
     /// одинаковым индексом начнут выдавать одинаковые номера, поэтому значение
     /// зажимается в диапазон, а не принимается как есть.</summary>
     int TillIndex { get; set; }
+
+    /// <summary>Сколько касс делят диапазон номеров. Заменяет константу
+    /// NumberPool.Tills = 5. Зажимается в 1..9. Точке, где у каждой кассы
+    /// своя буква, ставить 1: буква сама разводит кассы.</summary>
+    int TillCount { get; set; }
+
+    /// <summary>Буква кассы перед числом, до 3 символов, прибавляется как
+    /// есть: «A-» даёт «A-123». Пусто — буквы нет.</summary>
+    string QueueNumberPrefix { get; set; }
+
+    /// <summary>Границы диапазона чисел, включительно. 1..9999, Max ≥ Min.</summary>
+    int QueueNumberMin { get; set; }
+    int QueueNumberMax { get; set; }
+
+    /// <summary>Выключенное перемешивание выдаёт номера по порядку — и
+    /// позволяет посчитать оборот по двум талонам. Осознанный выбор точки.</summary>
+    bool QueueNumberShuffle { get; set; }
 }

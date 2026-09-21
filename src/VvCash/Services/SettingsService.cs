@@ -41,6 +41,11 @@ public class SettingsData
     public int QueuePort { get; set; } = DefaultQueuePort;
     public string QueueSecret { get; set; } = string.Empty;
     public int TillIndex { get; set; }
+    public int TillCount { get; set; } = QueueNumberOptions.DefaultTillCount;
+    public string QueueNumberPrefix { get; set; } = string.Empty;
+    public int QueueNumberMin { get; set; } = QueueNumberOptions.DefaultMin;
+    public int QueueNumberMax { get; set; } = QueueNumberOptions.DefaultMax;
+    public bool QueueNumberShuffle { get; set; } = true;
 }
 
 public class SettingsService : ISettingsService, IQueueSettings
@@ -194,6 +199,36 @@ public class SettingsService : ISettingsService, IQueueSettings
     {
         get => Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
         set => _data.TillIndex = value;
+    }
+
+    public int TillCount
+    {
+        get => _data.TillCount;
+        set => _data.TillCount = value;
+    }
+
+    public string QueueNumberPrefix
+    {
+        get => _data.QueueNumberPrefix;
+        set => _data.QueueNumberPrefix = value ?? string.Empty;
+    }
+
+    public int QueueNumberMin
+    {
+        get => _data.QueueNumberMin;
+        set => _data.QueueNumberMin = value;
+    }
+
+    public int QueueNumberMax
+    {
+        get => _data.QueueNumberMax;
+        set => _data.QueueNumberMax = value;
+    }
+
+    public bool QueueNumberShuffle
+    {
+        get => _data.QueueNumberShuffle;
+        set => _data.QueueNumberShuffle = value;
     }
 
     /// <summary>Creates the service against the standard per-user settings file. Pass

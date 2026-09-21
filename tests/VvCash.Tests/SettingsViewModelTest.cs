@@ -48,6 +48,11 @@ public class SettingsViewModelTest
         public int QueuePort { get; set; } = 8770;
         public string QueueSecret { get; set; } = string.Empty;
         public int TillIndex { get; set; }
+        public int TillCount { get; set; } = 5;
+        public string QueueNumberPrefix { get; set; } = string.Empty;
+        public int QueueNumberMin { get; set; } = 100;
+        public int QueueNumberMax { get; set; } = 999;
+        public bool QueueNumberShuffle { get; set; } = true;
         public int SaveCallCount { get; private set; }
         public event EventHandler? SettingsChanged;
         public void Save()
