@@ -836,7 +836,7 @@
                                 <TextBlock.Text>
                                     <MultiBinding StringFormat="{}{0:F2} / {1}">
                                         <Binding Path="QuantityPad.PriceInSelectedUnit"/>
-                                        <Binding Path="QuantityPad.UnitLabel"/>
+                                        <Binding Path="QuantityPad.PriceUnitLabel"/>
                                     </MultiBinding>
                                 </TextBlock.Text>
                             </TextBlock>
@@ -847,17 +847,21 @@
                         </Button>
                     </Grid>
 
-                    <!-- Mode selector. Hidden entirely for a piece-only product:
-                         there is nothing to switch to, and an inert control
-                         reads as broken. A StackPanel, not a star Grid, so a
-                         hidden segment collapses instead of leaving a gap. -->
+                    <!-- Mode selector. Hidden entirely for a piece-only,
+                         indivisible product: there is nothing to switch to,
+                         and an inert control reads as broken. A StackPanel,
+                         not a star Grid, so a hidden segment collapses
+                         instead of leaving a gap. -->
                     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center"
-                                IsVisible="{Binding QuantityPad.CanSwitchUnit}">
+                                IsVisible="{Binding QuantityPad.HasModeSelector}">
                         <RadioButton Content="шт" Classes="Segmented" Width="130"
                                      IsChecked="{Binding QuantityPad.IsPiecesMode}"/>
                         <RadioButton Content="{Binding QuantityPad.Item.Product.UnitShortName}" Classes="Segmented" Width="130"
                                      IsChecked="{Binding QuantityPad.IsUnitMode}"
                                      IsVisible="{Binding QuantityPad.CanSwitchUnit}"/>
+                        <RadioButton Content="сум" Classes="Segmented" Width="130"
+                                     IsChecked="{Binding QuantityPad.IsMoneyMode}"
+                                     IsVisible="{Binding QuantityPad.CanEnterMoney}"/>
                     </StackPanel>
 
                     <!-- Input display -->
@@ -881,6 +885,10 @@
                                    Foreground="{StaticResource Slate700Brush}"/>
                         <TextBlock IsVisible="{Binding QuantityPad.IsRounded}"
                                    Text="Округлено вверх до целой штуки"
+                                   FontSize="12" HorizontalAlignment="Center"
+                                   Foreground="{StaticResource Red600Brush}"/>
+                        <TextBlock IsVisible="{Binding QuantityPad.IsRoundedDown}"
+                                   Text="Округлено вниз до грамма"
                                    FontSize="12" HorizontalAlignment="Center"
                                    Foreground="{StaticResource Red600Brush}"/>
                     </StackPanel>
