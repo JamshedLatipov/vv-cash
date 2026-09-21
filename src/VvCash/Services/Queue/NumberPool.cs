@@ -1,44 +1,30 @@
 using System;
 using System.Globalization;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 
 namespace VvCash.Services.Queue;
 
-/// <summary>Пул трёхзначных номеров для одной кассы. Два требования заказчика:
-/// номер не должен выдавать оборот (значит — шаффл, не счётчик), и кассы не должны
-/// координироваться по сети (значит — у каждой своя выделенная mod-Tills часть
-/// диапазона). Реализация опирается на то, что в проде у каждой кассы свой файл
-/// БД (см. QueueStorage) — таблица NumberPool в файле этой кассы никогда не
-/// содержит чужих номеров, так что срез не нужно хранить отдельной колонкой.</summary>
+/// <summary>Пул номеров для одной кассы. Два требования заказчика: номер не
+/// должен выдавать оборот (значит — шаффл, не счётчик; по желанию точки —
+/// отключаемый), и кассы не должны координироваться по сети (значит — у каждой
+/// своя выделенная часть диапазона, см. QueueNumberSlice). Форма пула —
+/// диапазон, число касс, перемешивать или нет — приходит из QueueNumberOptions:
+/// снимок берётся на каждой выдаче, а пересборка таблицы привязана к ключу
+/// PoolKey, а не только к дню — см. EnsurePoolAsync. Реализация опирается на
+/// то, что в проде у каждой кассы свой файл БД (см. QueueStorage) — таблица
+/// NumberPool в файле этой кассы никогда не содержит чужих номеров, так что
+/// срез не нужно хранить отдельной колонкой.</summary>
 public class NumberPool : INumberPool
 {
-    /// <summary>Количество касс в торговой точке. Номер принадлежит кассе с
-    /// индексом (Number % Tills). Internal, а не private: SettingsService клэмпит
-    /// TillIndex этим же значением — держать два числа в согласии руками означало
-    /// бы, что при рассинхроне номера просто начинают выдаваться на две кассы
-    /// сразу, без единой ошибки на этот счёт.
-    ///
-    /// Менять на живой точке нельзя: срез на сегодня уже выдан каждой кассе и
-    /// зашит в её NumberPool до конца дня (см. EnsureTodaysPoolAsync), поэтому
-    /// смена этого числа посреди смены сталкивает срезы касс до следующей смены
-    /// дня, а не применяется сразу. Значение не должно становиться настройкой,
-    /// которую можно поменять на бегу.</summary>
-    internal const int Tills = 5;
-
-    private const int FirstNumber = 100;
-    private const int LastNumber = 999;
-
     /// <summary>Сколько выдач должно пройти с момента возврата номера, прежде
     /// чем его можно выдать снова. Не время — количество выдач: так граница не
     /// зависит от того, насколько быстро или медленно идёт смена.</summary>
     internal const int CooldownIssues = 50;
 
     private readonly QueueStorage _storage;
-    private readonly int _tillIndex;
-    private readonly string _secret;
+    private readonly Func<QueueNumberOptions> _options;
     private readonly Func<DateTime> _now;
 
     /// <summary>Сериализует выдачу и возврат друг относительно друга внутри
@@ -51,11 +37,15 @@ public class NumberPool : INumberPool
     /// проходит с устаревшим прочитанным значением.</summary>
     private readonly SemaphoreSlim _semaphore = new(1, 1);
 
-    public NumberPool(QueueStorage storage, int tillIndex, string secret, Func<DateTime> now)
+    /// <summary>options читается на каждой выдаче, а не один раз: экран
+    /// настроек сохраняет форму номера, и следующий талон обязан выйти уже
+    /// в ней — без перезапуска и без ожидания завтра. Снимок берётся один раз
+    /// в начале IssueAsync, под семафором, чтобы PoolKey и срез считались от
+    /// одних и тех же значений.</summary>
+    public NumberPool(QueueStorage storage, Func<QueueNumberOptions> options, Func<DateTime> now)
     {
         _storage = storage;
-        _tillIndex = tillIndex;
-        _secret = secret;
+        _options = options;
         _now = now;
     }
 
@@ -66,10 +56,12 @@ public class NumberPool : INumberPool
         await _semaphore.WaitAsync();
         try
         {
+            var options = _options();
+
             using var connection = new SqliteConnection(_storage.ConnectionString);
             await connection.OpenAsync();
 
-            await EnsureTodaysPoolAsync(connection);
+            await EnsurePoolAsync(connection, options);
 
             using var transaction = connection.BeginTransaction();
 
@@ -77,7 +69,7 @@ public class NumberPool : INumberPool
 
             var number = await SelectNumberToIssueAsync(connection, transaction, seq)
                 ?? throw new InvalidOperationException(
-                    $"NumberPool for till {_tillIndex} has no numbers to issue — the slice is empty.");
+                    $"NumberPool for till {options.TillIndex} has no numbers to issue — the slice is empty.");
 
             using (var update = connection.CreateCommand())
             {
@@ -173,8 +165,8 @@ public class NumberPool : INumberPool
     /// без экрана на кухне встать намертво: там никто ничего не возвращает,
     /// и без неё первые две ветки голодали бы вечно.
     ///
-    /// У третьей ветки есть обратная сторона: если выдать все 180 номеров и
-    /// затем вернуть все 180 (вырожденный случай, а не обычная смена), она
+    /// У третьей ветки есть обратная сторона: если выдать весь срез и
+    /// затем вернуть его целиком (вырожденный случай, а не обычная смена), она
     /// готова тут же выдать номер, отпущенный секунду назад — условие «не
     /// раньше кулдауна» у неё не проверяется вовсе, потому что оно относится
     /// только ко второй ветке. Это не дефект: третья ветка существует ради
@@ -220,7 +212,7 @@ public class NumberPool : INumberPool
     }
 
     /// <summary>0, если строки IssueSeq ещё нет или её не удалось разобрать.
-    /// EnsureTodaysPoolAsync всегда пишет эту строку при заведении дня, так что
+    /// EnsurePoolAsync всегда пишет эту строку при пересборке пула, так что
     /// на практике это откат не срабатывает — но если бы он сработал посреди
     /// дня (строку стёрли или испортили руками), последствия не «начали
     /// заново», а тихая порча кулдауна до конца дня: seq снова пойдёт от
@@ -251,25 +243,49 @@ public class NumberPool : INumberPool
         await command.ExecuteNonQueryAsync();
     }
 
-    /// <summary>Перешаффливает и обнуляет пул при первой выдаче этой кассы в новый
-    /// день. Местное время, как в спецификации: граница дня — это граница смены в
-    /// торговом зале, а не часовой пояс сервера, которого может и не быть на связи.
-    /// Удаление и вставка — в одной транзакции, чтобы падение посреди перешаффла
-    /// не могло оставить таблицу наполовину старой, наполовину новой.</summary>
-    private async Task EnsureTodaysPoolAsync(SqliteConnection connection)
+    /// <summary>Ключ, по которому пул считается «тем же»: день и всё, что
+    /// меняет состав или порядок среза. Prefix не входит — он прибавляется к
+    /// уже выданному числу. Secret не входит — он влияет только на порядок
+    /// при следующей пересборке, а порядок уже лежит в таблице.</summary>
+    internal static string PoolKey(string day, QueueNumberOptions o) => string.Join('|',
+        day,
+        o.Min.ToString(CultureInfo.InvariantCulture),
+        o.Max.ToString(CultureInfo.InvariantCulture),
+        o.Shuffle ? "shuffle" : "sequential",
+        o.TillCount.ToString(CultureInfo.InvariantCulture),
+        o.TillIndex.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>Пересобирает пул, когда сохранённый PoolKey не совпал с
+    /// вычисленным — по смене дня (местное время: граница дня — граница смены
+    /// в зале, а не часовой пояс сервера) или по смене любой из настроек
+    /// формы. Так настройки применяются на следующем талоне. Удаление и
+    /// вставка — в одной транзакции, чтобы падение посреди пересборки не
+    /// могло оставить таблицу наполовину старой, наполовину новой.
+    ///
+    /// Наследие: до этой настройки ключом был Day, и на действующей кассе
+    /// PoolKey нет. Пересобрать просто так нельзя — порядок детерминирован по
+    /// дню, IssueSeq обнулится, и касса заново раздаст утренние номера. Если
+    /// Day — сегодня и настройки совпадают с константами прежнего кода
+    /// (ShapesTheLegacyPool), пул на диске и есть пул от этих настроек:
+    /// записать PoolKey, таблицу не трогать. Иначе — пересобрать. Day после
+    /// этого не пишется и не читается; ветка отмирает на следующий день.</summary>
+    private async Task EnsurePoolAsync(SqliteConnection connection, QueueNumberOptions options)
     {
         var today = _now().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var poolKey = PoolKey(today, options);
 
-        string? storedDay;
-        using (var read = connection.CreateCommand())
+        var storedKey = await ReadStateAsync(connection, "PoolKey");
+        if (storedKey == poolKey) return;
+
+        if (storedKey == null && options.ShapesTheLegacyPool
+            && await ReadStateAsync(connection, "Day") == today)
         {
-            read.CommandText = "SELECT Value FROM QueueState WHERE Key = 'Day'";
-            storedDay = (await read.ExecuteScalarAsync()) as string;
+            await WriteStateAsync(connection, "PoolKey", poolKey);
+            return;
         }
 
-        if (storedDay == today) return;
-
-        var slice = ShuffledSlice(today);
+        var slice = QueueNumberSlice.Ascending(options);
+        if (options.Shuffle) Shuffle(slice, today, options);
 
         using var transaction = connection.BeginTransaction();
 
@@ -302,36 +318,48 @@ public class NumberPool : INumberPool
             state.CommandText = @"
                 INSERT INTO QueueState (Key, Value) VALUES ('IssueSeq', '0')
                     ON CONFLICT(Key) DO UPDATE SET Value = '0';
-                INSERT INTO QueueState (Key, Value) VALUES ('Day', $Day)
+                INSERT INTO QueueState (Key, Value) VALUES ('PoolKey', $PoolKey)
                     ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;
             ";
-            state.Parameters.AddWithValue("$Day", today);
+            state.Parameters.AddWithValue("$PoolKey", poolKey);
             await state.ExecuteNonQueryAsync();
         }
 
         await transaction.CommitAsync();
     }
 
-    /// <summary>Срез этой кассы, перемешанный Фишером — Йетсом на потоке
-    /// QueueShuffleKeystream (день, индекс кассы, общий секрет — см. его
-    /// докстринг о том, почему не System.Random). Детерминированно по дню, так
-    /// что перезапуск посреди дня (TheShuffleIsStableAcrossRestartsWithinADay)
-    /// воспроизводит тот же порядок, а не теряет, что уже роздано; на секрете,
-    /// а не только на дате, чтобы порядок нельзя было предсказать по одному
-    /// талону и дате на нём.</summary>
-    private int[] ShuffledSlice(string day)
+    private static async Task<string?> ReadStateAsync(SqliteConnection connection, string key)
     {
-        var slice = Enumerable.Range(FirstNumber, LastNumber - FirstNumber + 1)
-            .Where(n => n % Tills == _tillIndex)
-            .ToArray();
+        using var read = connection.CreateCommand();
+        read.CommandText = "SELECT Value FROM QueueState WHERE Key = $Key";
+        read.Parameters.AddWithValue("$Key", key);
+        return (await read.ExecuteScalarAsync()) as string;
+    }
 
-        var keystream = new QueueShuffleKeystream(day, _tillIndex, _secret);
+    private static async Task WriteStateAsync(SqliteConnection connection, string key, string value)
+    {
+        using var write = connection.CreateCommand();
+        write.CommandText = @"
+            INSERT INTO QueueState (Key, Value) VALUES ($Key, $Value)
+            ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+        write.Parameters.AddWithValue("$Key", key);
+        write.Parameters.AddWithValue("$Value", value);
+        await write.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Фишер—Йетс на потоке QueueShuffleKeystream (день, индекс
+    /// кассы, общий секрет — см. его докстринг о том, почему не
+    /// System.Random). Детерминированно по дню, так что перезапуск посреди
+    /// дня (TheShuffleIsStableAcrossRestartsWithinADay) воспроизводит тот же
+    /// порядок; на секрете, а не только на дате, чтобы порядок нельзя было
+    /// предсказать по одному талону и дате на нём.</summary>
+    private static void Shuffle(int[] slice, string day, QueueNumberOptions options)
+    {
+        var keystream = new QueueShuffleKeystream(day, options.TillIndex, options.Secret);
         for (var i = slice.Length - 1; i > 0; i--)
         {
             var j = keystream.NextIndex(i + 1);
             (slice[i], slice[j]) = (slice[j], slice[i]);
         }
-
-        return slice;
     }
 }

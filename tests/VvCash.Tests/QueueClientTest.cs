@@ -87,7 +87,7 @@ public class QueueClientTest
     private static (QueueClient Client, FakeTransport Transport, NumberPool Pool) Build(string? db = null)
     {
         var storage = new QueueStorage(db ?? TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new FakeTransport();
         return (new QueueClient(storage, pool, transport, tillIndex: 0, Now), transport, pool);
     }
@@ -294,7 +294,7 @@ public class QueueClientTest
     public async Task AFailureWritingTheBufferStillCompletesTheSale()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
 
         var order = await client.EnqueueAsync(Sale());
@@ -316,7 +316,7 @@ public class QueueClientTest
     public async Task APendingCountReadFailureReturnsZeroInsteadOfThrowing()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
 
         var count = await client.PendingCountAsync();
@@ -496,7 +496,7 @@ public class QueueClientTest
     public async Task EnqueueDoesNotWaitForTheServerRoundTrip()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
         var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
 
@@ -529,7 +529,7 @@ public class QueueClientTest
     public async Task TheOrderIsDurableAndCountedPendingBeforeItsSendEverResolves()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
         var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
 
@@ -559,7 +559,7 @@ public class QueueClientTest
     public async Task AFailedBackgroundSendLeavesTheRowForFlushAsync()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
         var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
 

@@ -251,7 +251,8 @@ public class QueueStorageTest
             // NumberPool built on the same file keeps working: it can issue a fresh
             // number and later release that same number by the order id it issued it
             // to, exercising exactly the column this migration added.
-            var pool = new NumberPool(storage, tillIndex: 0, "secret", () => new DateTime(2026, 8, 31, 10, 0, 0));
+            var pool = new NumberPool(
+                storage, () => QueueNumberOptions.Default(0, "secret"), () => new DateTime(2026, 8, 31, 10, 0, 0));
             var orderId = Guid.NewGuid();
             var number = await pool.IssueAsync(orderId);
             await pool.ReleaseAsync(number, orderId);

@@ -18,7 +18,10 @@ public class NumberPoolTest
         Path.Combine(Path.GetTempPath(), $"vv-queue-{Path.GetRandomFileName()}.db");
 
     private static NumberPool Pool(int tillIndex = 0, string? db = null, Func<DateTime>? now = null)
-        => new(new QueueStorage(db ?? TempDb()), tillIndex, "secret", now ?? (() => new DateTime(2026, 8, 31, 10, 0, 0)));
+        => Pool(() => QueueNumberOptions.Default(tillIndex, "secret"), db, now);
+
+    private static NumberPool Pool(Func<QueueNumberOptions> options, string? db = null, Func<DateTime>? now = null)
+        => new(new QueueStorage(db ?? TempDb()), options, now ?? (() => new DateTime(2026, 8, 31, 10, 0, 0)));
 
     /// <summary>None of the tests in this file release a number for a different order
     /// than the one that issued it, so a fresh Guid per call is all any of them need —
@@ -285,5 +288,151 @@ public class NumberPoolTest
         // Перешаффл: те же номера, но не на тех же местах.
         var samePosition = yesterday.Zip(today, (a, b) => a == b).Count(x => x);
         Assert.InRange(samePosition, 0, 10);
+    }
+
+    /// <summary>Читает строку QueueState напрямую — PoolKey и Day не входят в
+    /// публичный контракт пула, но именно они и есть предмет тестов усыновления
+    /// ниже.</summary>
+    private static async Task<string?> StateAsync(string db, string key)
+    {
+        using var connection = new SqliteConnection($"Data Source={db}");
+        await connection.OpenAsync();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT Value FROM QueueState WHERE Key = $k";
+        cmd.Parameters.AddWithValue("$k", key);
+        return await cmd.ExecuteScalarAsync() as string;
+    }
+
+    [Fact]
+    public async Task ASequentialPoolIssuesItsBlockInOrder()
+    {
+        var pool = Pool(() => new QueueNumberOptions(1, 2, 1, 99, false, "", "secret"));
+
+        var issued = new List<int>();
+        for (var i = 0; i < 49; i++) issued.Add(await Issue(pool));
+
+        Assert.Equal(Enumerable.Range(51, 49).ToArray(), issued);
+    }
+
+    [Fact]
+    public async Task ASingleTillDrawsFromTheWholeRange()
+    {
+        var pool = Pool(() => new QueueNumberOptions(0, 1, 1, 30, true, "", "secret"));
+
+        var issued = new List<int>();
+        for (var i = 0; i < 30; i++) issued.Add(await Issue(pool));
+
+        Assert.Equal(Enumerable.Range(1, 30), issued.OrderBy(n => n));
+    }
+
+    [Fact]
+    public async Task ChangingTheRangeMidDayRebuildsThePoolOnTheNextIssue()
+    {
+        var db = TempDb();
+        var options = QueueNumberOptions.Default(0, "secret");
+        var pool = Pool(() => options, db);
+
+        var before = await Issue(pool);
+        Assert.InRange(before, 100, 999);
+
+        options = options with { Min = 1, Max = 30 };
+        var after = await Issue(pool);
+
+        Assert.InRange(after, 1, 30);
+    }
+
+    [Fact]
+    public async Task TheSameOptionsAgainDoNotRebuildThePool()
+    {
+        var db = TempDb();
+        var pool = Pool(() => QueueNumberOptions.Default(0, "secret"), db);
+
+        var first = await Issue(pool);
+        var second = await Issue(pool);
+        // Новый экземпляр над тем же файлом — перезапуск кассы.
+        var restarted = Pool(() => QueueNumberOptions.Default(0, "secret"), db);
+        var third = await Issue(restarted);
+
+        Assert.Equal(3, new[] { first, second, third }.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ChangingTheTillIndexMidDayRebuildsThePool()
+    {
+        var db = TempDb();
+        var options = QueueNumberOptions.Default(0, "secret");
+        var pool = Pool(() => options, db);
+
+        Assert.Equal(0, await Issue(pool) % 5);
+
+        options = options with { TillIndex = 3 };
+
+        Assert.Equal(3, await Issue(pool) % 5);
+    }
+
+    /// <summary>База, которую этот код застаёт на действующей кассе: ключ Day,
+    /// ключа PoolKey нет, три номера уже роздано с утра. Пересобрать нельзя —
+    /// порядок детерминирован по дню, IssueSeq обнулится, и те же три номера
+    /// уйдут второму клиенту. Пул усыновляется: продолжает с четвёртого.</summary>
+    [Fact]
+    public async Task ALegacyPoolFromTodayIsAdoptedNotRebuilt()
+    {
+        var db = TempDb();
+        var day = new DateTime(2026, 9, 22, 10, 0, 0);
+        var legacy = Pool(() => QueueNumberOptions.Default(0, "secret"), db, () => day);
+
+        var morning = new List<int>();
+        for (var i = 0; i < 3; i++) morning.Add(await Issue(legacy));
+
+        // Превращаем базу в «старую»: PoolKey стираем, Day пишем, как писал прежний код.
+        using (var connection = new SqliteConnection($"Data Source={db}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                DELETE FROM QueueState WHERE Key = 'PoolKey';
+                INSERT INTO QueueState (Key, Value) VALUES ('Day', '2026-09-22')
+                    ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var updated = Pool(() => QueueNumberOptions.Default(0, "secret"), db, () => day);
+        var fourth = await Issue(updated);
+
+        Assert.DoesNotContain(fourth, morning);
+        Assert.NotNull(await StateAsync(db, "PoolKey"));
+        Assert.Equal("2026-09-22", await StateAsync(db, "Day"));
+    }
+
+    [Fact]
+    public async Task ALegacyPoolIsRebuiltWhenTheSettingsAlreadyDiffer()
+    {
+        var db = TempDb();
+        var day = new DateTime(2026, 9, 22, 10, 0, 0);
+        var legacy = Pool(() => QueueNumberOptions.Default(0, "secret"), db, () => day);
+        await Issue(legacy);
+
+        using (var connection = new SqliteConnection($"Data Source={db}"))
+        {
+            await connection.OpenAsync();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = @"
+                DELETE FROM QueueState WHERE Key = 'PoolKey';
+                INSERT INTO QueueState (Key, Value) VALUES ('Day', '2026-09-22')
+                    ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        var narrowed = Pool(() => QueueNumberOptions.Default(0, "secret") with { Max = 500 }, db, () => day);
+
+        Assert.InRange(await Issue(narrowed), 100, 500);
+    }
+
+    [Fact]
+    public async Task AnEmptySliceThrowsRatherThanIssuingSomeoneElsesNumber()
+    {
+        var pool = Pool(() => new QueueNumberOptions(4, 5, 1, 3, true, "", "secret"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Issue(pool));
     }
 }
