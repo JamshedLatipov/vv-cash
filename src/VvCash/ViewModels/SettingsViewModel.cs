@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -307,13 +308,81 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>Номер этой кассы в пуле номеров очереди (см.
     /// IQueueSettings.TillIndex) — строкой по той же причине, что и
     /// QueuePortText выше. Виден на экране ВСЕГДА, а не только у клиента:
-    /// сервер тоже продаёт и тоже выдаёт номера из своего диапазона (класс
-    /// вычетов Number % NumberPool.Tills). Две кассы с одинаковым номером
-    /// начнут выдавать покупателям одинаковые номера — по этой же причине
-    /// IQueueSettings.TillIndex зажимает его в 0..NumberPool.Tills-1, а не
-    /// принимает как есть.</summary>
+    /// сервер тоже продаёт и тоже выдаёт номера из своего среза. Две кассы
+    /// с одинаковым номером начнут выдавать покупателям одинаковые номера —
+    /// по этой же причине IQueueSettings.TillIndex зажимает его в
+    /// 0..TillCount-1, а не принимает как есть.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
     private string _tillIndexText = "0";
+
+    /// <summary>Форма номера талона (см. IQueueSettings): буква кассы, число
+    /// касс, диапазон, перемешивание. Каждое поле пересчитывает предпросмотр
+    /// ниже — это единственное место, где опечатка в диапазоне видна до того,
+    /// как талон не напечатался.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    private string _queueNumberPrefix = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    private string _tillCountText = QueueNumberOptions.DefaultTillCount.ToString(CultureInfo.InvariantCulture);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    private string _queueNumberMinText = QueueNumberOptions.DefaultMin.ToString(CultureInfo.InvariantCulture);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    private string _queueNumberMaxText = QueueNumberOptions.DefaultMax.ToString(CultureInfo.InvariantCulture);
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreviewData))]
+    [NotifyPropertyChangedFor(nameof(QueueNumberPreview))]
+    private bool _queueNumberShuffle = QueueNumberOptions.DefaultShuffle;
+
+    /// <summary>Первый и последний номер среза этой кассы и их число — по
+    /// введённым значениям, через те же клэмпы и ту же формулу, что и пул
+    /// (QueueNumberOptions, QueueNumberSlice). Null — срез пуст или поле не
+    /// читается как число. Отдельно от строки QueueNumberPreview, чтобы
+    /// проверять структуру, а не локализованный текст.</summary>
+    public (string First, string Last, int Count)? QueueNumberPreviewData
+    {
+        get
+        {
+            if (!int.TryParse(TillCountText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tillCountRaw)
+                || !int.TryParse(TillIndexText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tillIndexRaw)
+                || !int.TryParse(QueueNumberMinText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var minRaw)
+                || !int.TryParse(QueueNumberMaxText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var maxRaw))
+            {
+                return null;
+            }
+
+            var tillCount = QueueNumberOptions.ClampTillCount(tillCountRaw);
+            var min = QueueNumberOptions.ClampMin(minRaw);
+            var options = new QueueNumberOptions(
+                QueueNumberOptions.ClampTillIndex(tillIndexRaw, tillCount),
+                tillCount,
+                min,
+                QueueNumberOptions.ClampMax(maxRaw, min),
+                QueueNumberShuffle,
+                QueueNumberOptions.NormalizePrefix(QueueNumberPrefix),
+                string.Empty);
+            return QueueNumberSlice.Summarize(options);
+        }
+    }
+
+    /// <summary>Локализованная строка предпросмотра для экрана. Ключи
+    /// QueueNumberPreview ({0} первый, {1} последний, {2} число) и
+    /// QueueNumberPreviewEmpty — в Assets/i18n.</summary>
+    public string QueueNumberPreview => QueueNumberPreviewData is { } p
+        ? string.Format(CultureInfo.InvariantCulture, I18nService.Instance["QueueNumberPreview"], p.First, p.Last, p.Count)
+        : I18nService.Instance["QueueNumberPreviewEmpty"];
 
     /// <summary>Fix 4: причина, по которой сервер очереди этой кассы не поднялся —
     /// занятый порт, пустой секрет. QueueServer.LastError уже нёс её, но экран
@@ -464,6 +533,11 @@ public partial class SettingsViewModel : ViewModelBase
             QueuePortText = queueSettings.QueuePort.ToString();
             QueueSecret = queueSettings.QueueSecret;
             TillIndexText = queueSettings.TillIndex.ToString();
+            TillCountText = queueSettings.TillCount.ToString(CultureInfo.InvariantCulture);
+            QueueNumberPrefix = queueSettings.QueueNumberPrefix;
+            QueueNumberMinText = queueSettings.QueueNumberMin.ToString(CultureInfo.InvariantCulture);
+            QueueNumberMaxText = queueSettings.QueueNumberMax.ToString(CultureInfo.InvariantCulture);
+            QueueNumberShuffle = queueSettings.QueueNumberShuffle;
 
             QueueServerError = queueServerError ?? string.Empty;
 
@@ -1004,10 +1078,20 @@ public partial class SettingsViewModel : ViewModelBase
                 queueSettings.QueuePort = queuePort;
             queueSettings.QueueSecret = QueueSecret;
             // Не зажимается здесь — IQueueSettings.TillIndex зажимает сам на
-            // чтении (0..NumberPool.Tills-1), так что записывать можно как
+            // чтении (0..TillCount-1), так что записывать можно как
             // распарсилось.
             if (int.TryParse(TillIndexText, out var tillIndex))
                 queueSettings.TillIndex = tillIndex;
+            // Те же правила, что у TillIndexText: нечитаемое пропускается, не
+            // затирает сохранённое; клэмпы — на чтении в SettingsService.
+            if (int.TryParse(TillCountText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tillCount))
+                queueSettings.TillCount = tillCount;
+            queueSettings.QueueNumberPrefix = QueueNumberPrefix;
+            if (int.TryParse(QueueNumberMinText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var queueNumberMin))
+                queueSettings.QueueNumberMin = queueNumberMin;
+            if (int.TryParse(QueueNumberMaxText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var queueNumberMax))
+                queueSettings.QueueNumberMax = queueNumberMax;
+            queueSettings.QueueNumberShuffle = QueueNumberShuffle;
         }
 
         // Only when the list actually loaded: an offline settings visit shows an empty

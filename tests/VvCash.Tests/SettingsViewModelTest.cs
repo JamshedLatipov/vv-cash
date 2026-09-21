@@ -784,6 +784,120 @@ public class SettingsViewModelTest
         Assert.Equal(4, settings.TillIndex);
     }
 
+    [Fact]
+    public void Constructor_LoadsTheNumberShapeFromTheService()
+    {
+        var settings = new FakeSettings
+        {
+            TillCount = 2,
+            QueueNumberPrefix = "A-",
+            QueueNumberMin = 1,
+            QueueNumberMax = 99,
+            QueueNumberShuffle = false
+        };
+
+        var vm = BuildWith(settings);
+
+        Assert.Equal("2", vm.TillCountText);
+        Assert.Equal("A-", vm.QueueNumberPrefix);
+        Assert.Equal("1", vm.QueueNumberMinText);
+        Assert.Equal("99", vm.QueueNumberMaxText);
+        Assert.False(vm.QueueNumberShuffle);
+    }
+
+    [Fact]
+    public void Save_WritesTheNumberShapeBackToTheService()
+    {
+        var vm = Build(out var settings);
+        vm.BackendUrl = "https://api.example.test/v1/";
+        vm.TillCountText = "3";
+        vm.QueueNumberPrefix = "B-";
+        vm.QueueNumberMinText = "10";
+        vm.QueueNumberMaxText = "500";
+        vm.QueueNumberShuffle = false;
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal(1, settings.SaveCallCount);
+        Assert.Equal(3, settings.TillCount);
+        Assert.Equal("B-", settings.QueueNumberPrefix);
+        Assert.Equal(10, settings.QueueNumberMin);
+        Assert.Equal(500, settings.QueueNumberMax);
+        Assert.False(settings.QueueNumberShuffle);
+    }
+
+    [Fact]
+    public void Save_SkipsUnreadableNumberFieldsRatherThanOverwriting()
+    {
+        var settings = new FakeSettings { TillCount = 4, QueueNumberMin = 50, QueueNumberMax = 60 };
+        var vm = BuildWith(settings);
+        vm.BackendUrl = "https://api.example.test/v1/";
+        vm.TillCountText = "many";
+        vm.QueueNumberMinText = "";
+        vm.QueueNumberMaxText = "lots";
+
+        vm.SaveCommand.Execute(null);
+
+        Assert.Equal(4, settings.TillCount);
+        Assert.Equal(50, settings.QueueNumberMin);
+        Assert.Equal(60, settings.QueueNumberMax);
+    }
+
+    /// <summary>Предпросмотр считает по тем же клэмпам и той же формуле среза,
+    /// что и пул (QueueNumberOptions / QueueNumberSlice), — иначе экран однажды
+    /// покажет одно, а талон напечатает другое. Проверяется структурная
+    /// сводка, не локализованная строка: I18nService в тестах не
+    /// инициализирован и отдаёт «[ключ]».</summary>
+    [Fact]
+    public void QueueNumberPreview_FollowsTheEnteredShape()
+    {
+        var vm = Build(out _);
+        vm.QueueNumberPrefix = "A-";
+        vm.TillCountText = "2";
+        vm.TillIndexText = "1";
+        vm.QueueNumberMinText = "1";
+        vm.QueueNumberMaxText = "99";
+        vm.QueueNumberShuffle = false;
+
+        var preview = vm.QueueNumberPreviewData;
+
+        Assert.NotNull(preview);
+        Assert.Equal("A-51", preview!.Value.First);
+        Assert.Equal("A-99", preview.Value.Last);
+        Assert.Equal(49, preview.Value.Count);
+    }
+
+    [Fact]
+    public void QueueNumberPreview_IsNullForAnEmptySliceOrUnreadableInput()
+    {
+        var vm = Build(out _);
+        vm.TillCountText = "5";
+        vm.TillIndexText = "4";
+        vm.QueueNumberMinText = "1";
+        vm.QueueNumberMaxText = "3";
+        Assert.Null(vm.QueueNumberPreviewData);
+
+        vm.QueueNumberMaxText = "not a number";
+        Assert.Null(vm.QueueNumberPreviewData);
+    }
+
+    [Fact]
+    public void QueueNumberPreview_RaisesPropertyChangedWhenAnyShapeFieldChanges()
+    {
+        var vm = Build(out _);
+        var raised = 0;
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.QueueNumberPreview)) raised++; };
+
+        vm.QueueNumberPrefix = "A";
+        vm.TillCountText = "2";
+        vm.TillIndexText = "1";
+        vm.QueueNumberMinText = "1";
+        vm.QueueNumberMaxText = "50";
+        vm.QueueNumberShuffle = false;
+
+        Assert.Equal(6, raised);
+    }
+
     [Theory]
     [InlineData(QueueRole.Off, false, false)]
     [InlineData(QueueRole.Server, true, false)]
