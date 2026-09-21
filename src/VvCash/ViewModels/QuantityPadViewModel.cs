@@ -133,13 +133,25 @@ public partial class QuantityPadViewModel : ObservableObject
 
             // Floor, not round: the customer named the sum, so the line must
             // not come out above it. 50 / 30 → 1.666 kg → 49.98.
-            var amount = FloorToWeight(typed.Value / PriceInSelectedUnit);
+            //
+            // One division, not two. PriceInSelectedUnit is itself a rounded
+            // quotient (10 / 0.6 = 16.666…67), and dividing by it again puts
+            // 50 × 0.6 / 10 = 3 at 2.999…, which the floor then cuts to 2.999.
+            var amount = FloorToWeight(ScaledSum(typed.Value) / _item.UnitPrice);
             return amount > 0m ? amount : null;
         }
     }
 
     private static decimal FloorToWeight(decimal value)
         => decimal.Truncate(value / WeightStep) * WeightStep;
+
+    /// <summary>The typed sum expressed against the per-piece price, so that
+    /// one division by the line's unit price gives the amount in
+    /// <see cref="PriceUnitLabel"/>'s unit: 50 somoni of 0.5 kg packs at 15
+    /// → 25 → 1.666 kg. An exact product, so that division is the only
+    /// rounding step.</summary>
+    private decimal ScaledSum(decimal money)
+        => DerivesInUnit ? money * _item.Product.UnitFactor : money;
 
     /// <summary>Whether the current input can be committed. Rejects an empty or
     /// unparseable box, a non-positive amount, and a fractional piece count on
@@ -184,7 +196,9 @@ public partial class QuantityPadViewModel : ObservableObject
 
     /// <summary>Whether the entered amount was rounded up to a whole piece.
     /// Drives the callout in the pad, because this is the case where the
-    /// customer pays for more than they asked for.</summary>
+    /// customer pays for more than they asked for. Always false in money
+    /// mode: a divisible product never rounds up, and the cut the other way
+    /// has its own flag, <see cref="IsRoundedDown"/>.</summary>
     public bool IsRounded
     {
         get
@@ -203,14 +217,22 @@ public partial class QuantityPadViewModel : ObservableObject
     {
         get
         {
-            if (Mode != PadMode.Money || Amount is null) return false;
-            return PreviewTotal < Parsed!.Value;
+            var amount = Amount;
+            if (Mode != PadMode.Money || amount is null) return false;
+            // On the weight, not on PreviewTotal: that goes through the
+            // six-decimal piece count, which lands 1.000 kg of 0.3 kg packs
+            // at 9.999999 and flags a cut that never happened. Both sides
+            // here are exact products.
+            return amount.Value * _item.UnitPrice < ScaledSum(Parsed!.Value);
         }
     }
 
     public string PreviewText => _item.Product.HasSecondaryUnit
-        ? $"→ {PreviewQuantity} шт = {PreviewQuantityInUnit} {_item.Product.UnitShortName} · {PreviewTotal:F2}"
-        : $"→ {PreviewQuantity} шт · {PreviewTotal:F2}";
+        ? $"→ {PreviewQuantity.ToString(CultureInfo.InvariantCulture)} шт = " +
+          $"{PreviewQuantityInUnit.ToString(CultureInfo.InvariantCulture)} {_item.Product.UnitShortName} · " +
+          $"{PreviewTotal.ToString("F2", CultureInfo.InvariantCulture)}"
+        : $"→ {PreviewQuantity.ToString(CultureInfo.InvariantCulture)} шт · " +
+          $"{PreviewTotal.ToString("F2", CultureInfo.InvariantCulture)}";
 
     public void Append(string digit) => Input += digit;
 

@@ -61,8 +61,13 @@
 
 | Товар | Формула | Коммит |
 |---|---|---|
-| есть вторая единица (`HasSecondaryUnit`) | `amountInUnit = floor3(money / PriceInUnit)`, где `PriceInUnit = UnitPrice / UnitFactor` | `cart.SetQuantityInUnit(item, amountInUnit)`, `item.EnteredInUnit = true` |
+| есть вторая единица (`HasSecondaryUnit`) | `amountInUnit = floor3(money × UnitFactor / UnitPrice)` | `cart.SetQuantityInUnit(item, amountInUnit)`, `item.EnteredInUnit = true` |
 | нет | `quantity = floor3(money / UnitPrice)` | `cart.SetQuantity(item, quantity)`, `item.EnteredInUnit = false` |
+
+Одно деление, а не два: `PriceInUnit = UnitPrice / UnitFactor` — уже округлённое
+частное (`10 / 0.6 = 16.666…67`), и повторное деление на него сажает
+`50 × 0.6 / 10 = 3` на `2.999…`, что пол срезает до `2.999`. Умножение
+`money × UnitFactor` точное, так что единственное округление — само деление.
 
 Покупатель, просящий «на 50 сомони», думает в килограммах, а не в упаковках — поэтому
 для товара со второй единицей выводим в ней, независимо от `SellInSecondaryUnit`.
@@ -104,7 +109,7 @@ public enum PadMode { Pieces, Unit, Money }
 | `PreviewTotal` | `PreviewQuantity × UnitPrice` | без изменений — итог считается от штук, как в корзине |
 | `PreviewText` | есть | без изменений формата: `→ 3.332 шт = 1.666 кг · 49.98` |
 | `IsRounded` | округление вверх в `Unit` | без изменений; в `Money` всегда `false` |
-| `IsRoundedDown` | — | `Mode == Money && PreviewTotal < money` → подпись «Округлено вниз до грамма» |
+| `IsRoundedDown` | — | `Mode == Money && amount × UnitPrice < money × factor` (точные произведения, не через `PreviewTotal` — тот идёт через 6-значные штуки) → подпись «Округлено вниз до грамма» |
 | `Commit` | ветка по `EnteredInUnit` | третья ветка по таблице выше |
 
 Конвертация `money → количество` — один приватный статический метод, чтобы превью и

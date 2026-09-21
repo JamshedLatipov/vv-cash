@@ -328,4 +328,79 @@ public class QuantityPadTest
 
         Assert.False(pad.IsRoundedDown);
     }
+
+    [Fact]
+    public void MoneyMode_DoesNotLoseAGram_WhenThePricePerUnitDoesNotTerminate()
+    {
+        // 10 per 0.6 kg pack is 16.666…67 per kg once rounded; dividing by
+        // that rounded figure again would land 50 × 0.6 / 10 = 3 at 2.999.
+        var pack = Nuggets();
+        pack.Price = 10m;
+        pack.UnitFactor = 0.6m;
+        var pad = PadFor(pack);
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "50";
+
+        Assert.Equal(3m, pad.PreviewQuantityInUnit);
+        Assert.Equal(50m, pad.PreviewTotal);
+        Assert.False(pad.IsRoundedDown);
+    }
+
+    [Fact]
+    public void IsRoundedDown_IgnoresTheSixDecimalPieceRounding()
+    {
+        // 10 somoni of 0.3 kg packs at 3 is exactly 1 kg, but 1 / 0.3 pieces
+        // is 3.333333 and multiplies back to 9.999999.
+        var pack = Nuggets();
+        pack.Price = 3m;
+        pack.UnitFactor = 0.3m;
+        var pad = PadFor(pack);
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "10";
+
+        Assert.Equal(1m, pad.PreviewQuantityInUnit);
+        Assert.False(pad.IsRoundedDown);
+    }
+
+    [Fact]
+    public void MoneyMode_IsInvalid_WhenForcedOnAProductThatCannotTakeIt()
+    {
+        // The segment is hidden for these, but a forced Mode must not throw
+        // or resolve to a quantity.
+        var tile = PadFor(Tile(divisible: false));
+        tile.Mode = PadMode.Money;
+        tile.Input = "50";
+        Assert.False(tile.IsValid);
+        Assert.Equal(0m, tile.PreviewQuantity);
+
+        var free = LooseCandy();
+        free.Price = 0m;
+        var freePad = PadFor(free, inUnit: false);
+        freePad.Mode = PadMode.Money;
+        freePad.Input = "50";
+        Assert.False(freePad.IsValid);
+        Assert.Equal(0m, freePad.PreviewQuantity);
+    }
+
+    [Fact]
+    public void PreviewText_InMoneyMode_ReadsTheDerivedWeightAndTotal()
+    {
+        var pad = PadFor(Nuggets());
+        pad.Mode = PadMode.Money;
+
+        pad.Input = "50";
+
+        Assert.Equal("→ 3.332 шт = 1.666 кг · 49.98", pad.PreviewText);
+    }
+
+    [Fact]
+    public void IsRoundedDown_NotifiesOnInputAndModeChanges()
+    {
+        var pad = PadFor(Nuggets(), inUnit: false);
+
+        Assert.PropertyChanged(pad, nameof(pad.IsRoundedDown), () => pad.Mode = PadMode.Money);
+        Assert.PropertyChanged(pad, nameof(pad.IsRoundedDown), () => pad.Input = "50");
+    }
 }

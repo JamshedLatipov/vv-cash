@@ -589,6 +589,8 @@ The preview flags the cut the same way it flags a round-up on tiles.
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
+**Post-review fix (Task 3):** the formula divides once — `FloorToWeight(ScaledSum(money) / UnitPrice)` with `ScaledSum = money × UnitFactor` when deriving in the unit — because dividing by the already-rounded `PriceInSelectedUnit` lost a gram on non-terminating prices; and `IsRoundedDown` compares `amount × UnitPrice < ScaledSum(money)` instead of `PreviewTotal < money`. See the regression tests `MoneyMode_DoesNotLoseAGram_…` and `IsRoundedDown_IgnoresTheSixDecimalPieceRounding`.
+
 ---
 
 ### Task 4: Commit the derived amount into the cart
