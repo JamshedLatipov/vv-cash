@@ -877,20 +877,36 @@
 
                     <!-- Live preview. The whole reason this modal exists: on an
                          indivisible product the amount rounds up to a whole piece,
-                         and the customer pays for the round-up. -->
+                         and the customer pays for the round-up. In money mode the
+                         same goes the other way: the sum is cut down to a whole
+                         0.001, and the cashier sees what it bills before Apply. -->
                     <StackPanel Spacing="4">
                         <TextBlock Text="{Binding QuantityPad.PreviewText}"
                                    FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
                                    HorizontalAlignment="Center" TextAlignment="Center"
                                    Foreground="{StaticResource Slate700Brush}"/>
-                        <TextBlock IsVisible="{Binding QuantityPad.IsRounded}"
-                                   Text="Округлено вверх до целой штуки"
-                                   FontSize="12" HorizontalAlignment="Center"
-                                   Foreground="{StaticResource Red600Brush}"/>
-                        <TextBlock IsVisible="{Binding QuantityPad.IsRoundedDown}"
-                                   Text="Округлено вниз до грамма"
-                                   FontSize="12" HorizontalAlignment="Center"
-                                   Foreground="{StaticResource Red600Brush}"/>
+                        <!-- Fixed height so a caption coming and going does not
+                             move the numpad under the cashier's finger. The two
+                             are mutually exclusive (unit mode vs money mode), so
+                             overlaying them is safe. -->
+                        <Panel Height="16">
+                            <TextBlock IsVisible="{Binding QuantityPad.IsRounded}"
+                                       Text="Округлено вверх до целой штуки"
+                                       FontSize="12" HorizontalAlignment="Center"
+                                       Foreground="{StaticResource Red600Brush}"/>
+                            <!-- Names the unit, not "gram": money mode is offered
+                                 to any divisible product, and 1.666 шт or 0.5 м²
+                                 is cut to the same 0.001 step. -->
+                            <TextBlock IsVisible="{Binding QuantityPad.IsRoundedDown}"
+                                       FontSize="12" HorizontalAlignment="Center"
+                                       Foreground="{StaticResource Red600Brush}">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="Округлено вниз до 0.001 {0}">
+                                        <Binding Path="QuantityPad.PriceUnitLabel"/>
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </Panel>
                     </StackPanel>
 
                     <!-- Numpad -->
