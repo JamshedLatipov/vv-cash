@@ -10,6 +10,8 @@
 
 **Спека:** [`docs/superpowers/specs/2026-09-22-configurable-queue-numbers-design.md`](../specs/2026-09-22-configurable-queue-numbers-design.md)
 
+**Статус:** выполнено 2026-09-22, ветка feat/queue-number-format, 1337/1337 тестов зелёные.
+
 ---
 
 ## Как запускать тесты
@@ -48,7 +50,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 | **Создать** `tests/VvCash.Tests/QueueNumberSliceTest.cs` | Формулы среза |
 | Изменить `src/VvCash/Services/Queue/IQueueSettings.cs` | +5 свойств |
 | Изменить `src/VvCash/Services/SettingsService.cs` | `SettingsData` +5 полей, геттеры с клэмпами, `Load()` |
-| Изменить `src/VvCash/Services/Queue/NumberPool.cs` | Ctor на `Func<QueueNumberOptions>`, `PoolKey`, усыновление `Day`, ветки 3а/3б |
+| Изменить `src/VvCash/Services/Queue/NumberPool.cs` | Ctor на `Func<QueueNumberOptions>`, `PoolKey`, усыновление `Day`, исчерпание: свежий → свободный → живой, кулдаун удалён (см. Task 5) |
 | Изменить `src/VvCash/Models/QueueOrder.cs` | `Prefix`, `Label`, `FormatLabel` |
 | Изменить `src/VvCash/Services/Queue/QueueStorage.cs` | Колонка `Prefix` |
 | Изменить `src/VvCash/Services/Queue/IQueueClient.cs`, `QueueClient.cs` | `IssueNumberAsync → string?`, ctor на `Func<QueueNumberOptions>`, `Prefix` на заказе |
@@ -68,7 +70,7 @@ dotnet build src/VvCash/VvCash.csproj -o build/verify
 - Create: `src/VvCash/Services/Queue/QueueNumberOptions.cs`
 - Create: `tests/VvCash.Tests/QueueNumberOptionsTest.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 // tests/VvCash.Tests/QueueNumberOptionsTest.cs
@@ -168,12 +170,12 @@ public class QueueNumberOptionsTest
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueNumberOptionsTest"`
 Expected: сборка тестов падает — `QueueNumberOptions` не существует.
 
-- [ ] **Step 3: Write the record**
+- [x] **Step 3: Write the record**
 
 ```csharp
 // src/VvCash/Services/Queue/QueueNumberOptions.cs
@@ -332,12 +334,12 @@ public sealed record QueueNumberOptions(
 `tests/VvCash.Tests/QueueServerHostTest.cs` (класс `FakeSettings`),
 `tests/VvCash.Tests/SettingsViewModelTest.cs` (класс `FakeSettings`).
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueNumberOptionsTest"`
 Expected: все зелёные.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/VvCash/Services/Queue/QueueNumberOptions.cs src/VvCash/Services/Queue/IQueueSettings.cs src/VvCash/Services/SettingsService.cs tests/VvCash.Tests/QueueNumberOptionsTest.cs tests/VvCash.Tests/PosViewModelSellerGateTest.cs tests/VvCash.Tests/QueueServerHostTest.cs tests/VvCash.Tests/SettingsViewModelTest.cs
@@ -352,7 +354,7 @@ git commit -m "feat(queue): snapshot the number-format settings as QueueNumberOp
 - Create: `src/VvCash/Services/Queue/QueueNumberSlice.cs`
 - Create: `tests/VvCash.Tests/QueueNumberSliceTest.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```csharp
 // tests/VvCash.Tests/QueueNumberSliceTest.cs
@@ -449,12 +451,12 @@ public class QueueNumberSliceTest
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueNumberSliceTest"`
 Expected: сборка падает — `QueueNumberSlice` не существует.
 
-- [ ] **Step 3: Write the slice**
+- [x] **Step 3: Write the slice**
 
 ```csharp
 // src/VvCash/Services/Queue/QueueNumberSlice.cs
@@ -525,12 +527,12 @@ public static class QueueNumberSlice
 
 и `using System.Globalization;` в начало файла.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueNumberSliceTest"`
 Expected: все зелёные.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/VvCash/Services/Queue/QueueNumberSlice.cs src/VvCash/Models/QueueOrder.cs tests/VvCash.Tests/QueueNumberSliceTest.cs
@@ -545,7 +547,7 @@ git commit -m "feat(queue): one slice formula for the pool and the settings prev
 - Modify: `src/VvCash/Services/SettingsService.cs`
 - Modify: `tests/VvCash.Tests/QueueSettingsTest.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Добавить в `QueueSettingsTest` (после `TillIndexIsClampedIntoTheSlice`):
 
@@ -609,12 +611,12 @@ git commit -m "feat(queue): one slice formula for the pool and the settings prev
     }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueSettingsTest"`
 Expected: `TheRangeIsClampedAndMaxNeverFallsBelowMin`, `TillCountIsClampedToOneThroughNine`, `TillIndexIsClampedByTheConfiguredTillCount`, `ThePrefixIsTrimmedAndCut` красные (нет клэмпов); `AnUntouchedRegisterKeepsTheShippedNumberShape` зелёный уже после Task 1.
 
-- [ ] **Step 3: Replace the getters with clamping ones**
+- [x] **Step 3: Replace the getters with clamping ones**
 
 В `SettingsService` заменить `TillIndex` и пять минимальных свойств из Task 1:
 
@@ -678,12 +680,12 @@ Expected: `TheRangeIsClampedAndMaxNeverFallsBelowMin`, `TillCountIsClampedToOneT
 `NumberPool.Tills` после этого нигде в `SettingsService` не упоминается —
 сама константа уходит в Task 4.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueSettingsTest"`
 Expected: все зелёные, включая прежний `TillIndexIsClampedIntoTheSlice` (9 → 4 при TillCount 5).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/VvCash/Services/SettingsService.cs tests/VvCash.Tests/QueueSettingsTest.cs
@@ -700,7 +702,7 @@ git commit -m "feat(settings): clamp the queue number shape on read"
 - Modify: `tests/VvCash.Tests/NumberPoolTest.cs`
 - Modify: `tests/VvCash.Tests/QueueClientTest.cs` (6 конструкторов `NumberPool`)
 
-- [ ] **Step 1: Update the test helper and the 8 constructions so the file compiles against the new ctor**
+- [x] **Step 1: Update the test helper and the 8 constructions so the file compiles against the new ctor**
 
 В `NumberPoolTest`:
 
@@ -715,7 +717,7 @@ git commit -m "feat(settings): clamp the queue number shape on read"
 В `QueueClientTest` заменить все шесть `new NumberPool(storage, 0, "secret", Now)` на
 `new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now)`.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Добавить в `NumberPoolTest` в конец класса:
 
@@ -867,12 +869,12 @@ git commit -m "feat(settings): clamp the queue number shape on read"
     }
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~NumberPoolTest"`
 Expected: сборка падает — конструктор `NumberPool(QueueStorage, Func<QueueNumberOptions>, Func<DateTime>)` не существует.
 
-- [ ] **Step 4: Rewrite NumberPool's constructor, slice and pool-key logic**
+- [x] **Step 4: Rewrite NumberPool's constructor, slice and pool-key logic**
 
 В `NumberPool.cs`:
 
@@ -1053,7 +1055,7 @@ Expected: сборка падает — конструктор `NumberPool(Queue
 
 6. `using System.Linq;` больше не нужен (`Enumerable.Range` ушёл в `QueueNumberSlice`) — удалить.
 
-- [ ] **Step 5: Update the DI registration**
+- [x] **Step 5: Update the DI registration**
 
 В `App.axaml.cs` заменить регистрацию `INumberPool`:
 
@@ -1072,14 +1074,16 @@ Expected: сборка падает — конструктор `NumberPool(Queue
         });
 ```
 
-- [ ] **Step 6: Run to verify they pass**
+- [x] **Step 6: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~NumberPoolTest|FullyQualifiedName~QueueClientTest"`
-Expected: все зелёные — старые (срез 100–999 % 5, кулдаун, перешаффл по дню) и новые.
+Expected: все зелёные — старые (срез 100–999 % 5, перешаффл по дню) и новые. (Кулдаун на
+этом шаге ещё жив — его снесёт Task 5; как он выглядит после сноса — свежий →
+свободный → живой, без кулдауна — см. там.)
 
 Затем сборка приложения: `dotnet build src/VvCash/VvCash.csproj -o build/verify` — `0 Error(s)`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/VvCash/Services/Queue/NumberPool.cs src/VvCash/App.axaml.cs tests/VvCash.Tests/NumberPoolTest.cs tests/VvCash.Tests/QueueClientTest.cs
@@ -1135,7 +1139,7 @@ git commit -m "feat(queue): rebuild the number pool whenever its shape changes, 
 - Modify: `src/VvCash/Services/Queue/QueueStorage.cs`
 - Modify: `tests/VvCash.Tests/QueueStorageTest.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 В `QueueStorageTest` после `ASavedOrderAppearsInTheListing`:
 
@@ -1181,12 +1185,12 @@ git commit -m "feat(queue): rebuild the number pool whenever its shape changes, 
     }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueStorageTest"`
 Expected: сборка падает — у `QueueOrder` нет `Prefix`/`Label`.
 
-- [ ] **Step 3: Extend the model**
+- [x] **Step 3: Extend the model**
 
 В `QueueOrder` после `public int Number { get; set; }`:
 
@@ -1205,7 +1209,7 @@ Expected: сборка падает — у `QueueOrder` нет `Prefix`/`Label`.
 
 `FormatLabel` уже есть с Task 2.
 
-- [ ] **Step 4: Add the column**
+- [x] **Step 4: Add the column**
 
 В `QueueStorage.InitializeCoreAsync` (метод с `CREATE TABLE`) после
 `await AddColumnIfMissingAsync(command, "ALTER TABLE QueueOrders ADD COLUMN ReceivedAt TEXT;");`:
@@ -1265,12 +1269,12 @@ Expected: сборка падает — у `QueueOrder` нет `Prefix`/`Label`.
 `SELECT Id, CreatedAt, ReceivedAt …` в `CloseStaleOrdersAsync`) заказ не
 собирают — их не трогать.
 
-- [ ] **Step 5: Run to verify they pass**
+- [x] **Step 5: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueStorageTest|FullyQualifiedName~QueueServerTest|FullyQualifiedName~QueueDayRolloverTest|FullyQualifiedName~QueueOrderRetentionTest"`
 Expected: все зелёные.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/VvCash/Models/QueueOrder.cs src/VvCash/Services/Queue/QueueStorage.cs tests/VvCash.Tests/QueueStorageTest.cs
@@ -1288,7 +1292,7 @@ git commit -m "feat(queue): carry the till prefix on the order and in queue.db"
 - Modify: `tests/VvCash.Tests/QueueClientTest.cs`
 - Modify: `tests/VvCash.Tests/PosViewModelSellerGateTest.cs` (класс `FakeQueueClient`)
 
-- [ ] **Step 1: Update the constructions so the tests compile against the new ctor**
+- [x] **Step 1: Update the constructions so the tests compile against the new ctor**
 
 В `QueueClientTest` заменить все `tillIndex: 0` в `new QueueClient(...)` на
 `() => QueueNumberOptions.Default(0, "secret")` (семь мест: `Build` и строки
@@ -1308,7 +1312,7 @@ git commit -m "feat(queue): carry the till prefix on the order and in queue.db"
         }
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 В `QueueClientTest` после `AnOrderGetsANumberAndReachesTheServer`:
 
@@ -1363,12 +1367,12 @@ git commit -m "feat(queue): carry the till prefix on the order and in queue.db"
     }
 ```
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueClientTest"`
 Expected: сборка падает — конструктор с `Func<QueueNumberOptions>` не существует, `IssueNumberAsync` возвращает `int?`.
 
-- [ ] **Step 4: Change the interface**
+- [x] **Step 4: Change the interface**
 
 В `IQueueClient` заменить `Task<int?> IssueNumberAsync();` на:
 
@@ -1387,7 +1391,7 @@ Expected: сборка падает — конструктор с `Func<QueueNum
     Task<string?> IssueNumberAsync();
 ```
 
-- [ ] **Step 5: Change the client**
+- [x] **Step 5: Change the client**
 
 В `QueueClient`:
 
@@ -1441,7 +1445,7 @@ Expected: сборка падает — конструктор с `Func<QueueNum
 
 В `FlushAsync`: `foreach (var closed in await _transport.GetClosedAsync(_options().TillIndex))`.
 
-- [ ] **Step 6: Update the DI registration**
+- [x] **Step 6: Update the DI registration**
 
 В `App.axaml.cs`:
 
@@ -1458,12 +1462,12 @@ Expected: сборка падает — конструктор с `Func<QueueNum
         });
 ```
 
-- [ ] **Step 7: Run to verify they pass**
+- [x] **Step 7: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueClientTest"`
 Expected: все зелёные. `PosViewModelSellerGateTest` ещё **не** соберётся — `PosViewModel` присваивает `int?` из `IssueNumberAsync`; это Task 8, и до него не коммитить полный прогон. Сборка тестового проекта целиком упадёт на `PosViewModel.cs`, поэтому Step 7 и Task 8 делаются подряд, коммит — один на оба.
 
-- [ ] **Step 8: Continue to Task 8 before committing**
+- [x] **Step 8: Continue to Task 8 before committing**
 
 ---
 
@@ -1473,7 +1477,7 @@ Expected: все зелёные. `PosViewModelSellerGateTest` ещё **не** с
 - Modify: `src/VvCash/ViewModels/PosViewModel.cs:2626-2663`
 - Modify: `tests/VvCash.Tests/PosViewModelSellerGateTest.cs`
 
-- [ ] **Step 1: Replace the number branch**
+- [x] **Step 1: Replace the number branch**
 
 Заменить блок от `int? queueNumberValue;` до закрывающей скобки `if (queueNumberValue != null) { … }` на:
 
@@ -1522,7 +1526,7 @@ Expected: все зелёные. `PosViewModelSellerGateTest` ещё **не** с
 `using System.Globalization;` в `PosViewModel.cs` после этого не используется
 (единственное обращение к `CultureInfo` было здесь) — удалить строку 4.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 В `PosViewModelSellerGateTest` после `Pay_WithTicketAndKitchenPrintersConfiguredAndQueueOn_EnqueuesOnceAndPrintsBothCarryingTheNumber`:
 
@@ -1564,12 +1568,12 @@ Expected: все зелёные. `PosViewModelSellerGateTest` ещё **не** с
 `FakeQueueSettings` (класс `Deps`, строки ~779-780); `Result` у фейка по
 умолчанию заказ с `Number = 305`, префикс ставится на нём до оплаты.
 
-- [ ] **Step 3: Run to verify**
+- [x] **Step 3: Run to verify**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~PosViewModelSellerGateTest.Pay_"`
 Expected: все зелёные, включая новый и прежние `"305"`-ассерты (пустой префикс даёт `"305"`).
 
-- [ ] **Step 4: Build the app and commit Tasks 7+8 together**
+- [x] **Step 4: Build the app and commit Tasks 7+8 together**
 
 Run: `dotnet build src/VvCash/VvCash.csproj -o build/verify`
 Expected: `0 Error(s)`.
@@ -1588,7 +1592,7 @@ git commit -m "feat(queue): print the prefixed label on the ticket and the kitch
 - Modify: `src/VvCash/Assets/Web/board.html:129,136`
 - Modify: `tests/VvCash.Tests/QueueServerTest.cs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 В `QueueServerTest` после `AFreshServerHasNoOrders`:
 
@@ -1617,12 +1621,12 @@ git commit -m "feat(queue): print the prefixed label on the ticket and the kitch
 тесты этого файла (строки ~209, 222); `System.Text.Json` и
 `System.Net.Http.Json` в usings есть.
 
-- [ ] **Step 2: Run to verify it passes already**
+- [x] **Step 2: Run to verify it passes already**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueServerTest.TheListingCarriesThePrefixedLabel"`
 Expected: зелёный — `Label` get-only, `JsonSerializerDefaults.Web` его сериализует, а `POST /orders` десериализует `QueueOrder` с `prefix`. Тест здесь фиксирует контракт для страниц, а не ловит дефект.
 
-- [ ] **Step 3: Switch the pages to `label`**
+- [x] **Step 3: Switch the pages to `label`**
 
 `board.html`:
 
@@ -1649,12 +1653,12 @@ Expected: зелёный — `Label` get-only, `JsonSerializerDefaults.Web` ег
 и в подтверждении отмены ничего не меняется — `card.querySelector('.number').textContent`
 уже берёт то, что отрисовано, теперь это label.
 
-- [ ] **Step 4: Run the static and server tests**
+- [x] **Step 4: Run the static and server tests**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~QueueServerStaticTest|FullyQualifiedName~QueueServerTest|FullyQualifiedName~QueueServerSocketTest"`
 Expected: все зелёные.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/VvCash/Assets/Web/kds.html src/VvCash/Assets/Web/board.html tests/VvCash.Tests/QueueServerTest.cs
@@ -1669,7 +1673,7 @@ git commit -m "feat(queue): show the prefixed label on the kitchen screen and th
 - Modify: `src/VvCash/ViewModels/SettingsViewModel.cs` (свойства ~305-316, загрузка ~460-466, сохранение ~994-1011)
 - Modify: `tests/VvCash.Tests/SettingsViewModelTest.cs`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 В `SettingsViewModelTest` после `Save_SkipsUnreadablePortAndTillIndexRatherThanOverwriting`:
 
@@ -1789,12 +1793,12 @@ git commit -m "feat(queue): show the prefixed label on the kitchen screen and th
     }
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~SettingsViewModelTest"`
 Expected: сборка падает — нет `TillCountText`, `QueueNumberPrefix`, `QueueNumberPreviewData`.
 
-- [ ] **Step 3: Add the properties**
+- [x] **Step 3: Add the properties**
 
 В `SettingsViewModel` заменить объявление `_tillIndexText` и добавить после него:
 
@@ -1878,7 +1882,7 @@ Expected: сборка падает — нет `TillCountText`, `QueueNumberPref
 
 Убедиться, что в файле есть `using System.Globalization;` и `using VvCash.Services.Queue;` (второй уже есть, строка 16).
 
-- [ ] **Step 4: Load and save**
+- [x] **Step 4: Load and save**
 
 В конструкторе после `TillIndexText = queueSettings.TillIndex.ToString();`:
 
@@ -1909,12 +1913,12 @@ Expected: сборка падает — нет `TillCountText`, `QueueNumberPref
 Step 3; комментарий в сохранении на строке ~1007 (`0..NumberPool.Tills-1`)
 поправить на `0..TillCount-1`.
 
-- [ ] **Step 5: Run to verify they pass**
+- [x] **Step 5: Run to verify they pass**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~SettingsViewModelTest"`
 Expected: все зелёные.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/VvCash/ViewModels/SettingsViewModel.cs tests/VvCash.Tests/SettingsViewModelTest.cs
@@ -1930,7 +1934,7 @@ git commit -m "feat(settings): edit the queue number shape with a live preview"
 - Modify: `src/VvCash/Assets/i18n/ru.json`, `en.json`, `uz.json`, `kk.json`, `tg.json`
 - Modify: `tests/VvCash.Tests/I18nLocaleTest.cs`
 
-- [ ] **Step 0: Write the failing locale test**
+- [x] **Step 0: Write the failing locale test**
 
 В `I18nLocaleTest` после `DisplayProbeProgress_CarriesAllThreePlaceholders`
 (тот же `Locales`/`Load`, что и там):
@@ -1977,7 +1981,7 @@ git commit -m "feat(settings): edit the queue number shape with a live preview"
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~I18nLocaleTest.QueueNumber"`
 Expected: оба красные — ключей нет.
 
-- [ ] **Step 1: Replace the role/till grid**
+- [x] **Step 1: Replace the role/till grid**
 
 Заменить `<Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto">…</Grid>` (строки 386-398) на:
 
@@ -2022,7 +2026,7 @@ Expected: оба красные — ключей нет.
 `QueueNumberMinText`, `QueueNumberMaxText`, `QueueNumberShuffle`,
 `QueueNumberPreview`.
 
-- [ ] **Step 2: Add the i18n keys**
+- [x] **Step 2: Add the i18n keys**
 
 `ru.json` — после `"TillNumber": "Номер кассы",` и заменить `QueueSettingsNotice`:
 
@@ -2097,7 +2101,7 @@ Get-ChildItem src/VvCash/Assets/i18n/*.json | ForEach-Object { Get-Content $_ -R
 
 Expected: пять строк `… ok`.
 
-- [ ] **Step 3: Run the locale test, build, eyeball**
+- [x] **Step 3: Run the locale test, build, eyeball**
 
 Run: `& ./run-tests.ps1 --filter "FullyQualifiedName~I18nLocaleTest"`
 Expected: все зелёные.
@@ -2111,7 +2115,7 @@ Expected: `0 Error(s)`.
 должна показать `Эта касса: A-51 … A-99, 49 номеров`. Поставить номер
 кассы `4`, диапазон `1`–`3`, касс `5` — строка про «ни одного номера».
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/VvCash/Views/SettingsView.axaml src/VvCash/Assets/i18n/ru.json src/VvCash/Assets/i18n/en.json src/VvCash/Assets/i18n/uz.json src/VvCash/Assets/i18n/kk.json src/VvCash/Assets/i18n/tg.json tests/VvCash.Tests/I18nLocaleTest.cs
@@ -2126,14 +2130,14 @@ git commit -m "feat(settings): queue number shape fields on the settings screen"
 - Modify: `docs/superpowers/specs/2026-09-22-configurable-queue-numbers-design.md:5`
 - Modify: `docs/superpowers/specs/2026-08-31-order-queue-design.md` (раздел «Номера» — одна ссылка)
 
-- [ ] **Step 1: Full test run**
+- [x] **Step 1: Full test run**
 
 Run: `& ./run-tests.ps1`
 Expected: зелёный. Упавший тест не из списка выше — прочитать стек: гонка
 Avalonia Dispatcher даёт `InvalidOperationException` из `Dispatcher`, не из
 кода очереди; перезапустить один раз.
 
-- [ ] **Step 2: Grep for leftovers**
+- [x] **Step 2: Grep for leftovers**
 
 ```bash
 grep -rn "NumberPool.Tills\|EnsureTodaysPoolAsync\|ShuffledSlice\|queueNumberValue" src tests --include=*.cs
@@ -2141,7 +2145,7 @@ grep -rn "NumberPool.Tills\|EnsureTodaysPoolAsync\|ShuffledSlice\|queueNumberVal
 
 Expected: пусто.
 
-- [ ] **Step 3: Mark the spec implemented**
+- [x] **Step 3: Mark the spec implemented**
 
 В новой спеке строку `**Статус:** спека написана, ждёт ревью` → `**Статус:** реализовано, ветка feat/queue-number-format`.
 
@@ -2153,7 +2157,7 @@ Expected: пусто.
 > Ниже — исходное поведение, которое осталось поведением по умолчанию.
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-22-configurable-queue-numbers-design.md docs/superpowers/specs/2026-08-31-order-queue-design.md
