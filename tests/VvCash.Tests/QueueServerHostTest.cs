@@ -74,7 +74,7 @@ public class QueueServerHostTest
     /// exercises; they are here only because IQueueClient requires them.</summary>
     private sealed class FakeQueueClient : IQueueClient
     {
-        public Task<int?> IssueNumberAsync() => Task.FromResult<int?>(null);
+        public Task<string?> IssueNumberAsync() => Task.FromResult<string?>(null);
         public Task<QueueOrder?> EnqueueAsync(SaleReceiptData sale) => Task.FromResult<QueueOrder?>(null);
         public Task FlushAsync() => Task.CompletedTask;
         public Task<int> PendingCountAsync() => Task.FromResult(0);

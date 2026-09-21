@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -2623,7 +2622,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 _sellerSession.Current?.FullName,
                                 DateTime.Now.ToString("dd.MM.yyyy HH:mm"));
 
-                            int? queueNumberValue;
+                            string? queueNumber;
                             string queueNumberTime;
                             if (queueRoleOn)
                             {
@@ -2632,14 +2631,14 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                                 // талон/бегунок нечем (тот самый случай "кухонный экран без
                                 // кухонного принтера").
                                 var queueOrder = await _queueClient.EnqueueAsync(queueSale);
-                                queueNumberValue = queueOrder?.Number;
+                                queueNumber = queueOrder?.Label;
                                 queueNumberTime = queueOrder?.CreatedAt.ToString("HH:mm") ?? DateTime.Now.ToString("HH:mm");
                             }
                             else
                             {
                                 // Очередь выключена: серверу этот заказ показать некому, так
                                 // что не создаём его вовсе — только номер для бумаги.
-                                queueNumberValue = await _queueClient.IssueNumberAsync();
+                                queueNumber = await _queueClient.IssueNumberAsync();
                                 queueNumberTime = DateTime.Now.ToString("HH:mm");
                             }
 
@@ -2652,9 +2651,10 @@ public partial class PosViewModel : ViewModelBase, IDisposable
                             // (CompositePrinterService), так что вызывать их безопасно и
                             // тогда, когда ни один принтер не держит Ticket/KitchenOrder —
                             // именно так заказ доезжает до KDS без бумаги на этой кассе.
-                            if (queueNumberValue != null)
+                            // Строка уже с буквой кассы (QueueOrder.Label) — здесь ничего
+                            // не форматируется.
+                            if (queueNumber != null)
                             {
-                                var queueNumber = queueNumberValue.Value.ToString(CultureInfo.InvariantCulture);
                                 await _printerService.PrintTicketAsync(
                                     queueNumber,
                                     time: queueNumberTime,

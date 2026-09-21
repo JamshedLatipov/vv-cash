@@ -519,7 +519,7 @@ public partial class App : Application
                 sp.GetRequiredService<IQueueStorage>(),
                 sp.GetRequiredService<INumberPool>(),
                 sp.GetRequiredService<IQueueTransport>(),
-                settings.TillIndex,
+                () => QueueNumberOptions.From(settings),
                 () => DateTime.Now);
         });
 

@@ -45,7 +45,10 @@ public class QueueClient : IQueueClient
     private readonly IQueueStorage _storage;
     private readonly INumberPool _pool;
     private readonly IQueueTransport _transport;
-    private readonly int _tillIndex;
+    /// <summary>Тот же снимок, что читает NumberPool — TillIndex и Prefix
+    /// берутся из него на каждом заказе, а не один раз в конструкторе: иначе
+    /// пул уже выдаёт номера нового индекса, а на заказе стоит старый.</summary>
+    private readonly Func<QueueNumberOptions> _options;
     private readonly Func<DateTime> _now;
 
     /// <summary>Ids of orders whose durable outbox row exists but whose own background send
@@ -67,12 +70,12 @@ public class QueueClient : IQueueClient
     /// reads this except with fresh QueueClient instances (see QueueClientTest.Build).</summary>
     internal Task? LastDispatchedSend { get; private set; }
 
-    public QueueClient(IQueueStorage storage, INumberPool pool, IQueueTransport transport, int tillIndex, Func<DateTime> now)
+    public QueueClient(IQueueStorage storage, INumberPool pool, IQueueTransport transport, Func<QueueNumberOptions> options, Func<DateTime> now)
     {
         _storage = storage;
         _pool = pool;
         _transport = transport;
-        _tillIndex = tillIndex;
+        _options = options;
         _now = now;
     }
 
@@ -90,10 +93,15 @@ public class QueueClient : IQueueClient
     ///
     /// Same fail-open swallow as EnqueueAsync's own number step, sharing its
     /// implementation via TryIssueNumberAsync below.</summary>
-    public Task<int?> IssueNumberAsync() => TryIssueNumberAsync(Guid.NewGuid());
+    public async Task<string?> IssueNumberAsync()
+    {
+        var number = await TryIssueNumberAsync(Guid.NewGuid());
+        return number == null ? null : QueueOrder.FormatLabel(_options().Prefix, number.Value);
+    }
 
     public async Task<QueueOrder?> EnqueueAsync(SaleReceiptData sale)
     {
+        var options = _options();
         // Minted before the number is asked for, not after: NumberPool.IssueAsync needs
         // the order's own id to stamp NumberPool.IssuedFor with (see its docstring for
         // why that identity is what makes ReleaseAsync safe against a stale replay), so
@@ -113,7 +121,8 @@ public class QueueClient : IQueueClient
         {
             Id = orderId,
             Number = number.Value,
-            TillIndex = _tillIndex,
+            Prefix = options.Prefix,
+            TillIndex = options.TillIndex,
             State = QueueOrderState.New,
             CreatedAt = _now(),
             SaleDocumentNumber = sale.DocumentNumber ?? string.Empty,
@@ -283,7 +292,7 @@ public class QueueClient : IQueueClient
         // ReleaseAsync has to be told WHICH order is asking, to tell a genuine close
         // apart from a stale replay for a number already re-issued to someone else —
         // see NumberPool.ReleaseAsync's own docstring for the collision this used to allow.
-        foreach (var closed in await _transport.GetClosedAsync(_tillIndex))
+        foreach (var closed in await _transport.GetClosedAsync(_options().TillIndex))
         {
             await _pool.ReleaseAsync(closed.Number, closed.Id);
         }

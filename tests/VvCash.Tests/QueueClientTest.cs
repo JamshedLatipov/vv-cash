@@ -89,7 +89,7 @@ public class QueueClientTest
         var storage = new QueueStorage(db ?? TempDb());
         var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new FakeTransport();
-        return (new QueueClient(storage, pool, transport, tillIndex: 0, Now), transport, pool);
+        return (new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now), transport, pool);
     }
 
     private static SaleReceiptData Sale() => new(
@@ -129,6 +129,55 @@ public class QueueClientTest
         Assert.InRange(order.Number, 100, 999);
         Assert.Single(transport.Posted);
         Assert.Equal(order.Id, transport.Posted[0].Id);
+    }
+
+    [Fact]
+    public async Task TheOrderCarriesThisTillsPrefixAndIndex()
+    {
+        var storage = new QueueStorage(TempDb());
+        var options = QueueNumberOptions.Default(2, "secret") with { Prefix = "B-" };
+        var pool = new NumberPool(storage, () => options, Now);
+        var client = new QueueClient(storage, pool, new FakeTransport(), () => options, Now);
+
+        var order = await client.EnqueueAsync(Sale());
+
+        Assert.NotNull(order);
+        Assert.Equal("B-", order!.Prefix);
+        Assert.Equal(2, order.TillIndex);
+        Assert.Equal("B-" + order.Number, order.Label);
+    }
+
+    [Fact]
+    public async Task IssueNumberAloneReturnsThePrefixedLabel()
+    {
+        var storage = new QueueStorage(TempDb());
+        var options = QueueNumberOptions.Default(0, "secret") with { Prefix = "A-" };
+        var pool = new NumberPool(storage, () => options, Now);
+        var client = new QueueClient(storage, pool, new FakeTransport(), () => options, Now);
+
+        var label = await client.IssueNumberAsync();
+
+        Assert.NotNull(label);
+        Assert.StartsWith("A-", label);
+        Assert.InRange(int.Parse(label!["A-".Length..]), 100, 999);
+    }
+
+    /// <summary>Индекс кассы читается на каждом заказе, не один раз: пул уже
+    /// выдаёт номера нового индекса (см. NumberPoolTest.ChangingTheTillIndexMidDayRebuildsThePool),
+    /// и заказ с прежним индексом на сервере искал бы закрытые не там.</summary>
+    [Fact]
+    public async Task FlushAsksForClosedOrdersOnTheCurrentTillIndex()
+    {
+        var storage = new QueueStorage(TempDb());
+        var options = QueueNumberOptions.Default(0, "secret");
+        var pool = new NumberPool(storage, () => options, Now);
+        var transport = new FakeTransport();
+        var client = new QueueClient(storage, pool, transport, () => options, Now);
+
+        options = options with { TillIndex = 3 };
+        await client.FlushAsync();
+
+        Assert.Equal(3, transport.LastRequestedTillIndex);
     }
 
     [Fact]
@@ -230,7 +279,7 @@ public class QueueClientTest
     {
         var storage = new QueueStorage(TempDb());
         var transport = new FakeTransport();
-        var client = new QueueClient(storage, new ThrowingPool(), transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, new ThrowingPool(), transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
 
@@ -295,7 +344,7 @@ public class QueueClientTest
     {
         var storage = new QueueStorage(TempDb());
         var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
-        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
+        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
 
@@ -317,7 +366,7 @@ public class QueueClientTest
     {
         var storage = new QueueStorage(TempDb());
         var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
-        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
+        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var count = await client.PendingCountAsync();
 
@@ -510,7 +559,7 @@ public class QueueClientTest
         var storage = new QueueStorage(TempDb());
         var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
-        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var enqueueTask = client.EnqueueAsync(Sale());
 
@@ -543,7 +592,7 @@ public class QueueClientTest
         var storage = new QueueStorage(TempDb());
         var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
-        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
         Assert.NotNull(order);
@@ -573,7 +622,7 @@ public class QueueClientTest
         var storage = new QueueStorage(TempDb());
         var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
-        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
         Assert.NotNull(order);
