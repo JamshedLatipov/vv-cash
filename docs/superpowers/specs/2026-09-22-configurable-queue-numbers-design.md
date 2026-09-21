@@ -185,7 +185,7 @@ public sealed record QueueNumberOptions(
 
 `NumberPool(QueueStorage, Func<QueueNumberOptions>, Func<DateTime>)` — снимок
 берётся один раз в начале `IssueAsync`, под семафором, и от него считаются и
-`PoolKey`, и срез. `Prefix` и `Secret` в `PoolKey` не входят. Восемь вызовов
+`PoolKey`, и срез. `Prefix` и `Secret` в `PoolKey` не входят. Семь вызовов
 `new NumberPool(storage, 0, "secret", Now)` в тестах становятся
 `new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now)`.
 
