@@ -10,8 +10,10 @@ using Xunit;
 namespace VvCash.Tests;
 
 /// <summary>Пул номеров. Главное требование заказчика — по двум талонам нельзя
-/// посчитать, сколько чеков пробито за день, поэтому «не подряд» здесь такое же
-/// требование, как «без дубликатов».</summary>
+/// посчитать, сколько чеков пробито за день; «без дубликатов» — требование
+/// такого же ранга. «Не подряд» само по себе с 2026-09-22 опция
+/// (QueueNumberShuffle), а не абсолютное требование — но включена она по
+/// умолчанию, и тесты ниже фиксируют именно это значение по умолчанию.</summary>
 public class NumberPoolTest
 {
     private static string TempDb() =>
@@ -361,6 +363,8 @@ public class NumberPoolTest
         var after = await Issue(pool);
 
         Assert.InRange(after, 1, 30);
+        // Day по-прежнему пишется рядом с PoolKey — страховка на откат (см. EnsurePoolAsync).
+        Assert.Equal("2026-08-31", await StateAsync(db, "Day"));
     }
 
     [Fact]

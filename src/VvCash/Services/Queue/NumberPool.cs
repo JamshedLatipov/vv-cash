@@ -193,7 +193,7 @@ public class NumberPool : INumberPool
         var fresh = await ScalarNumberAsync(connection, transaction, @"
             SELECT Number FROM NumberPool
             WHERE IssuedSeq IS NULL AND ReleasedAtSeq IS NULL
-            ORDER BY Position LIMIT 1", null);
+            ORDER BY Position LIMIT 1");
         if (fresh.HasValue) return fresh;
 
         // 2: свободный — самый давно возвращённый. Живые не трогаем: у клиента
@@ -201,7 +201,7 @@ public class NumberPool : INumberPool
         var freed = await ScalarNumberAsync(connection, transaction, @"
             SELECT Number FROM NumberPool
             WHERE IssuedSeq IS NULL AND ReleasedAtSeq IS NOT NULL
-            ORDER BY ReleasedAtSeq LIMIT 1", null);
+            ORDER BY ReleasedAtSeq LIMIT 1");
         if (freed.HasValue) return freed;
 
         // 3: свободных нет вовсе — самый давно выданный. Ветка для точки без
@@ -209,17 +209,15 @@ public class NumberPool : INumberPool
         // бы намертво.
         return await ScalarNumberAsync(connection, transaction, @"
             SELECT Number FROM NumberPool
-            ORDER BY IssuedSeq LIMIT 1", null);
+            ORDER BY IssuedSeq LIMIT 1");
     }
 
     private static async Task<int?> ScalarNumberAsync(
-        SqliteConnection connection, SqliteTransaction transaction, string sql,
-        Action<SqliteCommand>? bind)
+        SqliteConnection connection, SqliteTransaction transaction, string sql)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
-        bind?.Invoke(command);
 
         var result = await command.ExecuteScalarAsync();
         return result == null ? null : Convert.ToInt32(result);
@@ -282,8 +280,13 @@ public class NumberPool : INumberPool
     /// дню, IssueSeq обнулится, и касса заново раздаст утренние номера. Если
     /// Day — сегодня и настройки совпадают с константами прежнего кода
     /// (ShapesTheLegacyPool), пул на диске и есть пул от этих настроек:
-    /// записать PoolKey, таблицу не трогать. Иначе — пересобрать. Day после
-    /// этого не пишется и не читается; ветка отмирает на следующий день.</summary>
+    /// записать PoolKey, таблицу не трогать. Иначе — пересобрать. Day при
+    /// пересборке по-прежнему пишется рядом с PoolKey — ещё один релиз, как
+    /// страховка на случай отката на предыдущую сборку: старый
+    /// EnsureTodaysPoolAsync ключевался только на Day и пересобрал бы пул с
+    /// IssueSeq = 0 на устаревшем Day, повторно выдав сегодняшние номера.
+    /// Читается Day только в ветке усыновления выше; новый код его больше
+    /// нигде не читает.</summary>
     private async Task EnsurePoolAsync(SqliteConnection connection, QueueNumberOptions options)
     {
         var today = _now().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -330,13 +333,21 @@ public class NumberPool : INumberPool
         using (var state = connection.CreateCommand())
         {
             state.Transaction = transaction;
+            // Day пишется здесь ещё один релиз как страховка на откат к предыдущей
+            // сборке: старый EnsureTodaysPoolAsync ключевался только на Day и, застав
+            // его устаревшим, пересобрал бы пул с IssueSeq = 0 — то есть заново выдал
+            // бы уже розданные сегодня номера. Новый код Day нигде не читает, кроме
+            // ветки усыновления легаси-пула выше.
             state.CommandText = @"
                 INSERT INTO QueueState (Key, Value) VALUES ('IssueSeq', '0')
                     ON CONFLICT(Key) DO UPDATE SET Value = '0';
                 INSERT INTO QueueState (Key, Value) VALUES ('PoolKey', $PoolKey)
                     ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;
+                INSERT INTO QueueState (Key, Value) VALUES ('Day', $Day)
+                    ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;
             ";
             state.Parameters.AddWithValue("$PoolKey", poolKey);
+            state.Parameters.AddWithValue("$Day", today);
             await state.ExecuteNonQueryAsync();
         }
 
