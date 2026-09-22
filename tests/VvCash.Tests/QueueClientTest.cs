@@ -87,9 +87,9 @@ public class QueueClientTest
     private static (QueueClient Client, FakeTransport Transport, NumberPool Pool) Build(string? db = null)
     {
         var storage = new QueueStorage(db ?? TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new FakeTransport();
-        return (new QueueClient(storage, pool, transport, tillIndex: 0, Now), transport, pool);
+        return (new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now), transport, pool);
     }
 
     private static SaleReceiptData Sale() => new(
@@ -129,6 +129,55 @@ public class QueueClientTest
         Assert.InRange(order.Number, 100, 999);
         Assert.Single(transport.Posted);
         Assert.Equal(order.Id, transport.Posted[0].Id);
+    }
+
+    [Fact]
+    public async Task TheOrderCarriesThisTillsPrefixAndIndex()
+    {
+        var storage = new QueueStorage(TempDb());
+        var options = QueueNumberOptions.Default(2, "secret") with { Prefix = "B-" };
+        var pool = new NumberPool(storage, () => options, Now);
+        var client = new QueueClient(storage, pool, new FakeTransport(), () => options, Now);
+
+        var order = await client.EnqueueAsync(Sale());
+
+        Assert.NotNull(order);
+        Assert.Equal("B-", order!.Prefix);
+        Assert.Equal(2, order.TillIndex);
+        Assert.Equal("B-" + order.Number, order.Label);
+    }
+
+    [Fact]
+    public async Task IssueNumberAloneReturnsThePrefixedLabel()
+    {
+        var storage = new QueueStorage(TempDb());
+        var options = QueueNumberOptions.Default(0, "secret") with { Prefix = "A-" };
+        var pool = new NumberPool(storage, () => options, Now);
+        var client = new QueueClient(storage, pool, new FakeTransport(), () => options, Now);
+
+        var label = await client.IssueNumberAsync();
+
+        Assert.NotNull(label);
+        Assert.StartsWith("A-", label);
+        Assert.InRange(int.Parse(label!["A-".Length..]), 100, 999);
+    }
+
+    /// <summary>Индекс кассы читается на каждом заказе, не один раз: пул уже
+    /// выдаёт номера нового индекса (см. NumberPoolTest.ChangingTheTillIndexMidDayRebuildsThePool),
+    /// и заказ с прежним индексом на сервере искал бы закрытые не там.</summary>
+    [Fact]
+    public async Task FlushAsksForClosedOrdersOnTheCurrentTillIndex()
+    {
+        var storage = new QueueStorage(TempDb());
+        var options = QueueNumberOptions.Default(0, "secret");
+        var pool = new NumberPool(storage, () => options, Now);
+        var transport = new FakeTransport();
+        var client = new QueueClient(storage, pool, transport, () => options, Now);
+
+        options = options with { TillIndex = 3 };
+        await client.FlushAsync();
+
+        Assert.Equal(3, transport.LastRequestedTillIndex);
     }
 
     [Fact]
@@ -230,7 +279,7 @@ public class QueueClientTest
     {
         var storage = new QueueStorage(TempDb());
         var transport = new FakeTransport();
-        var client = new QueueClient(storage, new ThrowingPool(), transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, new ThrowingPool(), transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
 
@@ -294,8 +343,8 @@ public class QueueClientTest
     public async Task AFailureWritingTheBufferStillCompletesTheSale()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
-        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
+        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
 
@@ -316,8 +365,8 @@ public class QueueClientTest
     public async Task APendingCountReadFailureReturnsZeroInsteadOfThrowing()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
-        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), tillIndex: 0, Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
+        var client = new QueueClient(new ThrowingStorage(), pool, new FakeTransport(), () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var count = await client.PendingCountAsync();
 
@@ -391,45 +440,59 @@ public class QueueClientTest
     }
 
     /// <summary>The server lists every closed order for the till on every
-    /// poll, and nothing deletes them - QueueFlushLoop calls FlushAsync every
-    /// 15 seconds, so the same closed order is reported and released over and
-    /// over, not once. This is the test that makes NumberPool cooldown bug
-    /// visible from the client side: run against the unguarded ReleaseAsync,
-    /// the repeat release re-stamps the cooldown anchor and the final assert
-    /// below fails.
+    /// poll within its retention window, and QueueFlushLoop calls FlushAsync
+    /// every 15 seconds — so every release is replayed many times over, not
+    /// once. A replay must not re-stamp ReleasedAtSeq: that would move the
+    /// number BACK in the freed queue, behind numbers freed after it, and the
+    /// order in which freed numbers go back out would depend on the polling
+    /// schedule instead of on when each order actually closed. Run against an
+    /// unguarded ReleaseAsync, the replay of A at seq 180 re-stamps it behind
+    /// B (freed at 179) and the first assert below fails.
     ///
-    /// Same order reported twice, not a re-issue in between — the release-by-identity
+    /// Same order reported again, not a re-issue in between — the release-by-identity
     /// guard makes this a no-op automatically (the first release already clears
     /// IssuedFor for that order, so the repeat matches no row), same as before Critical
     /// 2's fix. Contrast with AStaleClosedOrderReplayDoesNotFreeANumberIssuedToSomeoneElse
     /// below, where the number IS re-issued in between and the old guard actually failed.</summary>
     [Fact]
-    public async Task RepeatedFlushesOfTheSameClosedOrderDoNotStallItsCooldown()
+    public async Task RepeatedFlushesOfTheSameClosedOrderDoNotMoveItInTheFreedQueue()
     {
         var (client, transport, pool) = Build();
 
+        // Issue all but two so the last two fresh issues can sit between the
+        // releases and give A and B distinct ReleasedAtSeq (a release itself
+        // does not move seq).
         var issued = new List<int>();
         var issuedIds = new List<Guid>();
-        for (var i = 0; i < 180; i++)
+        for (var i = 0; i < 178; i++)
         {
             var id = Guid.NewGuid();
             issuedIds.Add(id);
             issued.Add(await pool.IssueAsync(id));
         }
-        var target = issued[0];
-        var targetId = issuedIds[0];
+        var a = issued[0];
+        var aId = issuedIds[0];
+        var b = issued[1];
+        var bId = issuedIds[1];
 
-        transport.ClosedOrders = new List<QueueOrder> { new() { Id = targetId, Number = target } };
-        await client.FlushAsync(); // real release, anchored at seq 180
+        transport.ClosedOrders = new List<QueueOrder> { new() { Id = aId, Number = a } };
+        await client.FlushAsync(); // A freed @178
 
-        for (var i = 0; i < 10; i++) await pool.IssueAsync(Guid.NewGuid()); // seq -> 190
+        Assert.DoesNotContain(await pool.IssueAsync(Guid.NewGuid()), new[] { a, b }); // fresh #179
 
-        await client.FlushAsync(); // stale repeat of the same closed order
+        transport.ClosedOrders = new List<QueueOrder>
+        {
+            new() { Id = aId, Number = a }, // still reported — its replay must be a no-op
+            new() { Id = bId, Number = b },
+        };
+        await client.FlushAsync(); // B freed @179
 
-        for (var i = 0; i < NumberPool.CooldownIssues - 10 - 1; i++) // seq 191..229
-            Assert.NotEqual(target, await pool.IssueAsync(Guid.NewGuid()));
+        Assert.DoesNotContain(await pool.IssueAsync(Guid.NewGuid()), new[] { a, b }); // fresh #180, the last one
 
-        Assert.Equal(target, await pool.IssueAsync(Guid.NewGuid())); // seq 230
+        await client.FlushAsync(); // both replayed again at seq 180 — both no-ops
+
+        Assert.Equal(a, await pool.IssueAsync(Guid.NewGuid()));
+        Assert.Equal(b, await pool.IssueAsync(Guid.NewGuid()));
     }
 
     /// <summary>Critical 2, reproduced through the actual code path where it happens in
@@ -439,30 +502,28 @@ public class QueueClientTest
     /// stale release, assert the live number does not move) — see
     /// NumberPoolTest.AStaleReleaseForAReissuedNumberDoesNotFreeALiveOrder for the same
     /// scenario at the pool level, including why the final assertion checks the
-    /// NumberPool row directly rather than issuing more numbers and hoping one of them
-    /// exposes it (with the slice this exhausted, the third, oldest-first
-    /// SelectNumberToIssueAsync branch can legitimately keep handing out other
-    /// already-issued numbers for a long stretch regardless of whether the guard bug
-    /// fired, so it would not reliably distinguish the fixed guard from the broken one).</summary>
+    /// NumberPool row directly rather than issuing one more number and reading the
+    /// answer off it (the row is what the guard protects; the next issue would only
+    /// reflect it through SelectNumberToIssueAsync's freed-before-live ordering, and a
+    /// reordering of those branches should not be able to silently blind this test).</summary>
     [Fact]
     public async Task AStaleClosedOrderReplayDoesNotFreeANumberIssuedToSomeoneElse()
     {
         var db = TempDb();
         var (client, transport, _) = Build(db);
 
-        // Exhaust the till's 180-number slice first, same reasoning as the cooldown
-        // tests: with fresh numbers still available the pool would just hand one of
-        // those out instead of recycling `first`'s number, and the scenario would not
-        // fire at all.
+        // Exhaust the till's 180-number slice first: with fresh numbers still
+        // available the pool would just hand one of those out instead of recycling
+        // `first`'s number, and the scenario would not fire at all.
         var orders = new List<QueueOrder>();
         for (var i = 0; i < 180; i++) orders.Add((await EnqueueAndSettle(client))!);
         var first = orders[0];
 
         transport.ClosedOrders = new List<QueueOrder> { new() { Id = first.Id, Number = first.Number } };
-        await client.FlushAsync(); // real release, anchored at the current seq
+        await client.FlushAsync(); // real release
 
-        for (var i = 0; i < NumberPool.CooldownIssues - 1; i++) await EnqueueAndSettle(client);
-        var second = await EnqueueAndSettle(client); // the CooldownIssues-th issue after release
+        // No fresh numbers and nothing else freed: the very next issue is `first`'s number.
+        var second = await EnqueueAndSettle(client);
         Assert.Equal(first.Number, second!.Number); // sanity: same ticket number, new customer
         Assert.True(await IsStillIssuedAsync(db, first.Number)); // sanity: it is live right now
 
@@ -496,9 +557,9 @@ public class QueueClientTest
     public async Task EnqueueDoesNotWaitForTheServerRoundTrip()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
-        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var enqueueTask = client.EnqueueAsync(Sale());
 
@@ -529,9 +590,9 @@ public class QueueClientTest
     public async Task TheOrderIsDurableAndCountedPendingBeforeItsSendEverResolves()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
-        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
         Assert.NotNull(order);
@@ -559,9 +620,9 @@ public class QueueClientTest
     public async Task AFailedBackgroundSendLeavesTheRowForFlushAsync()
     {
         var storage = new QueueStorage(TempDb());
-        var pool = new NumberPool(storage, 0, "secret", Now);
+        var pool = new NumberPool(storage, () => QueueNumberOptions.Default(0, "secret"), Now);
         var transport = new BlockingTransport();
-        var client = new QueueClient(storage, pool, transport, tillIndex: 0, Now);
+        var client = new QueueClient(storage, pool, transport, () => QueueNumberOptions.Default(0, "secret"), Now);
 
         var order = await client.EnqueueAsync(Sale());
         Assert.NotNull(order);

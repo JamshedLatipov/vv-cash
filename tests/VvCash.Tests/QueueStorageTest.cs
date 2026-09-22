@@ -114,6 +114,56 @@ public class QueueStorageTest
     }
 
     [Fact]
+    public async Task ThePrefixSurvivesARoundTrip()
+    {
+        var storage = new QueueStorage(TempDb());
+        var order = Order();
+        order.Prefix = "A-";
+
+        await storage.SaveOrderAsync(order, order.CreatedAt);
+
+        var stored = Assert.Single(await storage.GetLiveOrdersAsync());
+        Assert.Equal("A-", stored.Prefix);
+        Assert.Equal("A-305", stored.Label);
+    }
+
+    /// <summary>queue.db, созданный прежней версией — без колонки Prefix;
+    /// InitializeAsync добавляет её, строка читается пустым префиксом.</summary>
+    [Fact]
+    public async Task AnOrderWrittenBeforeThePrefixColumnReadsAsUnprefixed()
+    {
+        var dbPath = TempDb();
+        try
+        {
+            await SeedPreOrderPrefixDatabaseAsync(dbPath);
+
+            var storage = new QueueStorage(dbPath);
+            await storage.InitializeAsync();
+
+            using var check = new SqliteConnection($"Data Source={dbPath}");
+            await check.OpenAsync();
+
+            // The column exists now...
+            using (var cmd = check.CreateCommand())
+            {
+                cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('QueueOrders') WHERE name = 'Prefix';";
+                Assert.Equal(1L, Convert.ToInt64(await cmd.ExecuteScalarAsync()));
+            }
+
+            // ...and the pre-migration row reads back with an empty prefix.
+            var stored = Assert.Single(await storage.GetLiveOrdersAsync());
+            Assert.Equal(string.Empty, stored.Prefix);
+            Assert.Equal("305", stored.Label);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(dbPath + suffix)) File.Delete(dbPath + suffix);
+        }
+    }
+
+    [Fact]
     public async Task SavingTheSameOrderTwiceDoesNotDuplicateIt()
     {
         var storage = new QueueStorage(TempDb());
@@ -251,7 +301,8 @@ public class QueueStorageTest
             // NumberPool built on the same file keeps working: it can issue a fresh
             // number and later release that same number by the order id it issued it
             // to, exercising exactly the column this migration added.
-            var pool = new NumberPool(storage, tillIndex: 0, "secret", () => new DateTime(2026, 8, 31, 10, 0, 0));
+            var pool = new NumberPool(
+                storage, () => QueueNumberOptions.Default(0, "secret"), () => new DateTime(2026, 8, 31, 10, 0, 0));
             var orderId = Guid.NewGuid();
             var number = await pool.IssueAsync(orderId);
             await pool.ReleaseAsync(number, orderId);
@@ -287,6 +338,37 @@ public class QueueStorageTest
                 Key TEXT PRIMARY KEY,
                 Value TEXT
             );
+        ";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>Raw schema exactly as QueueStorage created QueueOrders before Prefix
+    /// existed — old column list, no Prefix — with one row inserted the way the old
+    /// BindOrder would (SaleDocumentNumber = '', Lines = '[]', ReceivedAt set), so the
+    /// migration runs against a table that already has data, not an empty one.</summary>
+    private static async Task SeedPreOrderPrefixDatabaseAsync(string dbPath)
+    {
+        using var connection = new SqliteConnection($"Data Source={dbPath}");
+        await connection.OpenAsync();
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $@"
+            CREATE TABLE QueueOrders (
+                Id TEXT PRIMARY KEY,
+                Number INTEGER NOT NULL,
+                TillIndex INTEGER NOT NULL,
+                State TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                ReadyAt TEXT,
+                ClosedAt TEXT,
+                SaleDocumentNumber TEXT,
+                Lines TEXT NOT NULL,
+                ReceivedAt TEXT
+            );
+            INSERT INTO QueueOrders
+                (Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines, ReceivedAt)
+            VALUES
+                ('{Guid.NewGuid()}', 305, 0, 'New', '2026-09-22T10:00:00.0000000', NULL, NULL, '', '[]', '2026-09-22T10:00:00.0000000');
         ";
         await command.ExecuteNonQueryAsync();
     }

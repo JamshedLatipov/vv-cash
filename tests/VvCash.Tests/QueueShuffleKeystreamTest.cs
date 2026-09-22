@@ -74,12 +74,46 @@ public class QueueShuffleKeystreamTest
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
-    [InlineData(257)]
+    [InlineData(65537)]
     public void OutOfRangeBoundIsRejected(int bound)
     {
         var keystream = new QueueShuffleKeystream("2026-08-31", 0, "secret");
 
         Assert.Throws<ArgumentOutOfRangeException>(() => keystream.NextIndex(bound));
+    }
+
+    /// <summary>Однобайтовая ветка для bound ≤ 256 обязана остаться байт в байт
+    /// прежней: пул 100–999 на 5 касс (срез в 180) уже уехал на точки, и
+    /// смена его порядка посреди дня после обновления — это повторная выдача
+    /// утренних номеров. Список снят с кода до появления двухбайтовой ветки;
+    /// расхождение здесь — не «тест устарел», а сломанный порядок на кассах.</summary>
+    [Fact]
+    public void TheOneByteBranchIsUnchangedForSmallBounds()
+    {
+        var keystream = new QueueShuffleKeystream("2026-08-31", 0, "secret");
+
+        var draws = Enumerable.Range(0, 20).Select(_ => keystream.NextIndex(180)).ToList();
+
+        Assert.Equal(
+            new[] { 77, 125, 103, 14, 1, 146, 119, 176, 166, 6, 175, 15, 91, 153, 26, 95, 2, 47, 8, 100 },
+            draws);
+    }
+
+    /// <summary>Срезы длиннее 256: одна касса на 100–999 — это 900, одна на
+    /// 1–9999 — 9999. До двухбайтовой ветки такой bound бросал исключение на
+    /// каждой выдаче, QueueClient его проглатывал, и касса молча переставала
+    /// печатать номера. 65536 — потолок двухбайтового броска.</summary>
+    [Theory]
+    [InlineData(257)]
+    [InlineData(900)]
+    [InlineData(9999)]
+    [InlineData(65536)]
+    public void LargeBoundsDrawWithinRange(int bound)
+    {
+        var keystream = new QueueShuffleKeystream("2026-08-31", 0, "secret");
+
+        for (var i = 0; i < 2000; i++)
+            Assert.InRange(keystream.NextIndex(bound), 0, bound - 1);
     }
 
     /// <summary>Fisher–Yates поверх этого потока — то, что реально видит

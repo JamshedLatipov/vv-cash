@@ -116,6 +116,16 @@
     // хотя часть из них могла провисеть готовой давно.
     let seen = null;
 
+    // Префикс кассы — текст, введённый оператором в настройках, а не число,
+    // поэтому перед вставкой в разметку его нужно экранировать так же, как
+    // на кухонном экране (kds.html).
+    function escapeHtml(text) {
+        return String(text)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;');
+    }
+
     function render(orders) {
         const cooking = orders.filter(o => o.state === 'New' || o.state === 'InProgress');
         const ready = orders.filter(o => o.state === 'Ready');
@@ -126,14 +136,14 @@
         // не показывается — а не роняет рендер.
 
         document.getElementById('cooking').innerHTML = cooking
-            .map(o => `<li>${o.number}</li>`)
+            .map(o => `<li>${escapeHtml(o.label)}</li>`)
             .join('');
 
         const isFirstSnapshot = seen === null;
         if (isFirstSnapshot) seen = new Set();
 
         document.getElementById('ready').innerHTML = ready
-            .map(o => `<li class="${!isFirstSnapshot && !seen.has(o.id) ? 'fresh' : ''}">${o.number}</li>`)
+            .map(o => `<li class="${!isFirstSnapshot && !seen.has(o.id) ? 'fresh' : ''}">${escapeHtml(o.label)}</li>`)
             .join('');
 
         ready.forEach(o => seen.add(o.id));

@@ -103,6 +103,25 @@ public class QueueServerTest : IAsyncLifetime
         Assert.Empty(await Listing());
     }
 
+    /// <summary>kds.html и board.html читают o.label — то, что видит клиент,
+    /// с буквой кассы. Сырой JSON, а не ReadFromJsonAsync&lt;QueueOrder&gt;: тот
+    /// молча проигнорирует отсутствующее поле, потому что у Label нет сеттера.</summary>
+    [Fact]
+    public async Task TheListingCarriesThePrefixedLabel()
+    {
+        var order = Order();
+        order.Prefix = "A-";
+        var posted = await _client.PostAsJsonAsync("orders", order);
+        posted.EnsureSuccessStatusCode();
+
+        using var listing = JsonDocument.Parse(await _client.GetStringAsync("orders"));
+        var first = Assert.Single(listing.RootElement.EnumerateArray());
+
+        Assert.Equal("A-", first.GetProperty("prefix").GetString());
+        Assert.Equal("A-305", first.GetProperty("label").GetString());
+        Assert.Equal(305, first.GetProperty("number").GetInt32());
+    }
+
     [Fact]
     public async Task ARequestWithoutTheSecretIsRejected()
     {

@@ -57,6 +57,11 @@ public class QueueServerHostTest
         public int QueuePort { get; set; }
         public string QueueSecret { get; set; } = string.Empty;
         public int TillIndex { get; set; }
+        public int TillCount { get; set; } = 5;
+        public string QueueNumberPrefix { get; set; } = string.Empty;
+        public int QueueNumberMin { get; set; } = 100;
+        public int QueueNumberMax { get; set; } = 999;
+        public bool QueueNumberShuffle { get; set; } = true;
 
         public event EventHandler? SettingsChanged;
 
@@ -69,7 +74,7 @@ public class QueueServerHostTest
     /// exercises; they are here only because IQueueClient requires them.</summary>
     private sealed class FakeQueueClient : IQueueClient
     {
-        public Task<int?> IssueNumberAsync() => Task.FromResult<int?>(null);
+        public Task<string?> IssueNumberAsync() => Task.FromResult<string?>(null);
         public Task<QueueOrder?> EnqueueAsync(SaleReceiptData sale) => Task.FromResult<QueueOrder?>(null);
         public Task FlushAsync() => Task.CompletedTask;
         public Task<int> PendingCountAsync() => Task.FromResult(0);

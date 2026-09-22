@@ -96,6 +96,43 @@ public class I18nLocaleTest
     }
 
     [Fact]
+    public void QueueNumberKeys_ExistInEveryLocale()
+    {
+        // Непереведённый ключ кассир видит как "[ключ]" — не падение, а
+        // подпись, которая ничего не подписывает.
+        string[] keys =
+        {
+            "QueueNumberPrefix", "TillCount", "QueueNumberMin", "QueueNumberMax",
+            "QueueNumberShuffle", "QueueNumberPreview", "QueueNumberPreviewEmpty",
+            "QueueSettingsNotice",
+        };
+
+        foreach (var locale in Locales)
+        {
+            var map = Load(locale);
+            foreach (var key in keys)
+            {
+                Assert.True(map.ContainsKey(key), $"{locale}.json: нет ключа {key}");
+                Assert.False(string.IsNullOrWhiteSpace(map[key]), $"{locale}.json: {key} пуст");
+            }
+        }
+    }
+
+    [Fact]
+    public void QueueNumberPreview_CarriesAllThreePlaceholders()
+    {
+        // string.Format с первым номером, последним и их числом — перевод,
+        // потерявший {2}, покажет «A-51 … A-99» без «49 номеров».
+        foreach (var locale in Locales)
+        {
+            var value = Load(locale)["QueueNumberPreview"];
+            Assert.Contains("{0}", value);
+            Assert.Contains("{1}", value);
+            Assert.Contains("{2}", value);
+        }
+    }
+
+    [Fact]
     public void UpdateCheckMessages_CarryTheirPlaceholders()
     {
         // UpdateCheckFailed без {0} — это «Не удалось проверить обновления» и точка:

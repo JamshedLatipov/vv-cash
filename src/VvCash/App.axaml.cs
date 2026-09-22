@@ -479,15 +479,15 @@ public partial class App : Application
 
         // Singleton, not transient: NumberPool serialises issue/release through its own
         // in-process semaphore (see its own class remarks), which only means anything with
-        // exactly one live instance for the whole till. TillIndex and QueueSecret are read
-        // once here, matching NumberPool's own constructor (unlike HttpQueueTransport below,
-        // which re-reads its settings on every call) — TillIndex is documented there as not
-        // meant to move on a live till anyway.
+        // exactly one live instance for the whole till. The options snapshot is taken on
+        // every issue (see NumberPool's constructor remarks), so a number-format edit on the
+        // settings screen shows on the very next ticket — no restart, no waiting for
+        // tomorrow.
         services.AddSingleton<INumberPool>(sp =>
         {
             var settings = sp.GetRequiredService<IQueueSettings>();
             return new NumberPool(
-                sp.GetRequiredService<QueueStorage>(), settings.TillIndex, settings.QueueSecret, () => DateTime.Now);
+                sp.GetRequiredService<QueueStorage>(), () => QueueNumberOptions.From(settings), () => DateTime.Now);
         });
 
         // No AuthHeaderHandler on this client: it talks to another till's local queue server
@@ -519,7 +519,7 @@ public partial class App : Application
                 sp.GetRequiredService<IQueueStorage>(),
                 sp.GetRequiredService<INumberPool>(),
                 sp.GetRequiredService<IQueueTransport>(),
-                settings.TillIndex,
+                () => QueueNumberOptions.From(settings),
                 () => DateTime.Now);
         });
 

@@ -45,6 +45,64 @@ public class QueueSettingsTest
     }
 
     [Fact]
+    public void AnUntouchedRegisterKeepsTheShippedNumberShape()
+    {
+        IQueueSettings settings = new SettingsService(WriteSettings("{}"));
+
+        Assert.Equal(5, settings.TillCount);
+        Assert.Equal(100, settings.QueueNumberMin);
+        Assert.Equal(999, settings.QueueNumberMax);
+        Assert.True(settings.QueueNumberShuffle);
+        Assert.Equal(string.Empty, settings.QueueNumberPrefix);
+        Assert.True(QueueNumberOptions.From(settings).ShapesTheLegacyPool);
+    }
+
+    [Fact]
+    public void TheRangeIsClampedAndMaxNeverFallsBelowMin()
+    {
+        IQueueSettings settings = new SettingsService(WriteSettings(
+            """{ "QueueNumberMin": 0, "QueueNumberMax": 99999 }"""));
+        Assert.Equal(1, settings.QueueNumberMin);
+        Assert.Equal(9999, settings.QueueNumberMax);
+
+        IQueueSettings inverted = new SettingsService(WriteSettings(
+            """{ "QueueNumberMin": 500, "QueueNumberMax": 200 }"""));
+        Assert.Equal(500, inverted.QueueNumberMin);
+        Assert.Equal(500, inverted.QueueNumberMax);
+    }
+
+    [Fact]
+    public void TillCountIsClampedToOneThroughNine()
+    {
+        IQueueSettings zero = new SettingsService(WriteSettings("""{ "TillCount": 0 }"""));
+        IQueueSettings huge = new SettingsService(WriteSettings("""{ "TillCount": 50 }"""));
+
+        Assert.Equal(1, zero.TillCount);
+        Assert.Equal(9, huge.TillCount);
+    }
+
+    [Fact]
+    public void TillIndexIsClampedByTheConfiguredTillCount()
+    {
+        IQueueSettings settings = new SettingsService(WriteSettings(
+            """{ "TillCount": 2, "TillIndex": 3 }"""));
+
+        Assert.Equal(1, settings.TillIndex);
+    }
+
+    [Fact]
+    public void ThePrefixIsTrimmedAndCut()
+    {
+        IQueueSettings settings = new SettingsService(WriteSettings(
+            """{ "QueueNumberPrefix": "  ABCD " }"""));
+        IQueueSettings missing = new SettingsService(WriteSettings(
+            """{ "QueueNumberPrefix": null }"""));
+
+        Assert.Equal("ABC", settings.QueueNumberPrefix);
+        Assert.Equal(string.Empty, missing.QueueNumberPrefix);
+    }
+
+    [Fact]
     public void RoleIsReadAsAName()
     {
         IQueueSettings settings = new SettingsService(WriteSettings("""{ "QueueRole": "Server" }"""));

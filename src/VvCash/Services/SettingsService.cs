@@ -41,6 +41,11 @@ public class SettingsData
     public int QueuePort { get; set; } = DefaultQueuePort;
     public string QueueSecret { get; set; } = string.Empty;
     public int TillIndex { get; set; }
+    public int TillCount { get; set; } = QueueNumberOptions.DefaultTillCount;
+    public string QueueNumberPrefix { get; set; } = string.Empty;
+    public int QueueNumberMin { get; set; } = QueueNumberOptions.DefaultMin;
+    public int QueueNumberMax { get; set; } = QueueNumberOptions.DefaultMax;
+    public bool QueueNumberShuffle { get; set; } = QueueNumberOptions.DefaultShuffle;
 }
 
 public class SettingsService : ISettingsService, IQueueSettings
@@ -187,13 +192,49 @@ public class SettingsService : ISettingsService, IQueueSettings
         set => _data.QueueSecret = value ?? string.Empty;
     }
 
-    /// <summary>Зажимается в 0..NumberPool.Tills-1, а не принимается как есть:
-    /// значение из settings.json правится руками, и вне диапазона касса начнёт
-    /// делить по чужому классу вычетов пула.</summary>
+    /// <summary>Зажимается в 0..TillCount-1, а не принимается как есть:
+    /// значение из settings.json правится руками, и вне диапазона срез кассы
+    /// оказался бы пустым (ни один остаток не равен 9 при пяти кассах), а с
+    /// клэмпом — совпал бы с чужим; ни то ни другое не должно молча вытекать
+    /// из опечатки в файле, поэтому индекс зажимается, а экран настроек
+    /// показывает срез до сохранения (SettingsViewModel.QueueNumberPreview).</summary>
     public int TillIndex
     {
-        get => Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
+        get => QueueNumberOptions.ClampTillIndex(_data.TillIndex, TillCount);
         set => _data.TillIndex = value;
+    }
+
+    /// <summary>Клэмпы — в QueueNumberOptions, не здесь: предпросмотр в
+    /// настройках считает по тем же функциям, и делить их на два места
+    /// значило бы однажды показать одно, а напечатать другое.</summary>
+    public int TillCount
+    {
+        get => QueueNumberOptions.ClampTillCount(_data.TillCount);
+        set => _data.TillCount = value;
+    }
+
+    public string QueueNumberPrefix
+    {
+        get => QueueNumberOptions.NormalizePrefix(_data.QueueNumberPrefix);
+        set => _data.QueueNumberPrefix = value ?? string.Empty;
+    }
+
+    public int QueueNumberMin
+    {
+        get => QueueNumberOptions.ClampMin(_data.QueueNumberMin);
+        set => _data.QueueNumberMin = value;
+    }
+
+    public int QueueNumberMax
+    {
+        get => QueueNumberOptions.ClampMax(_data.QueueNumberMax, QueueNumberMin);
+        set => _data.QueueNumberMax = value;
+    }
+
+    public bool QueueNumberShuffle
+    {
+        get => _data.QueueNumberShuffle;
+        set => _data.QueueNumberShuffle = value;
     }
 
     /// <summary>Creates the service against the standard per-user settings file. Pass
@@ -278,7 +319,14 @@ public class SettingsService : ISettingsService, IQueueSettings
                 {
                     _data.QueueSecret = string.Empty;
                 }
-                _data.TillIndex = Math.Clamp(_data.TillIndex, 0, NumberPool.Tills - 1);
+                if (_data.QueueNumberPrefix == null)
+                {
+                    _data.QueueNumberPrefix = string.Empty;
+                }
+                _data.TillCount = QueueNumberOptions.ClampTillCount(_data.TillCount);
+                _data.TillIndex = QueueNumberOptions.ClampTillIndex(_data.TillIndex, _data.TillCount);
+                _data.QueueNumberMin = QueueNumberOptions.ClampMin(_data.QueueNumberMin);
+                _data.QueueNumberMax = QueueNumberOptions.ClampMax(_data.QueueNumberMax, _data.QueueNumberMin);
             }
             catch (Exception ex)
             {

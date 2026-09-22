@@ -114,6 +114,19 @@
             <Setter Property="Margin" Value="0"/>
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
         </Style>
+
+        <!-- Предпросмотр номеров очереди. Серый по умолчанию задан здесь, а не
+             атрибутом Foreground на самом TextBlock: локальное значение в
+             Avalonia сильнее любого стиля, и красный от класса empty его бы
+             не перебил — сборка чистая, цвет не меняется. Класс вешается
+             привязкой (Classes.empty="{Binding IsQueueNumberPreviewEmpty}");
+             красный — тот же, что у баннеров ошибок ниже. -->
+        <Style Selector="TextBlock.QueuePreview">
+            <Setter Property="Foreground" Value="{StaticResource Slate500Brush}"/>
+        </Style>
+        <Style Selector="TextBlock.QueuePreview.empty">
+            <Setter Property="Foreground" Value="#B91C1C"/>
+        </Style>
     </UserControl.Styles>
 
     <Grid RowDefinitions="Auto, *" Height="{Binding $parent[Window].ClientSize.Height}">
@@ -372,30 +385,55 @@
                              до перезапуска кассы, отсюда и прежняя формулировка ("после
                              перезапуска приложения"). Теперь QueueServerHost перезапускает
                              сервер сразу на Save() (см. её remarks), так что роль/порт/
-                             секрет применяются немедленно — а номер кассы по-прежнему нет:
-                             он же класс вычетов в пуле номеров, а пул на сегодняшний день
-                             уже разложен по первой продаже дня (см. NumberPool), поэтому
-                             смена номера безопасно применяется только с началом следующего
-                             дня, чем бы её ни просить подхватить раньше. Текст ключа
-                             QueueSettingsNotice в i18n/*.json обязан говорить именно это,
-                             а не «перезапустите приложение». -->
+                             секрет применяются немедленно. Форма номера — на следующем
+                             талоне: NumberPool сверяет PoolKey на каждой выдаче и
+                             пересобирает пул при несовпадении (см. EnsurePoolAsync). В
+                             PoolKey входят число касс, номер кассы, диапазон и
+                             перемешивание — их смена сбрасывает IssueSeq и забывает, какие
+                             номера сейчас на руках; буква в ключ не входит, она лишь
+                             приписывается к следующему выданному числу (см. докстринг
+                             NumberPool.PoolKey). Поэтому текст ключа QueueSettingsNotice в
+                             i18n/*.json обязан говорить «меняйте между сменами», а не
+                             «перезапустите приложение» и не «со следующего дня». -->
                         <TextBlock Text="{Binding [QueueSettingsNotice], Source={x:Static services:I18nService.Instance}}"
                                    FontSize="12" Foreground="{StaticResource Slate500Brush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
 
                         <Border Background="{StaticResource Slate50Brush}" BorderBrush="{StaticResource Slate200Brush}" BorderThickness="1" CornerRadius="8" Padding="12">
                             <StackPanel Spacing="12">
-                                <Grid ColumnDefinitions="*, *" RowDefinitions="Auto, Auto">
+                                <Grid ColumnDefinitions="*, *, *" RowDefinitions="Auto, Auto">
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [QueueRole], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
-                                    <!-- Номер кассы — её класс вычетов в пуле номеров очереди.
-                                         Виден всегда, не только у клиента: сервер тоже продаёт и
-                                         тоже выдаёт номера из своего диапазона. Две кассы с
-                                         одинаковым номером начнут выдавать покупателям
-                                         одинаковые номера. -->
-                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [TillNumber], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <!-- Буква кассы, число касс и номер кассы видны всегда, не
+                                         только у клиента: сервер тоже продаёт и тоже выдаёт
+                                         номера из своего среза, а касса с выключенной очередью
+                                         всё равно печатает талон. Две кассы с одинаковым
+                                         номером начнут выдавать одинаковые номера. -->
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [QueueNumberPrefix], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding [TillNumber], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,4"/>
 
                                     <ComboBox Grid.Row="1" Grid.Column="0" ItemsSource="{Binding QueueRoles}" SelectedItem="{Binding QueueRole, Mode=TwoWay}" Classes="PrinterCombo" Margin="0,0,8,0"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding TillIndexText, Mode=TwoWay}" Classes="PrinterInput"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding QueueNumberPrefix, Mode=TwoWay}" Classes="PrinterInput" MaxLength="3" Watermark="A-" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding TillIndexText, Mode=TwoWay}" Classes="PrinterInput"/>
                                 </Grid>
+
+                                <Grid ColumnDefinitions="*, *, *" RowDefinitions="Auto, Auto">
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding [TillCount], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding [QueueNumberMin], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,8,4"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding [QueueNumberMax], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,4"/>
+
+                                    <TextBox Grid.Row="1" Grid.Column="0" Text="{Binding TillCountText, Mode=TwoWay}" Classes="PrinterInput" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding QueueNumberMinText, Mode=TwoWay}" Classes="PrinterInput" Margin="0,0,8,0"/>
+                                    <TextBox Grid.Row="1" Grid.Column="2" Text="{Binding QueueNumberMaxText, Mode=TwoWay}" Classes="PrinterInput"/>
+                                </Grid>
+
+                                <CheckBox IsChecked="{Binding QueueNumberShuffle, Mode=TwoWay}"
+                                          Content="{Binding [QueueNumberShuffle], Source={x:Static services:I18nService.Instance}}"/>
+
+                                <!-- Предпросмотр: первый и последний номер среза этой кассы по
+                                     введённым значениям — те же клэмпы и формула, что у пула.
+                                     Единственное место, где пустой срез виден до сохранения,
+                                     поэтому он ещё и красный (TextBlock.QueuePreview.empty в
+                                     стилях выше; Foreground нарочно не задан локально). -->
+                                <TextBlock Text="{Binding QueueNumberPreview}" Classes="QueuePreview" Classes.empty="{Binding IsQueueNumberPreviewEmpty}" FontSize="12" TextWrapping="Wrap"/>
 
                                 <StackPanel IsVisible="{Binding IsQueueClientFieldsVisible}">
                                     <TextBlock Text="{Binding [QueueServerAddress], Source={x:Static services:I18nService.Instance}}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Slate500Brush}" Margin="0,0,0,4"/>

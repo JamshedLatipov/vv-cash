@@ -206,7 +206,7 @@
         container.innerHTML = live.map(o => `
             <article class="card" data-id="${o.id}" data-state="${o.state}">
                 <header>
-                    <span class="number">${o.number}</span>
+                    <span class="number">${escapeHtml(o.label)}</span>
                     <span class="time muted">${formatTime(o.createdAt)}</span>
                 </header>
                 <ul class="lines">

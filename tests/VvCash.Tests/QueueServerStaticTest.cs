@@ -47,6 +47,11 @@ public class QueueServerStaticTest : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("<html", html);
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+
+        // Страницы читают o.label — контракт TheListingCarriesThePrefixedLabel в
+        // QueueServerTest. Откат к o.number прошёл бы зелёным без этой пары.
+        Assert.Contains("o.label", html);
+        Assert.DoesNotContain("o.number", html);
     }
 
     [Fact]

@@ -109,6 +109,7 @@ public class QueueStorage : IQueueStorage
                 CREATE TABLE IF NOT EXISTS QueueOrders (
                     Id TEXT PRIMARY KEY,
                     Number INTEGER NOT NULL,
+                    Prefix TEXT,
                     TillIndex INTEGER NOT NULL,
                     State TEXT NOT NULL,
                     CreatedAt TEXT NOT NULL,
@@ -137,10 +138,11 @@ public class QueueStorage : IQueueStorage
 
         // NumberPool существовала до колонки IssuedFor: на уже стоящих у разработчиков
         // и на точках queue.db файлах CREATE TABLE IF NOT EXISTS выше — no-op, колонки
-        // как не было, так и нет. EnsureTodaysPoolAsync (NumberPool.cs) не чинит это
-        // само собой при смене дня — DELETE+INSERT пересоздают только строки таблицы,
-        // не её схему, — так что миграция нужна здесь, на каждой инициализации, тем же
-        // приёмом, что OfflineStorageService уже применяет к своим таблицам.
+        // как не было, так и нет. EnsurePoolAsync (NumberPool.cs) не чинит это
+        // само собой при пересборке пула — DELETE+INSERT пересоздают только строки
+        // таблицы, не её схему, — так что миграция нужна здесь, на каждой
+        // инициализации, тем же приёмом, что OfflineStorageService уже применяет к
+        // своим таблицам.
         await AddColumnIfMissingAsync(command, "ALTER TABLE NumberPool ADD COLUMN IssuedFor TEXT;");
 
         // Same idiom, for QueueOrders.ReceivedAt (see the schema comment above): a
@@ -148,6 +150,10 @@ public class QueueStorage : IQueueStorage
         // the migration read back with ReceivedAt NULL — CloseStaleOrdersAsync falls
         // back to CreatedAt for exactly those rows (see its own remarks).
         await AddColumnIfMissingAsync(command, "ALTER TABLE QueueOrders ADD COLUMN ReceivedAt TEXT;");
+
+        // Prefix — буква кассы (см. QueueOrder.Prefix). Заказы, записанные до
+        // колонки, читаются пустым префиксом — так они и были напечатаны.
+        await AddColumnIfMissingAsync(command, "ALTER TABLE QueueOrders ADD COLUMN Prefix TEXT;");
     }
 
     /// <summary>Runs one ADD COLUMN, treating "it is already there" as the success it
@@ -377,8 +383,9 @@ public class QueueStorage : IQueueStorage
     /// реалистичный обрыв связи внутри одной смены, а более старые Closed/
     /// Cancelled всё равно ничего не отдают внутри дня — обмен номерами имеет
     /// смысл только внутри него: у каждой кассы свой пул перемешивается заново
-    /// при первой продаже нового дня (см. NumberPool.EnsureTodaysPoolAsync), так
-    /// что заказ, закрытый вчера, никакой кассе сегодня уже не интересен.</summary>
+    /// при пересборке — по смене дня либо по смене настроек формы номера (см.
+    /// NumberPool.EnsurePoolAsync), так что заказ, закрытый вчера, никакой
+    /// кассе сегодня уже не интересен.</summary>
     internal static readonly TimeSpan RecentlyClosedWindow = TimeSpan.FromHours(24);
 
     public async Task<IReadOnlyList<QueueOrder>> GetRecentlyClosedOrdersAsync(DateTime now)
@@ -494,9 +501,9 @@ public class QueueStorage : IQueueStorage
         // этот заказ», на чём стоит CloseStaleOrdersAsync.
         command.CommandText = @"
             INSERT INTO QueueOrders
-                (Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines, ReceivedAt)
+                (Id, Number, Prefix, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines, ReceivedAt)
             VALUES
-                ($Id, $Number, $TillIndex, $State, $CreatedAt, $ReadyAt, $ClosedAt, $SaleDocumentNumber, $Lines, $ReceivedAt)
+                ($Id, $Number, $Prefix, $TillIndex, $State, $CreatedAt, $ReadyAt, $ClosedAt, $SaleDocumentNumber, $Lines, $ReceivedAt)
             ON CONFLICT(Id) DO NOTHING;
         ";
         BindOrder(command, order);
@@ -641,12 +648,13 @@ public class QueueStorage : IQueueStorage
     }
 
     private const string OrderColumnsSelect =
-        "SELECT Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines FROM QueueOrders";
+        "SELECT Id, Number, TillIndex, State, CreatedAt, ReadyAt, ClosedAt, SaleDocumentNumber, Lines, Prefix FROM QueueOrders";
 
     private static void BindOrder(SqliteCommand command, QueueOrder order)
     {
         command.Parameters.AddWithValue("$Id", order.Id.ToString());
         command.Parameters.AddWithValue("$Number", order.Number);
+        command.Parameters.AddWithValue("$Prefix", order.Prefix ?? string.Empty);
         command.Parameters.AddWithValue("$TillIndex", order.TillIndex);
         command.Parameters.AddWithValue("$State", order.State.ToString());
         command.Parameters.AddWithValue("$CreatedAt", order.CreatedAt.ToString("o"));
@@ -666,7 +674,8 @@ public class QueueStorage : IQueueStorage
         ReadyAt = reader.IsDBNull(5) ? null : ParseDate(reader.GetString(5)),
         ClosedAt = reader.IsDBNull(6) ? null : ParseDate(reader.GetString(6)),
         SaleDocumentNumber = reader.GetString(7),
-        Lines = JsonSerializer.Deserialize<List<QueueOrderLine>>(reader.GetString(8)) ?? new()
+        Lines = JsonSerializer.Deserialize<List<QueueOrderLine>>(reader.GetString(8)) ?? new(),
+        Prefix = reader.IsDBNull(9) ? string.Empty : reader.GetString(9)
     };
 
     private static string? FormatDate(DateTime? value) => value?.ToString("o");

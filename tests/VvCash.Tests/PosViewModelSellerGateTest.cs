@@ -325,14 +325,14 @@ public class PosViewModelSellerGateTest
     /// PosViewModel.ProceedToPayAsync) — tracked separately from Enqueued so a test can
     /// tell "the order went into the outbox" (EnqueueAsync/Enqueued) apart from "only a
     /// number was pulled for the printer" (IssueNumberAsync/IssueNumberAsyncCallCount).
-    /// Defaults to Result's own Number, since production issues the same pool through
+    /// Defaults to Result's own Label, since production issues the same pool through
     /// both paths — set IssueNumberAsyncResult directly for a test that needs the two to
     /// disagree.</summary>
     private class FakeQueueClient : IQueueClient
     {
         public List<SaleReceiptData> Enqueued { get; } = new();
         public int IssueNumberAsyncCallCount { get; private set; }
-        public int? IssueNumberAsyncResult { get; set; }
+        public string? IssueNumberAsyncResult { get; set; }
 
         public QueueOrder? Result { get; set; } = new QueueOrder
         {
@@ -343,10 +343,10 @@ public class PosViewModelSellerGateTest
             CreatedAt = DateTime.Now
         };
 
-        public Task<int?> IssueNumberAsync()
+        public Task<string?> IssueNumberAsync()
         {
             IssueNumberAsyncCallCount++;
-            return Task.FromResult(IssueNumberAsyncResult ?? Result?.Number);
+            return Task.FromResult(IssueNumberAsyncResult ?? Result?.Label);
         }
 
         public Task<QueueOrder?> EnqueueAsync(SaleReceiptData sale)
@@ -375,6 +375,11 @@ public class PosViewModelSellerGateTest
         public int QueuePort { get; set; } = 8770;
         public string QueueSecret { get; set; } = string.Empty;
         public int TillIndex { get; set; }
+        public int TillCount { get; set; } = 5;
+        public string QueueNumberPrefix { get; set; } = string.Empty;
+        public int QueueNumberMin { get; set; } = 100;
+        public int QueueNumberMax { get; set; } = 999;
+        public bool QueueNumberShuffle { get; set; } = true;
     }
 
     /// <summary>Записывает каждый ушедший кадр, по порядку. Порядок здесь и есть
@@ -3751,6 +3756,66 @@ public class PosViewModelSellerGateTest
         Assert.Equal("305", ticket.Number);
         var kitchen = Assert.Single(deps.PrinterService.KitchenOrders);
         Assert.Equal("305", kitchen.QueueNumber);
+    }
+
+    /// <summary>The ticket and the kitchen slip print the order's Label, not its bare
+    /// Number: the till letter has to reach paper, and PosViewModel must not format
+    /// the number itself.</summary>
+    [Fact]
+    public void Pay_WithATillPrefix_PrintsThePrefixedLabelOnTicketAndSlip()
+    {
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.QueueSettings.QueueRole = QueueRole.Client;
+            d.QueueClient.Result!.Prefix = "A-";
+            d.SettingsService.Printers.Add(new PrinterConfig
+            {
+                IsEnabled = true,
+                Roles = PrintRole.Ticket | PrintRole.KitchenOrder
+            });
+        });
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        var ticket = Assert.Single(deps.PrinterService.Tickets);
+        Assert.Equal("A-305", ticket.Number);
+        var kitchen = Assert.Single(deps.PrinterService.KitchenOrders);
+        Assert.Equal("A-305", kitchen.QueueNumber);
+    }
+
+    /// <summary>The Off-with-a-printer path prints whatever label IssueNumberAsync hands
+    /// back, verbatim: that string already carries the till letter (see IQueueClient),
+    /// and PosViewModel neither formats nor re-prefixes it.</summary>
+    [Fact]
+    public void Pay_QueueOffWithATillPrefix_PrintsThePrefixedLabelFromIssueNumber()
+    {
+        using var vm = CreateViewModel(out var deps, d =>
+        {
+            d.QueueSettings.QueueRole = QueueRole.Off;
+            d.QueueClient.IssueNumberAsyncResult = "B-777";
+            d.SettingsService.Printers.Add(new PrinterConfig { IsEnabled = true, Roles = PrintRole.Ticket });
+        });
+        deps.SellerSession.SetCurrent(MakeSeller("s1"));
+        vm.AddToCartCommand.Execute(MakeProduct("p1", 100m));
+
+        MixedPaymentViewModel? mixedPaymentVm = null;
+        vm.NavigationRequest = navigated => { if (navigated is MixedPaymentViewModel m) mixedPaymentVm = m; };
+        vm.PayCommand.Execute(null);
+        Assert.NotNull(mixedPaymentVm);
+        mixedPaymentVm!.CashAmount = mixedPaymentVm.TotalAmount;
+        mixedPaymentVm.ConfirmPaymentCommand.Execute(null);
+
+        var ticket = Assert.Single(deps.PrinterService.Tickets);
+        Assert.Equal("B-777", ticket.Number);
+        Assert.Equal(1, deps.QueueClient.IssueNumberAsyncCallCount);
+        Assert.Empty(deps.QueueClient.Enqueued);
     }
 
     [Fact]
