@@ -293,5 +293,11 @@
   "ConfirmClearProducts": "Ushbu kassadan butun mahsulot katalogi o'chirilsinmi? Keyingi sinxronizatsiyagacha sotadigan narsa qolmaydi.",
   "ConfirmClearCategories": "Ushbu kassadan barcha kategoriyalar o'chirilsinmi? Keyingi sinxronizatsiyagacha katalog bo'sh bo'ladi.",
   "ConfirmDelete": "O'chirish",
-  "ClearFailed": "Kassaning mahalliy ma'lumotlarini tozalab bo'lmadi:"
+  "ClearFailed": "Kassaning mahalliy ma'lumotlarini tozalab bo'lmadi:",
+  "Currency_TJS": "somoni",
+  "Currency_KGS": "som",
+  "Currency_UZS": "so'm",
+  "Currency_KZT": "₸",
+  "Currency_RUB": "₽",
+  "Currency_USD": "$"
 }

@@ -15,6 +15,11 @@ public class MoneyPolicy
     /// <summary>HALF_UP | BANK | UP | DOWN | CEIL | FLOOR.</summary>
     [JsonPropertyName("mode")] public string Mode { get; set; } = "HALF_UP";
 
+    /// <summary>ISO code of the shop's currency ("TJS"). Null until a server that
+    /// sends it is synced; <see cref="Services.CurrencyLabel"/> turns it into what
+    /// the cashier reads beside an amount.</summary>
+    [JsonPropertyName("currency")] public string? Currency { get; set; }
+
     /// <summary>What the server falls back to when a store configured nothing.</summary>
     public static MoneyPolicy Default => new();
 

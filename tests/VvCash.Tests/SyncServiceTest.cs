@@ -307,7 +307,7 @@ public class SyncServiceTest
             if (url.Contains("product/versions/"))
                 return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
             if (url.Contains("cashes/money/"))
-                return (HttpStatusCode.OK, """{"message":"success","body":{"scale":3,"mode":"BANK"},"status":0}""");
+                return (HttpStatusCode.OK, """{"message":"success","body":{"scale":3,"mode":"BANK","currency":"TJS"},"status":0}""");
             return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
         });
         var storage = new FakeStorage();
@@ -316,6 +316,28 @@ public class SyncServiceTest
 
         Assert.Equal(3, storage.SavedMoneyPolicy!.Scale);
         Assert.Equal("BANK", storage.SavedMoneyPolicy.Mode);
+        Assert.Equal("TJS", storage.SavedMoneyPolicy.Currency);
+    }
+
+    [Fact]
+    public async Task SyncMoneyPolicy_BackendWithoutCurrency_LeavesCurrencyUnset()
+    {
+        // A server from before the field existed. The pad then falls back to a
+        // generic label instead of printing a currency nobody configured.
+        var handler = new StubHttpMessageHandler(req =>
+        {
+            var url = req.RequestUri!.ToString();
+            if (url.Contains("product/versions/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":[],"status":0}""");
+            if (url.Contains("cashes/money/"))
+                return (HttpStatusCode.OK, """{"message":"success","body":{"scale":2,"mode":"HALF_UP"},"status":0}""");
+            return (HttpStatusCode.OK, """{"message":"success","body":null,"status":0}""");
+        });
+        var storage = new FakeStorage();
+
+        await Build(handler, storage).SyncProductsAsync();
+
+        Assert.Null(storage.SavedMoneyPolicy!.Currency);
     }
 
     [Fact]

@@ -34,10 +34,14 @@ public partial class QuantityPadViewModel : ObservableObject
     private const decimal WeightStep = 0.001m;
 
     private readonly CartItem _item;
+    private readonly string? _currency;
 
-    public QuantityPadViewModel(CartItem item)
+    /// <param name="currency">The shop currency as the cashier reads it ("смн."),
+    /// see <see cref="CurrencyLabel"/>; null when the till has not learnt it.</param>
+    public QuantityPadViewModel(CartItem item, string? currency = null)
     {
         _item = item;
+        _currency = currency;
         // Never Money: that is a one-off gesture, and the line stores a
         // quantity, not the sum it came from.
         _mode = item.EnteredInUnit && item.Product.HasSecondaryUnit ? PadMode.Unit : PadMode.Pieces;
@@ -102,17 +106,23 @@ public partial class QuantityPadViewModel : ObservableObject
         _ => false,
     };
 
-    /// <summary>Label next to the typed figure: "3 шт", "12.5 м²", "50 сум".</summary>
+    /// <summary>Label next to the typed figure: "3 шт", "12.5 м²", "50 смн.".
+    /// Money with an unknown currency stays bare: a guessed one would be wrong
+    /// beside the customer's money.</summary>
     public string UnitLabel => Mode switch
     {
         PadMode.Unit => _item.Product.UnitShortName,
-        PadMode.Money => "сум",
+        PadMode.Money => _currency ?? string.Empty,
         _ => "шт",
     };
 
+    /// <summary>The money segment: the currency, or a plain "by amount" while
+    /// it is unknown — a segment must say something.</summary>
+    public string MoneyLabel => _currency ?? I18nService.Instance["ByAmount"];
+
     /// <summary>Unit the entered figure resolves to, for the "price / unit"
     /// header. Differs from <see cref="UnitLabel"/> only in money mode, where
-    /// the header must read "30.00 / кг" and not "30.00 / сум".</summary>
+    /// the header must read "30.00 / кг" and not "30.00 / смн.".</summary>
     public string PriceUnitLabel => DerivesInUnit ? _item.Product.UnitShortName : "шт";
 
     /// <summary>Price expressed in the unit the entry resolves to, so the ticket

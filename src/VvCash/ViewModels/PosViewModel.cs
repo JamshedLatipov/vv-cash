@@ -1916,7 +1916,7 @@ public partial class PosViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     private void OpenQuantityPad(CartItem item)
     {
-        QuantityPad = new QuantityPadViewModel(item);
+        QuantityPad = new QuantityPadViewModel(item, CurrencyLabel.For(_cartService.MoneyPolicy.Currency));
         IsQuantityPadVisible = true;
     }
 

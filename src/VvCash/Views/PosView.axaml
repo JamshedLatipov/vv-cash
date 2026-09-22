@@ -850,7 +850,7 @@
                         <RadioButton Content="{Binding QuantityPad.Item.Product.UnitShortName}" Classes="Segmented" Width="130"
                                      IsChecked="{Binding QuantityPad.IsUnitMode}"
                                      IsVisible="{Binding QuantityPad.CanSwitchUnit}"/>
-                        <RadioButton Content="сум" Classes="Segmented" Width="130"
+                        <RadioButton Content="{Binding QuantityPad.MoneyLabel}" Classes="Segmented" Width="130"
                                      IsChecked="{Binding QuantityPad.IsMoneyMode}"
                                      IsVisible="{Binding QuantityPad.CanEnterMoney}"/>
                     </StackPanel>

@@ -32,8 +32,8 @@ public class QuantityPadTest
         Id = "p4", Name = "Конфеты", Price = 30m, IsDivisible = true,
     };
 
-    private static QuantityPadViewModel PadFor(Product p, bool inUnit = true) =>
-        new(new CartItem { Product = p, Quantity = 1m, EnteredInUnit = inUnit });
+    private static QuantityPadViewModel PadFor(Product p, bool inUnit = true, string? currency = "смн.") =>
+        new(new CartItem { Product = p, Quantity = 1m, EnteredInUnit = inUnit }, currency);
 
     [Fact]
     public void Preview_ShowsThePieceCountAndTheRoundedUnitAmount()
@@ -222,14 +222,14 @@ public class QuantityPadTest
         var pad = PadFor(Nuggets());
         pad.Mode = PadMode.Money;
 
-        Assert.Equal("сум", pad.UnitLabel);
+        Assert.Equal("смн.", pad.UnitLabel);
         Assert.Equal("кг", pad.PriceUnitLabel);
         Assert.Equal(30m, pad.PriceInSelectedUnit);
 
         var candy = PadFor(LooseCandy(), inUnit: false);
         candy.Mode = PadMode.Money;
 
-        Assert.Equal("сум", candy.UnitLabel);
+        Assert.Equal("смн.", candy.UnitLabel);
         Assert.Equal("шт", candy.PriceUnitLabel);
         Assert.Equal(30m, candy.PriceInSelectedUnit);
 
@@ -238,6 +238,24 @@ public class QuantityPadTest
         fromPieces.Mode = PadMode.Money;
         Assert.Equal("кг", fromPieces.PriceUnitLabel);
         Assert.Equal(30m, fromPieces.PriceInSelectedUnit);
+    }
+
+    [Fact]
+    public void MoneySegment_IsLabelledWithTheShopCurrency()
+    {
+        Assert.Equal("смн.", PadFor(Nuggets()).MoneyLabel);
+    }
+
+    [Fact]
+    public void MoneyMode_WithoutAKnownCurrency_LeavesTheFigureUnlabelled()
+    {
+        // Never synced, or a server from before the field: no currency is better
+        // than a guessed one beside the customer's money.
+        var pad = PadFor(Nuggets(), currency: null);
+        pad.Mode = PadMode.Money;
+
+        Assert.Equal(string.Empty, pad.UnitLabel);
+        Assert.Equal(I18nService.Instance["ByAmount"], pad.MoneyLabel);
     }
 
     [Fact]
