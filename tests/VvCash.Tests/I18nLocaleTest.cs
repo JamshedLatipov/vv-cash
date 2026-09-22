@@ -170,6 +170,30 @@ public class I18nLocaleTest
     }
 
     [Fact]
+    public void CurrencyLabels_ExistInEveryLocaleButEnglish()
+    {
+        // Сервер присылает ISO-код, кассир читает рядом с суммой «смн.». Без ключа
+        // CurrencyLabel покажет сам код — не падение, но «50 TJS» на кассе в Душанбе.
+        // В en ключей нет намеренно: там код и есть привычная запись.
+        string[] codes = { "TJS", "KGS", "UZS", "KZT", "RUB", "USD" };
+
+        foreach (var locale in new[] { "ru", "kk", "tg", "uz" })
+        {
+            var map = Load(locale);
+            foreach (var code in codes)
+            {
+                var key = $"Currency_{code}";
+                Assert.True(map.ContainsKey(key), $"{locale}.json: нет ключа {key}");
+                Assert.False(string.IsNullOrWhiteSpace(map[key]), $"{locale}.json: {key} пуст");
+            }
+        }
+
+        // Сомони пишется «смн.»: форма выбрана явно, а не угадана.
+        Assert.Equal("смн.", Load("ru")["Currency_TJS"]);
+        Assert.Equal("смн.", Load("tg")["Currency_TJS"]);
+    }
+
+    [Fact]
     public void DisplayProbeApplied_CarriesItsPlaceholder()
     {
         foreach (var locale in Locales)

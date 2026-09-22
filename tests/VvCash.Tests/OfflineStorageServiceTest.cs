@@ -881,4 +881,17 @@ public class OfflineStorageServiceTest : IDisposable
         Assert.Equal(12345678901234.56m, loaded.Price);
         Assert.Equal(1.000000000000001m, loaded.UnitFactor);
     }
+
+    /// <summary>The currency rides in the same Settings row as the rounding policy, so
+    /// a till that starts offline still labels amounts with the shop's currency.</summary>
+    [Fact]
+    public async Task MoneyPolicy_RoundTripsTheCurrency()
+    {
+        await _service.InitializeAsync();
+        await _service.SaveMoneyPolicyAsync(new MoneyPolicy { Scale = 2, Mode = "HALF_UP", Currency = "TJS" });
+
+        var loaded = await _service.GetMoneyPolicyAsync();
+
+        Assert.Equal("TJS", loaded.Currency);
+    }
 }

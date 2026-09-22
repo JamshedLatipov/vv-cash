@@ -57,6 +57,11 @@ public partial class I18nService : ObservableObject
         }
     }
 
+    /// <summary>For callers with a fallback of their own: the indexer answers a
+    /// missing key with "[key]", which is not a value to show anyone.</summary>
+    public bool TryGet(string key, out string value)
+        => _currentStrings.TryGetValue(key, out value!);
+
     public string this[string key]
     {
         get
